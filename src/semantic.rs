@@ -62,6 +62,22 @@ pub struct Element {
     /// Optional contextual hint added by heuristics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Semantic hint from `@lad/hints` (`data-lad="field:email"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<ElementHint>,
+}
+
+/// Semantic hint from `@lad/hints` (`data-lad="field:email"`).
+///
+/// Provides explicit developer-authored annotations that bypass heuristic
+/// guessing. When present, the 5-tier dispatcher uses these at Tier 1
+/// with very high confidence (0.98).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ElementHint {
+    /// Hint category: `"field"`, `"form"`, or `"action"`.
+    pub hint_type: String,
+    /// Hint value: `"email"`, `"login"`, `"submit"`, etc.
+    pub value: String,
 }
 
 /// Semantic classification of an interactive element.
@@ -134,6 +150,9 @@ impl SemanticView {
             }
             if let Some(href) = &el.href {
                 let _ = write!(out, " href=\"{href}\"");
+            }
+            if let Some(hint) = &el.hint {
+                let _ = write!(out, " [hint:{}:{}]", hint.hint_type, hint.value);
             }
             if el.disabled {
                 out.push_str(" [disabled]");

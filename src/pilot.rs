@@ -45,12 +45,18 @@ pub enum Action {
 }
 
 /// How the action was resolved.
+///
+/// Variants are listed in 5-tier priority order (Tier 0 highest).
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionSource {
-    /// Resolved by a deterministic heuristic rule.
+    /// Tier 0: Resolved by replaying a trained playbook.
+    Playbook,
+    /// Tier 1: Resolved by explicit `data-lad` developer hints.
+    Hints,
+    /// Tier 2: Resolved by a deterministic heuristic rule.
     Heuristic,
-    /// Resolved by the LLM backend.
+    /// Tier 3: Resolved by the LLM backend.
     Llm,
 }
 
@@ -117,9 +123,13 @@ pub struct PilotResult {
     pub final_action: Action,
     /// Total wall-clock duration of the run.
     pub total_duration: Duration,
-    /// Number of steps resolved by heuristics.
+    /// Number of steps resolved by playbook replay (Tier 0).
+    pub playbook_hits: u32,
+    /// Number of steps resolved by `@lad/hints` (Tier 1).
+    pub hints_hits: u32,
+    /// Number of steps resolved by heuristics (Tier 2).
     pub heuristic_hits: u32,
-    /// Number of steps resolved by the LLM.
+    /// Number of steps resolved by the LLM (Tier 3).
     pub llm_hits: u32,
     /// Total number of retries across all steps.
     pub retry_count: u32,
