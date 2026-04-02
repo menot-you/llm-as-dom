@@ -4,6 +4,18 @@ version = "0.1.0"
 edition = "2024"
 description = "LLM-as-DOM: AI browser pilot with cheap LLM + heuristics"
 
+[lib]
+name = "llm_as_dom"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lad"
+path = "src/main.rs"
+
+[[bin]]
+name = "lad-mcp"
+path = "src/mcp_server.rs"
+
 [dependencies]
 # Browser (CDP)
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
@@ -33,10 +45,9 @@ rmcp = { version = "1.3", features = ["server", "transport-io"] }
 async-trait = "0.1"
 thiserror = "2"
 
-[[bin]]
-name = "lad"
-path = "src/main.rs"
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 
-[[bin]]
-name = "lad-mcp"
-path = "src/mcp_server.rs"
+[[bench]]
+name = "core"
+harness = false
