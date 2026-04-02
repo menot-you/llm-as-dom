@@ -173,6 +173,18 @@ lad-mcp  # starts MCP server (stdio)
 | qwen2.5-7b (Ollama) | 0.4s | Free |
 | glm-4.7 (Z.AI cloud) | 1.7s | ~$0.001 |
 
+### Real-World Results (live MCP battle test)
+
+Tested via actual MCP tool calls from Claude Code against real sites:
+
+| Site | Elements | Tokens | Compression | Status |
+|------|----------|--------|-------------|--------|
+| Localhost login | 5 | 106 | 75x | ✓ |
+| HN front page | 50 | 724 | 69x | ✓ |
+| GitHub trending | 28 | 534 | 66x | ✓ |
+
+Full results: [docs/BATTLE_TEST_RESULTS.md](docs/BATTLE_TEST_RESULTS.md)
+
 ## Test Suite
 
 - **101 tests** (unit + chaos + integration)
