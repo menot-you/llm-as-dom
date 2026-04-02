@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pet Shop - Loading...</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #ddd; border-top-color: #4a90d9; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading { text-align: center; }
+    .loading p { margin-top: 1rem; color: #888; }
+    .content { display: none; }
+    .card { background: white; border-radius: 12px; padding: 2rem; width: 380px; box-shadow: 0 2px 12px rgba(0,0,0,.1); }
+  </style>
+</head>
+<body>
+  <div id="loadingState" class="loading">
+    <div class="spinner"></div>
+    <p>Loading pet data...</p>
+  </div>
+  <div id="content" class="content">
+    <div class="card">
+      <h1>Pets Loaded!</h1>
+      <p>Found 42 pets available for adoption.</p>
+      <form id="adoptForm">
+        <div style="margin:1rem 0">
+          <label for="petName">Pet name</label>
+          <input type="text" id="petName" name="pet_name" placeholder="Enter pet name" style="width:100%;padding:.5rem;margin-top:.25rem;border:1px solid #ddd;border-radius:4px">
+        </div>
+        <button type="submit" style="width:100%;padding:.6rem;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer">Adopt Now</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    // Simulate 3-second load time (throttle test)
+    setTimeout(() => {
+      document.getElementById('loadingState').style.display = 'none';
+      document.getElementById('content').style.display = 'flex';
+      document.getElementById('content').style.justifyContent = 'center';
+      document.title = 'Pet Shop - Adopt a Pet';
+    }, 3000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pet Shop - Home</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui; background: #f5f5f5; }
+    nav { background: #2c3e50; padding: 1rem 2rem; display: flex; gap: 1rem; }
+    nav a { color: #bdc3c7; text-decoration: none; padding: .3rem .8rem; border-radius: 4px; cursor: pointer; }
+    nav a.active { background: #e67e22; color: white; }
+    main { max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+    .page { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .page h2 { margin-bottom: 1rem; }
+    .page p { color: #555; line-height: 1.6; }
+    .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem; }
+    .product-card { border: 1px solid #eee; border-radius: 8px; padding: 1rem; text-align: center; }
+    .product-card button { margin-top: .5rem; padding: .4rem .8rem; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <nav id="nav">
+    <a href="#home" class="active" data-route="home">Home</a>
+    <a href="#products" data-route="products">Products</a>
+    <a href="#about" data-route="about">About</a>
+    <a href="#contact" data-route="contact">Contact</a>
+  </nav>
+  <main id="content"></main>
+  <script>
+    const pages = {
+      home: '<div class="page"><h2>Welcome to Pet Shop</h2><p>Find everything your pet needs. Browse our collection of premium pet products.</p></div>',
+      products: '<div class="page"><h2>Products</h2><div class="product-grid"><div class="product-card"><h3>Dog Food</h3><p>$29.99</p><button>Add to Cart</button></div><div class="product-card"><h3>Cat Toy</h3><p>$12.99</p><button>Add to Cart</button></div><div class="product-card"><h3>Fish Tank</h3><p>$89.99</p><button>Add to Cart</button></div><div class="product-card"><h3>Bird Seed</h3><p>$8.99</p><button>Add to Cart</button></div></div></div>',
+      about: '<div class="page"><h2>About Pet Shop</h2><p>We have been serving pet owners since 2020. Our mission is to provide the best products for your furry, feathered, and finned friends.</p></div>',
+      contact: '<div class="page"><h2>Contact Us</h2><form id="contactForm"><div style="margin-bottom:1rem"><label>Name</label><input type="text" name="name" placeholder="Your name" style="width:100%;padding:.5rem;margin-top:.25rem;border:1px solid #ddd;border-radius:4px"></div><div style="margin-bottom:1rem"><label>Email</label><input type="email" name="email" placeholder="you@example.com" style="width:100%;padding:.5rem;margin-top:.25rem;border:1px solid #ddd;border-radius:4px"></div><div style="margin-bottom:1rem"><label>Message</label><textarea name="message" placeholder="How can we help?" style="width:100%;padding:.5rem;margin-top:.25rem;border:1px solid #ddd;border-radius:4px;height:80px"></textarea></div><button type="submit" style="padding:.6rem 1.2rem;background:#2c3e50;color:white;border:none;border-radius:6px;cursor:pointer">Send Message</button></form></div>',
+    };
+
+    function navigate(route) {
+      document.getElementById('content').innerHTML = pages[route] || pages.home;
+      document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
+      document.title = 'Pet Shop - ' + route.charAt(0).toUpperCase() + route.slice(1);
+      history.pushState({ route }, '', '#' + route);
+    }
+
+    document.getElementById('nav').addEventListener('click', (e) => {
+      if (e.target.dataset.route) { e.preventDefault(); navigate(e.target.dataset.route); }
+    });
+
+    window.addEventListener('popstate', (e) => { navigate(e.state?.route || 'home'); });
+    navigate('home');
+  </script>
+</body>
+</html>

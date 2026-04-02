@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pet Shop - Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui; background: #f5f5f5; }
+    .topbar { background: #2c3e50; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    .topbar h1 { font-size: 1.25rem; }
+    .topbar .user { display: flex; align-items: center; gap: 1rem; }
+    .topbar button { padding: .4rem .8rem; background: #c0392b; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    nav { background: #34495e; padding: .5rem 2rem; display: flex; gap: 1rem; }
+    nav a { color: #bdc3c7; text-decoration: none; padding: .3rem .6rem; border-radius: 4px; }
+    nav a.active { background: #2c3e50; color: white; }
+    main { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .stat { background: white; border-radius: 8px; padding: 1.5rem; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .stat .number { font-size: 2rem; font-weight: bold; color: #2c3e50; }
+    .stat .label { color: #888; font-size: .875rem; margin-top: .25rem; }
+    .recent { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .recent h2 { margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: .5rem; border-bottom: 2px solid #eee; color: #555; font-size: .875rem; }
+    td { padding: .5rem; border-bottom: 1px solid #eee; }
+    .badge { padding: .2rem .5rem; border-radius: 4px; font-size: .75rem; }
+    .badge.shipped { background: #e8f5e9; color: #2e7d32; }
+    .badge.pending { background: #fff3e0; color: #e65100; }
+    .badge.processing { background: #e3f2fd; color: #1565c0; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>Pet Shop Admin</h1>
+    <div class="user">
+      <span>Welcome, Admin</span>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </div>
+  <nav>
+    <a href="#dashboard" class="active">Dashboard</a>
+    <a href="#orders">Orders</a>
+    <a href="#products">Products</a>
+    <a href="#customers">Customers</a>
+    <a href="#settings">Settings</a>
+  </nav>
+  <main>
+    <div class="stats">
+      <div class="stat"><div class="number">142</div><div class="label">Orders Today</div></div>
+      <div class="stat"><div class="number">$8,420</div><div class="label">Revenue Today</div></div>
+      <div class="stat"><div class="number">23</div><div class="label">New Customers</div></div>
+    </div>
+    <div class="recent">
+      <h2>Recent Orders</h2>
+      <table>
+        <thead><tr><th>Order</th><th>Customer</th><th>Product</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>#1042</td><td>Alice Johnson</td><td>Premium Dog Food</td><td>$59.98</td><td><span class="badge shipped">Shipped</span></td></tr>
+          <tr><td>#1041</td><td>Bob Smith</td><td>Cat Scratching Post</td><td>$45.00</td><td><span class="badge processing">Processing</span></td></tr>
+          <tr><td>#1040</td><td>Carol White</td><td>Fish Tank 20L</td><td>$89.99</td><td><span class="badge pending">Pending</span></td></tr>
+          <tr><td>#1039</td><td>Dave Brown</td><td>Bird Cage Deluxe</td><td>$120.00</td><td><span class="badge shipped">Shipped</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+  <script>
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      window.location.href = '/login';
+    });
+  </script>
+</body>
+</html>

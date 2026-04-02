@@ -89,10 +89,21 @@ impl PilotBackend for OllamaBackend {
     }
 }
 
+/// Build the LLM prompt with system instructions, few-shot examples, and page state.
+///
+/// The prompt is structured to force a single JSON response with no markdown or explanation.
 pub fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String {
-    let mut prompt = String::with_capacity(1024);
+    let mut prompt = String::with_capacity(2048);
 
-    prompt.push_str("You are a browser pilot. Execute the goal step by step.\n\n");
+    // System instruction — explicit single-JSON constraint
+    prompt.push_str(
+        "SYSTEM: You are a browser automation pilot. \
+         Respond with exactly ONE JSON object. \
+         No markdown, no explanation, no extra text. \
+         Do not wrap in ```json blocks. \
+         Do not return multiple actions.\n\n",
+    );
+
     prompt.push_str(&format!("GOAL: {goal}\n\n"));
     prompt.push_str(&view.to_prompt());
 
@@ -103,19 +114,91 @@ pub fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String
         }
     }
 
-    prompt.push_str("\nRespond with ONLY a JSON object. Valid actions:\n");
+    // Schema reference
+    prompt.push_str("\nVALID ACTIONS (respond with exactly one):\n");
     prompt.push_str(r#"{"action":"type","element":<id>,"value":"<text>","reasoning":"<why>"}"#);
     prompt.push('\n');
     prompt.push_str(r#"{"action":"click","element":<id>,"reasoning":"<why>"}"#);
     prompt.push('\n');
+    prompt.push_str(r#"{"action":"select","element":<id>,"value":"<text>","reasoning":"<why>"}"#);
+    prompt.push('\n');
+    prompt.push_str(r#"{"action":"scroll","direction":"<up|down|left|right>","reasoning":"<why>"}"#);
+    prompt.push('\n');
     prompt.push_str(r#"{"action":"wait","reasoning":"<why>"}"#);
     prompt.push('\n');
-    prompt.push_str(r#"{"action":"done","result":{...},"reasoning":"<why>"}"#);
+    prompt.push_str(r#"{"action":"done","result":{"success":true},"reasoning":"<why>"}"#);
     prompt.push('\n');
     prompt.push_str(r#"{"action":"escalate","reason":"<why>"}"#);
-    prompt.push_str("\n\nJSON:\n");
 
+    // Few-shot examples keyed to scenario type
+    prompt.push_str("\n\nFEW-SHOT EXAMPLES:\n");
+    push_few_shot_examples(&mut prompt, goal);
+
+    prompt.push_str("\nJSON:\n");
     prompt
+}
+
+/// Append scenario-relevant few-shot examples to the prompt.
+///
+/// Picks examples that match the goal type: login, search, todo/task, navigation, or generic.
+fn push_few_shot_examples(prompt: &mut String, goal: &str) {
+    let g = goal.to_lowercase();
+
+    if g.contains("login") || g.contains("sign in") || g.contains("log in") {
+        prompt.push_str(
+            r#"Goal: "login as alice@test.com password s3cret"
+[0] Input type=email "Email" name="email"
+[1] Input type=password "Password" name="password"
+[2] Button "Sign In"
+Step 1: {"action":"type","element":0,"value":"alice@test.com","reasoning":"fill email field"}
+Step 2: {"action":"type","element":1,"value":"s3cret","reasoning":"fill password field"}
+Step 3: {"action":"click","element":2,"reasoning":"submit login form"}
+"#,
+        );
+    } else if g.contains("search") || g.contains("find") || g.contains("look up") {
+        prompt.push_str(
+            r#"Goal: "search for rust tutorials"
+[0] Input type=search "Search" name="q"
+[1] Button "Search"
+Step 1: {"action":"type","element":0,"value":"rust tutorials","reasoning":"fill search box"}
+Step 2: {"action":"click","element":1,"reasoning":"submit search"}
+"#,
+        );
+    } else if g.contains("todo")
+        || g.contains("task")
+        || g.contains("add")
+        || g.contains("create")
+    {
+        prompt.push_str(
+            r#"Goal: "add a todo 'buy milk'"
+[0] Input type=text "New task" name="task"
+[1] Button "Add"
+Step 1: {"action":"type","element":0,"value":"buy milk","reasoning":"fill todo input"}
+Step 2: {"action":"click","element":1,"reasoning":"submit new todo"}
+"#,
+        );
+    } else if g.contains("click") || g.contains("go to") || g.contains("navigate") {
+        prompt.push_str(
+            r#"Goal: "click About"
+[0] Link "Home" href="/home"
+[1] Link "About" href="/about"
+[2] Link "Contact" href="/contact"
+Step 1: {"action":"click","element":1,"reasoning":"click the About link matching the goal"}
+"#,
+        );
+    } else {
+        // Generic fallback example
+        prompt.push_str(
+            r#"Goal: "fill form with name=John email=j@test.com"
+[0] Input type=text "Full Name" name="name"
+[1] Input type=email "Email" name="email"
+[2] Button "Submit"
+Step 1: {"action":"type","element":0,"value":"John","reasoning":"fill name field"}
+Step 2: {"action":"type","element":1,"value":"j@test.com","reasoning":"fill email field"}
+Step 3: {"action":"click","element":2,"reasoning":"submit the form"}
+"#,
+        );
+    }
 }
 
 /// Parse the LLM response into an Action.

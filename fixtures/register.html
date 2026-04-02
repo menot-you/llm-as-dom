@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pet Shop - Create Account</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .card { background: white; border-radius: 12px; padding: 2rem; width: 420px; box-shadow: 0 2px 12px rgba(0,0,0,.1); }
+    h1 { font-size: 1.5rem; margin-bottom: .5rem; }
+    .subtitle { color: #666; font-size: .875rem; margin-bottom: 1.5rem; }
+    .field { margin-bottom: 1rem; }
+    label { display: block; font-size: .875rem; color: #555; margin-bottom: .25rem; }
+    input, select { width: 100%; padding: .6rem .8rem; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
+    .row { display: flex; gap: 1rem; }
+    .row .field { flex: 1; }
+    .checkbox { display: flex; align-items: center; gap: .5rem; margin: 1rem 0; }
+    .checkbox input { width: auto; }
+    button { width: 100%; padding: .7rem; background: #27ae60; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #219a52; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .links { margin-top: 1rem; text-align: center; font-size: .875rem; }
+    .links a { color: #4a90d9; text-decoration: none; }
+    .success { display: none; color: #2e7d32; padding: 1rem; background: #e8f5e9; border-radius: 8px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Create Account</h1>
+    <p class="subtitle">Join Pet Shop to find the best for your pets</p>
+    <div id="success" class="success">Account created successfully! Welcome aboard.</div>
+    <form id="registerForm">
+      <div class="row">
+        <div class="field">
+          <label for="firstName">First name</label>
+          <input type="text" id="firstName" name="first_name" placeholder="John" required>
+        </div>
+        <div class="field">
+          <label for="lastName">Last name</label>
+          <input type="text" id="lastName" name="last_name" placeholder="Doe" required>
+        </div>
+      </div>
+      <div class="field">
+        <label for="regEmail">Email address</label>
+        <input type="email" id="regEmail" name="email" placeholder="john@example.com" required>
+      </div>
+      <div class="field">
+        <label for="regPassword">Password</label>
+        <input type="password" id="regPassword" name="password" placeholder="At least 8 characters" required minlength="8">
+      </div>
+      <div class="field">
+        <label for="petType">What type of pet do you have?</label>
+        <select id="petType" name="pet_type">
+          <option value="">Select...</option>
+          <option value="dog">Dog</option>
+          <option value="cat">Cat</option>
+          <option value="bird">Bird</option>
+          <option value="fish">Fish</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="checkbox">
+        <input type="checkbox" id="terms" name="terms" required>
+        <label for="terms">I agree to the Terms of Service</label>
+      </div>
+      <button type="submit" id="submitBtn">Create Account</button>
+    </form>
+    <div class="links">
+      Already have an account? <a href="/login">Sign in</a>
+    </div>
+  </div>
+  <script>
+    document.getElementById('registerForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const data = Object.fromEntries(new FormData(form));
+      document.getElementById('success').style.display = 'block';
+      form.style.display = 'none';
+      document.title = 'Pet Shop - Welcome ' + data.first_name;
+    });
+  </script>
+</body>
+</html>

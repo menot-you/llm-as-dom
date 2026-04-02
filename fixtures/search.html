@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pet Shop - Search Products</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui; background: #f5f5f5; }
+    header { background: #2c3e50; color: white; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+    header h1 { font-size: 1.25rem; }
+    .search-bar { flex: 1; display: flex; gap: .5rem; }
+    .search-bar input { flex: 1; padding: .5rem .8rem; border: none; border-radius: 6px; font-size: 1rem; }
+    .search-bar button { padding: .5rem 1rem; background: #e67e22; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    nav { background: #34495e; padding: .5rem 2rem; display: flex; gap: 1rem; }
+    nav a { color: #bdc3c7; text-decoration: none; font-size: .875rem; }
+    nav a:hover { color: white; }
+    main { max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    .results { display: none; }
+    .results h2 { margin-bottom: 1rem; }
+    .product { background: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); display: flex; justify-content: space-between; align-items: center; }
+    .product h3 { font-size: 1rem; }
+    .product .price { color: #e67e22; font-weight: bold; }
+    .product button { padding: .4rem .8rem; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .empty { text-align: center; color: #888; padding: 3rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Pet Shop</h1>
+    <div class="search-bar">
+      <input type="search" id="searchInput" name="q" placeholder="Search products..." aria-label="Search products">
+      <button id="searchBtn" type="button">Search</button>
+    </div>
+  </header>
+  <nav>
+    <a href="#dogs">Dogs</a>
+    <a href="#cats">Cats</a>
+    <a href="#birds">Birds</a>
+    <a href="#fish">Fish</a>
+    <a href="#supplies">Supplies</a>
+  </nav>
+  <main>
+    <div id="empty" class="empty">Search for pet products above</div>
+    <div id="results" class="results">
+      <h2>Results for "<span id="query"></span>"</h2>
+      <div id="productList"></div>
+    </div>
+  </main>
+  <script>
+    const products = [
+      { name: 'Premium Dog Food', price: 29.99, category: 'dogs' },
+      { name: 'Cat Scratching Post', price: 45.00, category: 'cats' },
+      { name: 'Squeaky Bone Toy', price: 8.99, category: 'dogs' },
+      { name: 'Fish Tank 20L', price: 89.99, category: 'fish' },
+      { name: 'Bird Cage Deluxe', price: 120.00, category: 'birds' },
+      { name: 'Cat Litter Box', price: 35.00, category: 'cats' },
+      { name: 'Dog Leash Leather', price: 22.50, category: 'dogs' },
+      { name: 'Hamster Wheel', price: 12.99, category: 'supplies' },
+    ];
+
+    function doSearch() {
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      if (!q) return;
+      const matches = products.filter(p => p.name.toLowerCase().includes(q) || p.category.includes(q));
+      document.getElementById('empty').style.display = 'none';
+      document.getElementById('results').style.display = 'block';
+      document.getElementById('query').textContent = q;
+      const list = document.getElementById('productList');
+      list.innerHTML = matches.length ? matches.map(p => 
+        '<div class="product"><div><h3>' + p.name + '</h3><span class="price">$' + p.price.toFixed(2) + '</span></div><button>Add to Cart</button></div>'
+      ).join('') : '<div class="empty">No products found</div>';
+      document.title = 'Pet Shop - Search: ' + q;
+    }
+
+    document.getElementById('searchBtn').addEventListener('click', doSearch);
+    document.getElementById('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pet Shop - Pet Adoption Application</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui; background: #f5f5f5; display: flex; justify-content: center; padding: 2rem; }
+    .wizard { background: white; border-radius: 12px; padding: 2rem; width: 480px; box-shadow: 0 2px 12px rgba(0,0,0,.1); }
+    h1 { font-size: 1.5rem; margin-bottom: .5rem; }
+    .steps { display: flex; gap: .5rem; margin-bottom: 1.5rem; }
+    .step { flex: 1; text-align: center; padding: .5rem; border-radius: 4px; background: #ecf0f1; color: #888; font-size: .875rem; }
+    .step.active { background: #e67e22; color: white; }
+    .step.done { background: #27ae60; color: white; }
+    .field { margin-bottom: 1rem; }
+    label { display: block; font-size: .875rem; color: #555; margin-bottom: .25rem; }
+    input, select, textarea { width: 100%; padding: .6rem .8rem; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
+    .actions { display: flex; gap: 1rem; margin-top: 1.5rem; }
+    .actions button { flex: 1; padding: .6rem; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    .btn-next { background: #e67e22; color: white; }
+    .btn-back { background: #ecf0f1; color: #333; }
+    .btn-next:disabled { background: #ccc; cursor: not-allowed; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .success { display: none; text-align: center; padding: 2rem; }
+    .success h2 { color: #27ae60; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="wizard">
+    <h1>Pet Adoption Application</h1>
+    <div class="steps">
+      <div class="step active" id="s1">1. Your Info</div>
+      <div class="step" id="s2">2. Pet Choice</div>
+      <div class="step" id="s3">3. Confirm</div>
+    </div>
+
+    <div id="page1" class="page active">
+      <div class="field"><label for="fullName">Full name</label><input type="text" id="fullName" name="full_name" placeholder="Jane Smith" required></div>
+      <div class="field"><label for="phone">Phone</label><input type="tel" id="phone" name="phone" placeholder="+1 555 123 4567"></div>
+      <div class="field"><label for="address">Address</label><textarea id="address" name="address" placeholder="123 Main St, City" rows="2"></textarea></div>
+      <div class="actions"><button class="btn-next" id="next1" disabled>Next</button></div>
+    </div>
+
+    <div id="page2" class="page">
+      <div class="field"><label for="petChoice">Choose a pet</label>
+        <select id="petChoice" name="pet"><option value="">Select...</option><option value="max">Max (Golden Retriever, 2yr)</option><option value="luna">Luna (Tabby Cat, 1yr)</option><option value="buddy">Buddy (Beagle, 3yr)</option></select>
+      </div>
+      <div class="field"><label for="reason">Why do you want to adopt?</label><textarea id="reason" name="reason" placeholder="Tell us about your home..." rows="3"></textarea></div>
+      <div class="actions"><button class="btn-back" id="back2">Back</button><button class="btn-next" id="next2" disabled>Next</button></div>
+    </div>
+
+    <div id="page3" class="page">
+      <h2>Review & Submit</h2>
+      <div id="summary" style="background:#f9f9f9;border-radius:8px;padding:1rem;margin:1rem 0;font-size:.9rem"></div>
+      <div class="actions"><button class="btn-back" id="back3">Back</button><button class="btn-next" id="submitBtn">Submit Application</button></div>
+    </div>
+
+    <div id="successPage" class="success">
+      <h2>Application Submitted!</h2>
+      <p>We will review your application and contact you within 48 hours.</p>
+    </div>
+  </div>
+  <script>
+    let currentPage = 1;
+
+    // Enable Next on page 1 when name is filled
+    document.getElementById('fullName').addEventListener('input', (e) => {
+      document.getElementById('next1').disabled = !e.target.value.trim();
+    });
+
+    // Enable Next on page 2 when pet is selected
+    document.getElementById('petChoice').addEventListener('change', (e) => {
+      document.getElementById('next2').disabled = !e.target.value;
+    });
+
+    function showPage(n) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById('page' + n).classList.add('active');
+      for (let i = 1; i <= 3; i++) {
+        const s = document.getElementById('s' + i);
+        s.classList.toggle('active', i === n);
+        s.classList.toggle('done', i < n);
+      }
+      currentPage = n;
+    }
+
+    document.getElementById('next1').addEventListener('click', () => showPage(2));
+    document.getElementById('back2').addEventListener('click', () => showPage(1));
+    document.getElementById('next2').addEventListener('click', () => {
+      const name = document.getElementById('fullName').value;
+      const pet = document.getElementById('petChoice').selectedOptions[0].text;
+      document.getElementById('summary').innerHTML = '<b>Name:</b> ' + name + '<br><b>Pet:</b> ' + pet;
+      showPage(3);
+    });
+    document.getElementById('back3').addEventListener('click', () => showPage(2));
+    document.getElementById('submitBtn').addEventListener('click', () => {
+      document.querySelectorAll('.page, .steps').forEach(el => el.style.display = 'none');
+      document.getElementById('successPage').style.display = 'block';
+      document.title = 'Pet Shop - Application Submitted';
+    });
+  </script>
+</body>
+</html>
