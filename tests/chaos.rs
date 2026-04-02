@@ -2,6 +2,7 @@
 //!
 //! 80% edge cases / 20% happy path per chaos testing protocol.
 //! Tests are deterministic, sub-second, independent.
+#![allow(dead_code, clippy::collapsible_match, clippy::single_match)]
 
 use llm_as_dom::heuristics;
 use llm_as_dom::pilot::Action;
