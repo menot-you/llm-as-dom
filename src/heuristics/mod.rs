@@ -5,9 +5,9 @@
 
 mod form;
 /// Tier 1: `@lad/hints` — explicit developer annotations.
-pub(crate) mod hints;
+pub mod hints;
 /// Login-specific heuristics (credential parsing, form fill, submit, done).
-pub(crate) mod login;
+pub mod login;
 mod navigation;
 mod search;
 
