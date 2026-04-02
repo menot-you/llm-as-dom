@@ -4,7 +4,10 @@
 //! confidence is below the threshold.
 
 mod form;
-mod login;
+/// Tier 1: `@lad/hints` — explicit developer annotations.
+pub(crate) mod hints;
+/// Login-specific heuristics (credential parsing, form fill, submit, done).
+pub(crate) mod login;
 mod navigation;
 mod search;
 
