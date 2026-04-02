@@ -85,9 +85,9 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
     "#;
 
     let result = page.evaluate(js).await?;
-    let extraction: JsExtraction = result.into_value().map_err(|e| {
-        crate::Error::Backend(format!("JS extraction parse failed: {e:?}"))
-    })?;
+    let extraction: JsExtraction = result
+        .into_value()
+        .map_err(|e| crate::Error::Backend(format!("JS extraction parse failed: {e:?}")))?;
 
     tracing::info!(
         elements = extraction.elements.len(),
@@ -166,7 +166,9 @@ fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
     let lower_title = title.to_lowercase();
     let lower_url = url.to_lowercase();
 
-    let has_password = elements.iter().any(|e| e.input_type.as_deref() == Some("password"));
+    let has_password = elements
+        .iter()
+        .any(|e| e.input_type.as_deref() == Some("password"));
     let has_inputs = elements.iter().any(|e| e.kind == ElementKind::Input);
     let has_submit = elements.iter().any(|e| {
         e.kind == ElementKind::Button
@@ -175,13 +177,22 @@ fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
                 || e.label.to_lowercase().contains("log"))
     });
 
-    if has_password || lower_title.contains("login") || lower_title.contains("sign in") || lower_url.contains("login") {
+    if has_password
+        || lower_title.contains("login")
+        || lower_title.contains("sign in")
+        || lower_url.contains("login")
+    {
         "login page".into()
     } else if lower_url.contains("search") || lower_title.contains("search") {
         "search page".into()
     } else if has_inputs && has_submit {
         "form page".into()
-    } else if elements.iter().filter(|e| e.kind == ElementKind::Link).count() > 10 {
+    } else if elements
+        .iter()
+        .filter(|e| e.kind == ElementKind::Link)
+        .count()
+        > 10
+    {
         "navigation/listing page".into()
     } else if has_inputs {
         "interactive page".into()

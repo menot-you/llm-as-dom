@@ -156,7 +156,9 @@ impl LadServer {
     /// Browse a URL and accomplish a goal autonomously.
     /// The pilot uses heuristics + cheap LLM to navigate, fill forms, click buttons.
     /// Returns structured result: success/failure, steps taken, timing.
-    #[tool(description = "Navigate to a URL and accomplish a browsing goal autonomously (login, fill form, click, search). Returns structured result.")]
+    #[tool(
+        description = "Navigate to a URL and accomplish a browsing goal autonomously (login, fill form, click, search). Returns structured result."
+    )]
     async fn lad_browse(
         &self,
         params: Parameters<BrowseParams>,
@@ -205,7 +207,9 @@ impl LadServer {
     /// Extract structured information from a web page.
     /// Returns interactive elements, visible text, page classification.
     /// Never returns raw HTML.
-    #[tool(description = "Extract structured info from a URL: interactive elements, text, page type. Never returns raw HTML.")]
+    #[tool(
+        description = "Extract structured info from a URL: interactive elements, text, page type. Never returns raw HTML."
+    )]
     async fn lad_extract(
         &self,
         params: Parameters<ExtractParams>,
@@ -233,7 +237,9 @@ impl LadServer {
 
     /// Assert conditions about a web page and return pass/fail results.
     /// Supports: "has login form", "title contains X", "has button Y", "has input Z", etc.
-    #[tool(description = "Check assertions on a URL. Returns pass/fail for each. Supports: has login form, title contains X, has button Y, url contains Z.")]
+    #[tool(
+        description = "Check assertions on a URL. Returns pass/fail for each. Supports: has login form, title contains X, has button Y, url contains Z."
+    )]
     async fn lad_assert(
         &self,
         params: Parameters<AssertParams>,
@@ -253,9 +259,7 @@ impl LadServer {
             }));
         }
 
-        let all_pass = results
-            .iter()
-            .all(|r| r["pass"].as_bool().unwrap_or(false));
+        let all_pass = results.iter().all(|r| r["pass"].as_bool().unwrap_or(false));
 
         let output = serde_json::json!({
             "url": view.url,
@@ -331,7 +335,8 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
         let name = rest.trim().trim_matches('"').to_lowercase();
         return view.elements.iter().any(|e| {
             e.kind == semantic::ElementKind::Input
-                && (e.name
+                && (e
+                    .name
                     .as_deref()
                     .unwrap_or("")
                     .to_lowercase()

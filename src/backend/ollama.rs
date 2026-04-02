@@ -1,5 +1,7 @@
 //! Ollama backend for the browser pilot.
-//! Talks to Ollama's /api/generate endpoint.
+//!
+//! Talks to Ollama's `/api/generate` endpoint with low temperature
+//! and a structured JSON-only prompt.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -7,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::pilot::{Action, PilotBackend, Step};
 use crate::semantic::SemanticView;
 
+/// LLM backend that calls a local Ollama instance.
 pub struct OllamaBackend {
     client: reqwest::Client,
     base_url: String,
@@ -14,6 +17,7 @@ pub struct OllamaBackend {
 }
 
 impl OllamaBackend {
+    /// Create a new backend pointing at the given Ollama URL and model.
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -23,6 +27,7 @@ impl OllamaBackend {
     }
 }
 
+/// Request body for Ollama's `/api/generate`.
 #[derive(Serialize)]
 struct GenerateRequest {
     model: String,
@@ -31,12 +36,14 @@ struct GenerateRequest {
     options: GenerateOptions,
 }
 
+/// Sampling options sent to Ollama.
 #[derive(Serialize)]
 struct GenerateOptions {
     temperature: f32,
     num_predict: u32,
 }
 
+/// Response body from Ollama's `/api/generate`.
 #[derive(Deserialize)]
 struct GenerateResponse {
     response: String,
@@ -79,10 +86,6 @@ impl PilotBackend for OllamaBackend {
         tracing::debug!(response_len = body.response.len(), "ollama responded");
 
         parse_action(&body.response)
-    }
-
-    fn name(&self) -> &str {
-        "ollama"
     }
 }
 
@@ -229,7 +232,8 @@ mod tests {
 
     #[test]
     fn parse_type_action() {
-        let json = r#"{"action":"type","element":0,"value":"test@example.com","reasoning":"fill email"}"#;
+        let json =
+            r#"{"action":"type","element":0,"value":"test@example.com","reasoning":"fill email"}"#;
         let action = parse_action(json).unwrap();
         assert!(matches!(action, Action::Type { element: 0, .. }));
     }

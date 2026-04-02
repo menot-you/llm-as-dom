@@ -1,86 +1,119 @@
-//! SemanticView: compressed DOM representation for LLM consumption.
+//! `SemanticView`: compressed DOM representation for LLM consumption.
+
+use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 
 /// Compressed view of a web page optimized for LLM reasoning.
-/// Target: ~500-2000 tokens instead of 15KB raw DOM.
+///
+/// Target: ~500-2000 tokens instead of 15 KB raw DOM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticView {
+    /// Current page URL.
     pub url: String,
+    /// Document title.
     pub title: String,
+    /// Heuristic page classification (e.g. "login page").
     pub page_hint: String,
+    /// Interactive elements on the page.
     pub elements: Vec<Element>,
+    /// Concatenated visible headings/paragraphs (max ~500 chars).
     pub visible_text: String,
+    /// Current page lifecycle state.
     pub state: PageState,
 }
 
+/// A single interactive element extracted from the DOM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Element {
+    /// Stable numeric ID (`data-lad-id`).
     pub id: u32,
+    /// Semantic element kind.
     pub kind: ElementKind,
+    /// Best-effort label (aria-label, text content, placeholder, etc.).
     pub label: String,
+    /// HTML `name` attribute.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Current input value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Placeholder text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
+    /// `href` attribute (links only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub href: Option<String>,
+    /// `type` attribute for inputs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_type: Option<String>,
+    /// Whether the element is disabled.
     pub disabled: bool,
+    /// Optional contextual hint added by heuristics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
 }
 
+/// Semantic classification of an interactive element.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ElementKind {
+    /// `<button>`, `[role=button]`, or `<input type=submit>`.
     Button,
+    /// `<input>` (text, email, number, etc.).
     Input,
+    /// `<a>` or `[role=link]`.
     Link,
+    /// `<select>`.
     Select,
+    /// `<textarea>`.
     Textarea,
+    /// Checkbox input or `[role=checkbox]`.
     Checkbox,
+    /// Radio input or `[role=radio]`.
     Radio,
+    /// Anything else with an interactive role.
     Other,
 }
 
+/// Page lifecycle state.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PageState {
+    /// Page is fully loaded and interactive.
     Ready,
+    /// Page is still loading.
     Loading,
+    /// An error prevented the page from loading.
     Error,
 }
 
 impl SemanticView {
-    /// Format as compact text for LLM prompt (not JSON — saves tokens).
+    /// Format as compact text for an LLM prompt (not JSON -- saves tokens).
     pub fn to_prompt(&self) -> String {
         let mut out = String::with_capacity(512);
-        out.push_str(&format!("URL: {}\n", self.url));
-        out.push_str(&format!("TITLE: {}\n", self.title));
-        out.push_str(&format!("HINT: {}\n", self.page_hint));
-        out.push_str(&format!("STATE: {:?}\n\n", self.state));
+        let _ = writeln!(out, "URL: {}", self.url);
+        let _ = writeln!(out, "TITLE: {}", self.title);
+        let _ = writeln!(out, "HINT: {}", self.page_hint);
+        let _ = writeln!(out, "STATE: {:?}\n", self.state);
         out.push_str("ELEMENTS:\n");
         for el in &self.elements {
-            out.push_str(&format!("[{}] {:?}", el.id, el.kind));
+            let _ = write!(out, "[{}] {:?}", el.id, el.kind);
             if let Some(itype) = &el.input_type {
-                out.push_str(&format!(" type={itype}"));
+                let _ = write!(out, " type={itype}");
             }
-            out.push_str(&format!(" \"{}\"", el.label));
+            let _ = write!(out, " \"{}\"", el.label);
             if let Some(name) = &el.name {
-                out.push_str(&format!(" name=\"{name}\""));
+                let _ = write!(out, " name=\"{name}\"");
             }
             if let Some(ph) = &el.placeholder {
-                out.push_str(&format!(" ph=\"{ph}\""));
+                let _ = write!(out, " ph=\"{ph}\"");
             }
             if let Some(val) = &el.value {
-                out.push_str(&format!(" val=\"{val}\""));
+                let _ = write!(out, " val=\"{val}\"");
             }
             if let Some(href) = &el.href {
-                out.push_str(&format!(" href=\"{href}\""));
+                let _ = write!(out, " href=\"{href}\"");
             }
             if el.disabled {
                 out.push_str(" [disabled]");
@@ -88,12 +121,12 @@ impl SemanticView {
             out.push('\n');
         }
         if !self.visible_text.is_empty() {
-            out.push_str(&format!("\nVISIBLE TEXT: {}\n", self.visible_text));
+            let _ = write!(out, "\nVISIBLE TEXT: {}\n", self.visible_text);
         }
         out
     }
 
-    /// Rough token estimate (1 token ≈ 4 chars).
+    /// Rough token estimate (1 token ~ 4 chars).
     pub fn estimated_tokens(&self) -> usize {
         self.to_prompt().len() / 4
     }

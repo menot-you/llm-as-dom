@@ -77,9 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| Error::BrowserStr(format!("{e}")))?;
 
-    let handle = tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    let handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser.new_page(&cli.url).await?;
     page.wait_for_navigation().await?;
@@ -121,7 +119,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for step in &result.steps {
             println!(
                 "  [{}] {:?} {:?} ({:.1}s)",
-                step.index, step.source, step.action, step.duration.as_secs_f64()
+                step.index,
+                step.source,
+                step.action,
+                step.duration.as_secs_f64()
             );
         }
     }

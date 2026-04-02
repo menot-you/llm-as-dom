@@ -16,15 +16,29 @@ pub enum Action {
     /// Click an interactive element by its `data-lad-id`.
     Click { element: u32, reasoning: String },
     /// Type text into an input/textarea by its `data-lad-id`.
-    Type { element: u32, value: String, reasoning: String },
+    Type {
+        element: u32,
+        value: String,
+        reasoning: String,
+    },
     /// Select an option in a `<select>` element.
-    Select { element: u32, value: String, reasoning: String },
+    Select {
+        element: u32,
+        value: String,
+        reasoning: String,
+    },
     /// Scroll the viewport in a given direction.
-    Scroll { direction: String, reasoning: String },
+    Scroll {
+        direction: String,
+        reasoning: String,
+    },
     /// Pause and wait for the page to settle.
     Wait { reasoning: String },
     /// Goal achieved -- includes the structured result.
-    Done { result: serde_json::Value, reasoning: String },
+    Done {
+        result: serde_json::Value,
+        reasoning: String,
+    },
     /// Cannot proceed -- escalate to the caller.
     Escalate { reason: String },
 }
@@ -33,40 +47,48 @@ pub enum Action {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionSource {
+    /// Resolved by a deterministic heuristic rule.
     Heuristic,
+    /// Resolved by the LLM backend.
     Llm,
 }
 
 /// A single step in the pilot's action history.
 #[derive(Debug, Clone, Serialize)]
 pub struct Step {
+    /// Zero-based step index within the pilot run.
     pub index: u32,
+    /// Semantic view observed at this step.
     pub observation: SemanticView,
+    /// The action decided upon.
     pub action: Action,
+    /// Whether a heuristic or the LLM produced the action.
     pub source: DecisionSource,
+    /// Confidence score (0.0 .. 1.0).
     pub confidence: f32,
+    /// Wall-clock duration of this step.
     pub duration: Duration,
 }
 
 /// LLM-agnostic backend for pilot decisions.
 #[async_trait]
-#[allow(unused)]
 pub trait PilotBackend: Send + Sync {
+    /// Given the current page state and history, choose the next action.
     async fn decide(
         &self,
         view: &SemanticView,
         goal: &str,
         history: &[Step],
     ) -> Result<Action, crate::Error>;
-
-    fn name(&self) -> &str;
 }
 
-/// Pilot configuration.
+/// Configuration for a pilot run.
 pub struct PilotConfig {
+    /// Natural-language goal to accomplish.
     pub goal: String,
+    /// Maximum number of steps before auto-escalation.
     pub max_steps: u32,
-    /// Use heuristics before LLM (default: true)
+    /// Whether to try heuristics before the LLM (default: `true`).
     pub use_heuristics: bool,
 }
 
@@ -83,15 +105,21 @@ impl Default for PilotConfig {
 /// Result of a pilot run.
 #[derive(Debug, Serialize)]
 pub struct PilotResult {
+    /// Whether the goal was achieved.
     pub success: bool,
+    /// Complete step history.
     pub steps: Vec<Step>,
+    /// The terminal action (Done or Escalate).
     pub final_action: Action,
+    /// Total wall-clock duration of the run.
     pub total_duration: Duration,
+    /// Number of steps resolved by heuristics.
     pub heuristic_hits: u32,
+    /// Number of steps resolved by the LLM.
     pub llm_hits: u32,
 }
 
-/// Run the pilot loop: observe → heuristics → LLM fallback → act → repeat.
+/// Run the pilot loop: observe -> heuristics -> LLM fallback -> act -> repeat.
 pub async fn run_pilot(
     page: &chromiumoxide::Page,
     backend: &dyn PilotBackend,
@@ -167,19 +195,17 @@ pub async fn run_pilot(
         };
 
         // 3. Check for terminal actions
-        match &action {
-            Action::Done { .. } | Action::Escalate { .. } => {
-                history.push(step);
-                return Ok(PilotResult {
-                    success: matches!(&action, Action::Done { .. }),
-                    steps: history,
-                    final_action: action,
-                    total_duration: run_start.elapsed(),
-                    heuristic_hits,
-                    llm_hits,
-                });
-            }
-            _ => {}
+        if matches!(&action, Action::Done { .. } | Action::Escalate { .. }) {
+            let success = matches!(&action, Action::Done { .. });
+            history.push(step);
+            return Ok(PilotResult {
+                success,
+                steps: history,
+                final_action: action,
+                total_duration: run_start.elapsed(),
+                heuristic_hits,
+                llm_hits,
+            });
         }
 
         // 4. Act: execute the action on the page

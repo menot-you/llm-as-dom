@@ -7,35 +7,40 @@ use crate::semantic::{ElementKind, SemanticView};
 /// Confidence threshold — below this, escalate to LLM.
 const CONFIDENCE_THRESHOLD: f32 = 0.6;
 
-/// Result of heuristic evaluation.
+/// Result of a heuristic evaluation attempt.
 pub struct HeuristicResult {
+    /// The resolved action, or `None` if no rule matched with enough confidence.
     pub action: Option<Action>,
+    /// Confidence score (0.0 .. 1.0) of the match.
     pub confidence: f32,
+    /// Human-readable explanation of why this rule matched (or didn't).
     pub reason: String,
 }
 
 /// Try to resolve the next action using rules only (no LLM).
 /// Returns None if confidence is too low — caller should use LLM.
-pub fn try_resolve(
-    view: &SemanticView,
-    goal: &str,
-    filled_fields: &[u32],
-) -> HeuristicResult {
+pub fn try_resolve(view: &SemanticView, goal: &str, filled_fields: &[u32]) -> HeuristicResult {
     let goal_lower = goal.to_lowercase();
 
     // Strategy 1: Form fill by goal parsing
-    if let Some(result) = try_form_fill(view, &goal_lower, filled_fields) && result.confidence >= CONFIDENCE_THRESHOLD {
-            return result;
+    if let Some(result) = try_form_fill(view, &goal_lower, filled_fields)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
     }
 
     // Strategy 2: Button click by goal keywords
-    if let Some(result) = try_button_click(view, &goal_lower, filled_fields) && result.confidence >= CONFIDENCE_THRESHOLD {
-            return result;
+    if let Some(result) = try_button_click(view, &goal_lower, filled_fields)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
     }
 
     // Strategy 3: Goal completion detection
-    if let Some(result) = try_detect_done(view, &goal_lower) && result.confidence >= CONFIDENCE_THRESHOLD {
-            return result;
+    if let Some(result) = try_detect_done(view, &goal_lower)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
     }
 
     HeuristicResult {
@@ -65,11 +70,17 @@ fn try_form_fill(
             ElementKind::Input => {
                 let is_password = el.input_type.as_deref() == Some("password");
                 let is_email = el.input_type.as_deref() == Some("email")
-                    || el.name.as_deref().map(|n| n.contains("email")).unwrap_or(false)
+                    || el
+                        .name
+                        .as_deref()
+                        .map(|n| n.contains("email"))
+                        .unwrap_or(false)
                     || el.label.to_lowercase().contains("email");
-                let is_username = el.name.as_deref().map(|n| {
-                    n.contains("user") || n.contains("login") || n.contains("acct")
-                }).unwrap_or(false)
+                let is_username = el
+                    .name
+                    .as_deref()
+                    .map(|n| n.contains("user") || n.contains("login") || n.contains("acct"))
+                    .unwrap_or(false)
                     || el.label.to_lowercase().contains("user")
                     || el.label.to_lowercase().contains("login");
 
@@ -91,7 +102,10 @@ fn try_form_fill(
                             action: Some(Action::Type {
                                 element: el.id,
                                 value: user.clone(),
-                                reasoning: format!("heuristic: fill username/email field [{}]", el.id),
+                                reasoning: format!(
+                                    "heuristic: fill username/email field [{}]",
+                                    el.id
+                                ),
                             }),
                             confidence: 0.90,
                             reason: "username/email field matched".into(),
@@ -104,7 +118,10 @@ fn try_form_fill(
                             action: Some(Action::Type {
                                 element: el.id,
                                 value: user.clone(),
-                                reasoning: format!("heuristic: fill first text input [{}] (likely username)", el.id),
+                                reasoning: format!(
+                                    "heuristic: fill first text input [{}] (likely username)",
+                                    el.id
+                                ),
                             }),
                             confidence: 0.70,
                             reason: "generic text field, guessing username".into(),
@@ -131,9 +148,11 @@ fn try_button_click(
     }
 
     // Check if all input fields have been filled
-    let unfilled_inputs = view.elements.iter().filter(|e| {
-        e.kind == ElementKind::Input && !filled_fields.contains(&e.id)
-    }).count();
+    let unfilled_inputs = view
+        .elements
+        .iter()
+        .filter(|e| e.kind == ElementKind::Input && !filled_fields.contains(&e.id))
+        .count();
 
     if unfilled_inputs > 0 {
         return None; // Still have fields to fill
@@ -218,8 +237,10 @@ fn try_detect_done(view: &SemanticView, goal: &str) -> Option<HeuristicResult> {
 
     // Check for error messages in visible text
     let text_lower = view.visible_text.to_lowercase();
-    if text_lower.contains("invalid") || text_lower.contains("incorrect")
-        || text_lower.contains("wrong password") || text_lower.contains("failed")
+    if text_lower.contains("invalid")
+        || text_lower.contains("incorrect")
+        || text_lower.contains("wrong password")
+        || text_lower.contains("failed")
     {
         return Some(HeuristicResult {
             action: Some(Action::Done {
