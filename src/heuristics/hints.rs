@@ -23,11 +23,7 @@ const HINT_CONFIDENCE: f32 = 0.98;
 /// - `field:<name>` — input field (e.g. `field:email`, `field:password`)
 /// - `action:<name>` — clickable action (e.g. `action:submit`, `action:login`)
 /// - `form:<name>` — form container (used for scoping, not direct actions)
-pub fn try_hints(
-    view: &SemanticView,
-    goal: &str,
-    acted_on: &[u32],
-) -> super::HeuristicResult {
+pub fn try_hints(view: &SemanticView, goal: &str, acted_on: &[u32]) -> super::HeuristicResult {
     let goal_lower = goal.to_lowercase();
 
     // Extract credentials from goal for field filling.
@@ -35,10 +31,8 @@ pub fn try_hints(
         &goal_lower,
         &["as ", "user ", "username ", "email ", "login "],
     );
-    let password = crate::heuristics::login::extract_credential(
-        &goal_lower,
-        &["password ", "pass ", "pw "],
-    );
+    let password =
+        crate::heuristics::login::extract_credential(&goal_lower, &["password ", "pass ", "pw "]);
 
     // Pass 1: Fill hinted fields that haven't been acted on yet.
     for el in &view.elements {
