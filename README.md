@@ -19,7 +19,7 @@ lad:          Claude → lad_browse("login as user") → { success: true, steps:
 # Extract a page (no LLM needed)
 lad --url "https://github.com/login" --extract-only
 
-# Pilot a login flow (needs Ollama with qwen3:8b)
+# Pilot a login flow (needs Ollama with qwen2.5:7b)
 lad --url "https://news.ycombinator.com/login" \
     --goal "login as testuser with password test123"
 
@@ -43,7 +43,7 @@ Add to `claude_desktop_config.json`:
       "command": "/path/to/lad-mcp",
       "env": {
         "LAD_OLLAMA_URL": "http://localhost:11434",
-        "LAD_MODEL": "qwen3:8b"
+        "LAD_MODEL": "qwen2.5:7b"
       }
     }
   }
@@ -120,7 +120,7 @@ ELEMENTS:
 
 - Rust 1.86+
 - Chrome/Chromium (system install)
-- Ollama with `qwen3:8b` (only for LLM fallback)
+- Ollama with `qwen2.5:7b` (only for LLM fallback)
 
 ```bash
 # Build

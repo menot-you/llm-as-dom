@@ -36,7 +36,7 @@ struct Cli {
     ollama_url: String,
 
     /// LLM model name.
-    #[arg(long, default_value = "qwen3:8b")]
+    #[arg(long, default_value = "qwen2.5:7b")]
     model: String,
 
     /// Max pilot steps before giving up.

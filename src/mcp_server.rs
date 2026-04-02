@@ -88,7 +88,7 @@ impl LadServer {
             handler_handle: Arc::new(Mutex::new(None)),
             ollama_url: std::env::var("LAD_OLLAMA_URL")
                 .unwrap_or_else(|_| "http://localhost:11434".into()),
-            model: std::env::var("LAD_MODEL").unwrap_or_else(|_| "qwen3:8b".into()),
+            model: std::env::var("LAD_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into()),
         }
     }
 
