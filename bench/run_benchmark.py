@@ -22,13 +22,33 @@ SCENARIOS = [
      "view": "[0] Input type=text \"Search\" name=\"q\"\n[3] Button \"Google Search\""},
 ]
 
-MODELS = [
+ALL_MODELS = [
     {"name": "qwen3-8b", "type": "ollama", "model": "qwen3:8b"},
     {"name": "qwen2.5-7b", "type": "ollama", "model": "qwen2.5:7b"},
     {"name": "glm-4.5-flash", "type": "zai", "model": "glm-4.5-flash"},
     {"name": "glm-4.5-air", "type": "zai", "model": "glm-4.5-air"},
     {"name": "glm-4.7", "type": "zai", "model": "glm-4.7"},
 ]
+
+def detect_models():
+    """Skip Ollama models if Ollama is not reachable. Skip ZAI if no key."""
+    import requests
+    models = []
+    for m in ALL_MODELS:
+        if m["type"] == "ollama":
+            try:
+                requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+                models.append(m)
+            except Exception:
+                print(f"  SKIP {m['name']}: Ollama not reachable at {OLLAMA_URL}")
+        elif m["type"] == "zai":
+            if ZAI_KEY:
+                models.append(m)
+            else:
+                print(f"  SKIP {m['name']}: Z_AI_API_KEY not set")
+    return models
+
+MODELS = detect_models()
 
 def prompt(sc):
     return f"""You are a browser pilot. Pick the next action.
