@@ -25,6 +25,9 @@ pub struct SemanticView {
     /// `None` when no filtering was applied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub element_cap: Option<String>,
+    /// Human-readable reason when the page is blocked (CAPTCHA, WAF, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
 }
 
 /// A single interactive element extracted from the DOM.
@@ -84,7 +87,7 @@ pub enum ElementKind {
 }
 
 /// Page lifecycle state.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PageState {
     /// Page is fully loaded and interactive.
@@ -93,6 +96,9 @@ pub enum PageState {
     Loading,
     /// An error prevented the page from loading.
     Error,
+    /// Page is blocked by a bot-challenge / CAPTCHA / WAF.
+    /// Contains the reason string describing what was detected.
+    Blocked(String),
 }
 
 impl SemanticView {
@@ -105,6 +111,9 @@ impl SemanticView {
         let _ = writeln!(out, "STATE: {:?}", self.state);
         if let Some(cap) = &self.element_cap {
             let _ = writeln!(out, "ELEMENT_CAP: {cap}");
+        }
+        if let Some(reason) = &self.blocked_reason {
+            let _ = writeln!(out, "BLOCKED: {reason}");
         }
         out.push('\n');
         out.push_str("ELEMENTS:\n");
