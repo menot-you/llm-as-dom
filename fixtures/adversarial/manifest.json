@@ -1,0 +1,326 @@
+[
+  {
+    "name": "Visual-Only Button (CSS Gradient Illusion)",
+    "attack": "Extraction attack: element looks interactive but isn't clickable",
+    "expected_failure": "lad extracts and tries to click a non-functional button rendered by CSS",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:20px}.fake-btn{width:100px;height:40px;background:linear-gradient(to bottom,#4CAF50,#45a049);border:none;border-radius:4px;cursor:pointer;color:white;font-weight:bold;pointer-events:none}.info{color:red;margin-top:20px}</style></head><body><div class='fake-btn'>Sign Up</div><div class='info'>This button only LOOKS clickable due to CSS. It has pointer-events:none.</div></body></html>"
+  },
+  {
+    "name": "Hidden div[onclick] Trap",
+    "attack": "Extraction attack: non-semantic interactive element disguised as static",
+    "expected_failure": "lad skips it because div doesn't match button/a/input selector",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:20px}.trap{background:#f0f0f0;padding:10px;border-radius:4px;cursor:pointer}</style></head><body><div class='trap' onclick=\"alert('Hidden trap clicked')\">This looks like a static div but has onclick handler</div><p>The div[onclick] won't be extracted by standard selectors.</p></body></html>"
+  },
+  {
+    "name": "Clip-Path Visibility Bypass",
+    "attack": "Extraction attack: visibility check misses clip-path hidden elements",
+    "expected_failure": "lad thinks element is visible when clip-path makes it invisible",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:20px}.clipped{width:100px;height:100px;background:red;clip-path:polygon(0 0,0 0,0 0,0 0);cursor:pointer}button{width:150px;height:40px;margin-top:20px}</style></head><body><div class='clipped'>Invisible</div><button onclick=\"alert('This button is visible')\">Real Button</button><p>The clipped div is actually invisible but getBoundingClientRect shows dimensions.</p></body></html>"
+  },
+  {
+    "name": "Transform Translate Beyond Viewport",
+    "attack": "Extraction attack: transform:translate moves element off-screen but not hidden",
+    "expected_failure": "lad extracts element that's outside viewport bounds",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:20px;width:500px}button{width:100px;height:40px}button.offscreen{transform:translateX(9999px)}</style></head><body><button class='offscreen'>Hidden Button</button><p>This button is translated 9999px left, but still technically visible and interactive.</p></body></html>"
+  },
+  {
+    "name": "Overflow Hidden Parent with Positioned Child",
+    "attack": "Extraction attack: child element extends beyond overflow:hidden parent",
+    "expected_failure": "lad marks element as visible when parent clips it",
+    "html": "<!DOCTYPE html><html><head><style>.parent{width:200px;height:100px;overflow:hidden;border:1px solid black;position:relative}button{position:absolute;top:50px;left:10px;width:100px;height:40px}</style></head><body><div class='parent'><button>Hidden Below</button></div><p>Button is positioned beyond parent's height but getBoundingClientRect still returns coords.</p></body></html>"
+  },
+  {
+    "name": "Dynamic Element Appears After 100ms",
+    "attack": "Extraction attack: race condition - element inserted during lad's scan",
+    "expected_failure": "lad misses element that appears mid-extraction cycle",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:20px}</style><script>setTimeout(()=>{const btn=document.createElement('button');btn.textContent='Late Button';btn.id='late-btn';document.body.appendChild(btn)},100)</script></head><body><p>A button will appear after 100ms. If lad scans immediately, it will miss this element.</p></body></html>"
+  },
+  {
+    "name": "1000+ Elements Token Bomb",
+    "attack": "Extraction attack: DOM bloat causes token budget explosion",
+    "expected_failure": "lad's compressed representation becomes massive and unusable",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:10px}button{margin:2px;width:80px;height:30px}</style></head><body><script>for(let i=0;i<1000;i++){const btn=document.createElement('button');btn.textContent='Btn'+i;document.body.appendChild(btn)}</script><p>Generating 1000 buttons...</p></body></html>"
+  },
+  {
+    "name": "Nested iframes 3 Levels Deep",
+    "attack": "Extraction attack: lad only scans top-level window",
+    "expected_failure": "lad misses interactive elements inside nested iframes",
+    "html": "<!DOCTYPE html><html><head><style>iframe{width:100%;height:200px;border:1px solid black}</style></head><body><h1>Frame 1 (Top)</h1><iframe srcdoc=\"<h2>Frame 2</h2><iframe srcdoc=&quot;<h3>Frame 3</h3><button onclick=&quot;alert('Deeply nested')&quot;>Click me</button>&quot; style=&quot;width:100%;height:100px&quot;></iframe>\"></iframe></body></html>"
+  },
+  {
+    "name": "Open Shadow DOM Extraction",
+    "attack": "Extraction attack: querySelectorAll doesn't pierce shadow boundaries",
+    "expected_failure": "lad extracts shadow host but not shadow tree internals",
+    "html": "<!DOCTYPE html><html><head><style>.shadow-host{border:1px solid black;padding:10px;margin:10px}</style></head><body><div class='shadow-host'></div><script>const host=document.querySelector('.shadow-host');const shadow=host.attachShadow({mode:'open'});shadow.innerHTML='<button onclick=\"alert(\\\"Shadow button\\\")\" >Click in Shadow</button>'</script></body></html>"
+  },
+  {
+    "name": "Closed Shadow DOM Hide",
+    "attack": "Extraction attack: closed shadow DOM is completely inaccessible",
+    "expected_failure": "lad can't reach elements inside closed shadow DOM",
+    "html": "<!DOCTYPE html><html><head><style>.shadow-host{border:1px solid black;padding:10px;margin:10px}</style></head><body><div class='shadow-host'></div><script>const host=document.querySelector('.shadow-host');const shadow=host.attachShadow({mode:'closed'});shadow.innerHTML='<button>Invisible</button>'</script><p>Button is in closed shadow DOM. lad cannot access it.</p></body></html>"
+  },
+  {
+    "name": "MutationObserver Delayed Insertion",
+    "attack": "Extraction attack: element inserted via MutationObserver callback during scan",
+    "expected_failure": "lad's synchronous scan misses elements created asynchronously",
+    "html": "<!DOCTYPE html><html><head><script>const observer=new MutationObserver(()=>{const btn=document.createElement('button');btn.textContent='Observer Button';btn.style.display='block';btn.style.marginTop='20px';document.body.appendChild(btn)});observer.observe(document.body,{childList:true});setTimeout(()=>{document.body.innerHTML+='<div>Trigger</div>'},50)</script></head><body><p>Waiting for mutation...</p></body></html>"
+  },
+  {
+    "name": "Content Loads After 2.1 Seconds",
+    "attack": "Timing attack: lazy-loaded content appears just past 2s wait window",
+    "expected_failure": "lad extracts empty page if it only waits 2 seconds",
+    "html": "<!DOCTYPE html><html><head><style>body{margin:20px}#lazy{display:none}</style><script>setTimeout(()=>{document.getElementById('lazy').style.display='block'},2100)</script></head><body><p>Content will appear after 2.1 seconds...</p><div id='lazy'><button>Lazy Loaded Button</button></div></body></html>"
+  },
+  {
+    "name": "Form Action URL Changed by setTimeout",
+    "attack": "Timing attack: form's action attribute changes dynamically",
+    "expected_failure": "lad extracts form with wrong action URL if timing is off",
+    "html": "<!DOCTYPE html><html><head><script>setTimeout(()=>{document.getElementById('form').action='/changed-endpoint'},500)</script></head><body><form id='form' action='/original-endpoint' method='post'><input type='text' name='user' placeholder='Username'><button type='submit'>Submit</button></form><p>Form action changes after 500ms.</p></body></html>"
+  },
+  {
+    "name": "Button Disables Itself on Page Load",
+    "attack": "Timing attack: button's disabled state changes after initial scan",
+    "expected_failure": "lad thinks button is clickable when it becomes disabled",
+    "html": "<!DOCTYPE html><html><head><script>setTimeout(()=>{document.getElementById('btn').disabled=true},300)</script></head><body><button id='btn'>Click Me Fast</button><p>This button becomes disabled after 300ms. If lad waits longer, it's unusable.</p></body></html>"
+  },
+  {
+    "name": "Input Blur Validation Shows Error",
+    "attack": "Timing attack: hidden error message appears on blur event",
+    "expected_failure": "lad extracts input without seeing validation error that appears later",
+    "html": "<!DOCTYPE html><html><head><style>.error{display:none;color:red}.input.invalid~.error{display:block}</style></head><body><input id='email' class='input' type='text' placeholder='Email'><div class='error'>Invalid email format</div><script>document.getElementById('email').addEventListener('blur',()=>{if(!document.getElementById('email').value.includes('@')){document.getElementById('email').classList.add('invalid')}})</script></body></html>"
+  },
+  {
+    "name": "requestAnimationFrame Rendering Loop",
+    "attack": "Timing attack: elements animate in via requestAnimationFrame",
+    "expected_failure": "lad extracts element at wrong animation frame state",
+    "html": "<!DOCTYPE html><html><head><style>button{opacity:0;transition:opacity 0.5s}button.visible{opacity:1}</style><script>requestAnimationFrame(()=>{document.querySelector('button').classList.add('visible')})</script></head><body><button>Appearing Button</button><p>Button fades in via RAF animation.</p></body></html>"
+  },
+  {
+    "name": "Duplicate data-lad-id Collision",
+    "attack": "Action attack: multiple elements stamped with same data-lad-id",
+    "expected_failure": "lad clicks wrong element when IDs collide",
+    "html": "<!DOCTYPE html><html><head><style>button{margin:10px;width:100px;height:40px}.bad{background:red}.good{background:green}</style></head><body><button class='bad' data-lad-id='btn-1' onclick=\"alert('Wrong button')\">Delete</button><button class='good' data-lad-id='btn-1' onclick=\"alert('Right button')\">Save</button><p>Both buttons have same data-lad-id. Clicking first one is wrong.</p></body></html>"
+  },
+  {
+    "name": "Element Moves on Mouse Over",
+    "attack": "Action attack: element position changes during click attempt",
+    "expected_failure": "lad calculates click coords but element moves before click fires",
+    "html": "<!DOCTYPE html><html><head><style>button{position:absolute;left:100px;top:100px;width:80px;height:40px}</style></head><body><button onmouseover=\"this.style.left=(Math.random()*300)+'px'\" onclick=\"alert('Caught me!')\">Dodge</button><p>Button moves when you try to hover/click it.</p></body></html>"
+  },
+  {
+    "name": "Alert Blocks Execution",
+    "attack": "Action attack: click handler shows alert that blocks further actions",
+    "expected_failure": "lad gets stuck waiting for user to dismiss alert",
+    "html": "<!DOCTYPE html><html><head><script>function blockingClick(){alert('You are stuck!');}</script></head><body><button onclick='blockingClick()'>Click Me</button><p>This button shows an alert that blocks all further execution.</p></body></html>"
+  },
+  {
+    "name": "preventDefault No-Op Form",
+    "attack": "Action attack: form submit does preventDefault but nothing else",
+    "expected_failure": "lad thinks form submission succeeded when nothing happened",
+    "html": "<!DOCTYPE html><html><head><script>document.addEventListener('DOMContentLoaded',()=>{document.querySelector('form').addEventListener('submit',(e)=>{e.preventDefault()})})</script></head><body><form><input type='text' placeholder='Search'><button type='submit'>Submit</button></form><p>Form prevents default but does nothing. No navigation, no API call.</p></body></html>"
+  },
+  {
+    "name": "Input maxlength Truncates Text",
+    "attack": "Action attack: input with maxlength=1 but goal needs full email",
+    "expected_failure": "lad types email but only first character is accepted",
+    "html": "<!DOCTYPE html><html><head><style>input{padding:10px;width:200px}label{display:block;margin-bottom:5px}</style></head><body><label>Email Address</label><input type='text' maxlength='1' placeholder='your@email.com'><p>This input only accepts 1 character. Good luck entering an email!</p></body></html>"
+  },
+  {
+    "name": "Password Field as Search",
+    "attack": "Classification attack: password field labeled as search",
+    "expected_failure": "lad treats password field as search box and types plaintext",
+    "html": "<!DOCTYPE html><html><head></head><body><form><label>Search Database</label><input type='password' placeholder='Search query'><button>Find</button></form><p>This 'search' field is actually type=password. lad would expose data!</p></body></html>"
+  },
+  {
+    "name": "404 Page Titled 'Login'",
+    "attack": "Classification attack: page title doesn't match actual content",
+    "expected_failure": "lad assumes it's a login page and tries to authenticate on 404",
+    "html": "<!DOCTYPE html><html><head><title>Login</title></head><body><h1>404 Not Found</h1><p>The page you requested does not exist.</p><a href='/'>Back to Home</a></body></html>"
+  },
+  {
+    "name": "Interleaved Forms (Not Nested)",
+    "attack": "Classification attack: two separate forms mixed in DOM",
+    "expected_failure": "lad confuses which inputs belong to which form",
+    "html": "<!DOCTYPE html><html><head><style>form{border:1px solid #ccc;padding:10px;margin:10px}</style></head><body><form id='login'><input placeholder='Username'></form><form id='search'><input placeholder='Search'></form><input placeholder='Appears between forms'><button type='submit' form='login'>Login</button><button type='submit' form='search'>Search</button></body></html>"
+  },
+  {
+    "name": "Sidebar Login Form Hidden Until Click",
+    "attack": "Classification attack: login form in sidebar but DOM structure unclear",
+    "expected_failure": "lad extracts form fields from wrong scope or misses scope change",
+    "html": "<!DOCTYPE html><html><head><style>.sidebar{position:fixed;left:-300px;width:280px;height:100vh;background:#333;color:white;padding:20px;transition:left 0.3s}.sidebar.open{left:0}button{width:100px;height:40px}</style></head><body><button onclick=\"document.querySelector('.sidebar').classList.toggle('open')\">Menu</button><div class='sidebar'><h3>Login</h3><input placeholder='Username'><input placeholder='Password'><button>Sign In</button></div></body></html>"
+  },
+  {
+    "name": "All Buttons Have Same Text",
+    "attack": "LLM confusion: multiple identical button labels",
+    "expected_failure": "LLM can't distinguish which button is which based on text alone",
+    "html": "<!DOCTYPE html><html><head><style>button{margin:5px;width:80px;height:40px}</style></head><body><button onclick=\"window.location.href='/delete-account'\">Submit</button><button onclick=\"window.location.href='/logout'\">Submit</button><button onclick=\"window.location.href='/logout'\">Submit</button><button onclick=\"alert('Account deleted')\">Submit</button><p>Four buttons, all say 'Submit', different actions.</p></body></html>"
+  },
+  {
+    "name": "All Inputs Have No Labels",
+    "attack": "LLM confusion: inputs with no labels, placeholders, or names",
+    "expected_failure": "LLM guesses what each input is for",
+    "html": "<!DOCTYPE html><html><head><style>input{display:block;margin:10px;padding:8px;width:200px}</style></head><body><input type='text'><input type='text'><input type='text'><input type='text'><input type='password'><p>Five identical-looking inputs. What are they for?</p></body></html>"
+  },
+  {
+    "name": "Thai Language Button Labels",
+    "attack": "LLM confusion: text in non-English language",
+    "expected_failure": "LLM misidentifies Thai text; mistranslation causes wrong action",
+    "html": "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><form><label>ชื่อผู้ใช้</label><input placeholder='ป้อนชื่อผู้ใช้'><button type='submit'>ลงชื่อเข้า</button></form><p>All text is in Thai. Will the LLM understand 'ลงชื่อเข้า' means 'Login'?</p></body></html>"
+  },
+  {
+    "name": "Arabic RTL Text Confusion",
+    "attack": "LLM confusion: right-to-left text direction",
+    "expected_failure": "LLM misreads Arabic which requires RTL parsing",
+    "html": "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><div dir='rtl'><form><label>اسم المستخدم</label><input placeholder='أدخل اسم المستخدم'><button type='submit'>تسجيل الدخول</button></form></div></body></html>"
+  },
+  {
+    "name": "Contradictory ARIA: role=button on link",
+    "attack": "LLM confusion: ARIA attributes contradict actual element type",
+    "expected_failure": "LLM trusts ARIA over actual element semantics",
+    "html": "<!DOCTYPE html><html><head></head><body><a href='/profile' role='button' aria-label='Open sidebar'>Navigation Link</a><p>This is an <a> but role='button' makes it confusing.</p></body></html>"
+  },
+  {
+    "name": "aria-hidden on Visible Element",
+    "attack": "LLM confusion: ARIA says element is hidden but it's visible",
+    "expected_failure": "LLM thinks element is hidden and skips it",
+    "html": "<!DOCTYPE html><html><head><style>button{width:100px;height:40px;display:block;margin:20px}</style></head><body><button aria-hidden='true'>Click Me</button><p>This button is visible but marked aria-hidden='true'. Should lad click it?</p></body></html>"
+  },
+  {
+    "name": "50 Nearly-Identical List Items",
+    "attack": "LLM confusion: high-cardinality similar elements",
+    "expected_failure": "LLM can't distinguish which list item to click",
+    "html": "<!DOCTYPE html><html><head><style>li{padding:10px;border-bottom:1px solid #eee;cursor:pointer}</style></head><body><ul><script>for(let i=1;i<=50;i++){const li=document.createElement('li');li.textContent=`Item ${i}`;li.onclick=()=>alert(`Clicked item ${i}`);document.querySelector('ul').appendChild(li)}</script></ul></body></html>"
+  },
+  {
+    "name": "Unicode Look-Alike Characters",
+    "attack": "LLM confusion: visually similar but different Unicode",
+    "expected_failure": "LLM mistakes Cyrillic А (U+0410) for Latin A",
+    "html": "<!DOCTYPE html><html><head><style>p{font-family:Arial,sans-serif;font-size:16px}</style></head><body><p>Latin: ADMIN</p><p>Cyrillic: АDМ­IN (look identical!)</p><form><input placeholder='Username'><button>Login As ADMIN</button></form><p>The second 'ADMIN' uses mixed script characters.</p></body></html>"
+  },
+  {
+    "name": "Opacity 0 but Pointer-Events Auto",
+    "attack": "Extraction attack: invisible element but clickable",
+    "expected_failure": "lad marks element as invisible but it's actually interactive",
+    "html": "<!DOCTYPE html><html><head><style>.ghost{opacity:0;pointer-events:auto;position:absolute;width:100px;height:100px;background:red;top:50px;left:50px;cursor:pointer}</style></head><body><div class='ghost' onclick=\"alert('Ghost clicked!')\"></div><p>Invisible div with pointer-events:auto. lad won't see it but it's clickable.</p></body></html>"
+  },
+  {
+    "name": "Visibility Hidden but Display Block",
+    "attack": "Extraction attack: visibility:hidden vs display:none confusion",
+    "expected_failure": "lad marks element as invisible when visibility:hidden still occupies space",
+    "html": "<!DOCTYPE html><html><head><style>.hidden{visibility:hidden;display:block;width:100px;height:40px}.visible{color:blue}</style></head><body><button class='hidden' onclick=\"alert('But I occupy space!')\">Hidden Button</button><p class='visible'>The button above is visibility:hidden but still takes up layout space.</p></body></html>"
+  },
+  {
+    "name": "Z-Index Stacking Behind Other Element",
+    "attack": "Extraction attack: element visually covered by z-index",
+    "expected_failure": "lad thinks element is interactive when it's behind another element",
+    "html": "<!DOCTYPE html><html><head><style>.under{position:absolute;width:100px;height:40px;top:50px;left:50px;z-index:1}.over{position:absolute;width:150px;height:60px;top:40px;left:40px;background:rgba(0,0,0,0.5);z-index:2}</style></head><body><button class='under'>Click Me</button><div class='over'></div><p>Button is behind a semi-transparent overlay. Can you click it?</p></body></html>"
+  },
+  {
+    "name": "CSS Content Property Visual Button",
+    "attack": "Extraction attack: button rendered entirely via CSS ::before/::after",
+    "expected_failure": "lad extracts host element but CSS content is not part of DOM",
+    "html": "<!DOCTYPE html><html><head><style>.css-btn::before{content:'Click Me';display:block;width:80px;padding:10px;background:#4CAF50;color:white;border-radius:4px;text-align:center;cursor:pointer}</style></head><body><div class='css-btn'></div><p>This looks like a button but it's rendered by CSS ::before pseudo-element.</p></body></html>"
+  },
+  {
+    "name": "Base64 Data URL Image Button",
+    "attack": "Extraction attack: button is image with onclick, not semantic button",
+    "expected_failure": "lad doesn't recognize img as interactive element",
+    "html": "<!DOCTYPE html><html><head></head><body><img src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0nMTAwJyBoZWlnaHQ9JzQwJyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnPjxyZWN0IHdpZHRoPScxMDAnIGhlaWdodD0nNDAnIGZpbGw9JyM0Q0FGNTE='/><script>document.querySelector('img').onclick=()=>alert('Image button clicked')</script><p>A button rendered as SVG data URL with onclick handler.</p></body></html>"
+  },
+  {
+    "name": "Contenteditable Div Masquerading as Button",
+    "attack": "Extraction attack: contenteditable element looks like button",
+    "expected_failure": "lad tries to click and type in what looks like a form field",
+    "html": "<!DOCTYPE html><html><head><style>.fake-btn{padding:10px;background:#4CAF50;color:white;border-radius:4px;display:inline-block;cursor:pointer;width:80px;text-align:center}</style></head><body><div contenteditable class='fake-btn'>Submit</div><p>This contenteditable div looks like a button but is actually an editor.</p></body></html>"
+  },
+  {
+    "name": "Multiple Submit Buttons, One Hidden",
+    "attack": "Extraction attack: form has multiple submit buttons with different actions",
+    "expected_failure": "lad clicks wrong submit button (the visible one)",
+    "html": "<!DOCTYPE html><html><head></head><body><form><input type='text' placeholder='Item ID'><button type='submit' name='action' value='update'>Update</button><button type='submit' name='action' value='delete' style='display:none'>Delete</button></form><p>Hidden delete button exists but isn't visible. lad will click Update instead.</p></body></html>"
+  },
+  {
+    "name": "Datalist with Dynamic Options",
+    "attack": "Extraction attack: datalist options added dynamically",
+    "expected_failure": "lad extracts datalist but options appear after user interaction",
+    "html": "<!DOCTYPE html><html><head><script>document.getElementById('search').addEventListener('focus',()=>{const datalist=document.getElementById('options');datalist.innerHTML='<option value=\"Apple\"><option value=\"Banana\"><option value=\"Cherry\">'})</script></head><body><input id='search' type='text' list='options' placeholder='Type fruit'><datalist id='options'></datalist><p>Datalist options only populate on input focus.</p></body></html>"
+  },
+  {
+    "name": "Label With Implicit Form Association",
+    "attack": "Extraction attack: label associates with input via implicit nesting",
+    "expected_failure": "lad doesn't recognize label wraps an input and treats them separately",
+    "html": "<!DOCTYPE html><html><head></head><body><label>Email: <input type='email'></label><label>Password: <input type='password'></label><button>Sign In</button><p>Labels implicitly wrap inputs. No 'for' attribute, just nesting.</p></body></html>"
+  },
+  {
+    "name": "Select with Optgroup",
+    "attack": "Extraction attack: grouped select options with disabled optgroup",
+    "expected_failure": "lad doesn't understand optgroup structure and disabled state",
+    "html": "<!DOCTYPE html><html><head></head><body><select><optgroup label='Active' disabled><option>Option 1</option><option>Option 2</option></optgroup><optgroup label='Archived'><option>Option 3</option></optgroup></select><p>Optgroup is disabled but options inside aren't individually disabled.</p></body></html>"
+  },
+  {
+    "name": "Range Input with Label and Output",
+    "attack": "Extraction attack: range input with live output display",
+    "expected_failure": "lad extracts input but doesn't understand it controls output element",
+    "html": "<!DOCTYPE html><html><head><script>document.getElementById('vol').addEventListener('input',(e)=>document.getElementById('volval').textContent=e.target.value)</script></head><body><label>Volume: <input type='range' id='vol' min='0' max='100' value='50'></label><output id='volval'>50</output><p>Range input controls output, but they're separate elements.</p></body></html>"
+  },
+  {
+    "name": "Form With fieldset and legend",
+    "attack": "Extraction attack: fieldset groups form elements, legend provides context",
+    "expected_failure": "lad extracts fields without understanding they're grouped",
+    "html": "<!DOCTYPE html><html><head></head><body><form><fieldset disabled><legend>Archived Settings</legend><input placeholder='Name'><input placeholder='Email'><button>Update</button></fieldset></form><p>Fieldset is disabled, so all children are disabled. lad won't understand this.</p></body></html>"
+  },
+  {
+    "name": "Button With Nested Span and Icon",
+    "attack": "Extraction attack: button contains complex nested HTML",
+    "expected_failure": "lad extracts button but nested elements complicate click target",
+    "html": "<!DOCTYPE html><html><head><style>button{padding:10px;border:none;background:#007bff;color:white;cursor:pointer;font-size:16px}</style></head><body><button><svg width='20' height='20' style='margin-right:5px'><circle cx='10' cy='10' r='8' fill='white'></circle></svg><span>Save</span></button><p>Button contains SVG and span. Where exactly is the click target?</p></body></html>"
+  },
+  {
+    "name": "Form With Autocomplete Attribute",
+    "attack": "Extraction attack: input's autocomplete attribute affects behavior",
+    "expected_failure": "lad doesn't trigger autocomplete or understand browser's form handling",
+    "html": "<!DOCTYPE html><html><head></head><body><form><input type='email' autocomplete='email' placeholder='your@email.com'><input type='password' autocomplete='current-password' placeholder='Password'><button type='submit'>Login</button></form><p>Autocomplete attributes change how browser handles form. lad ignores them.</p></body></html>"
+  },
+  {
+    "name": "Required Field With Constraint Validation",
+    "attack": "Extraction attack: form validation prevents submission",
+    "expected_failure": "lad tries to submit form but validation blocks it",
+    "html": "<!DOCTYPE html><html><head></head><body><form><input type='email' required placeholder='Email'><input type='text' pattern='[A-Z]{3}' required placeholder='Code (3 uppercase)'><button type='submit'>Submit</button></form><p>Inputs have required and pattern validation. Submission fails if invalid.</p></body></html>"
+  },
+  {
+    "name": "Input With Disabled Attribute Dynamically Changed",
+    "attack": "Extraction attack: disabled state changes via JavaScript",
+    "expected_failure": "lad extracts disabled field that later becomes enabled",
+    "html": "<!DOCTYPE html><html><head><script>setTimeout(()=>{document.getElementById('input').disabled=false;document.getElementById('input').value='Auto-filled'},1000)</script></head><body><input id='input' disabled placeholder='Will be enabled'><p>Input starts disabled but becomes enabled after 1 second.</p></body></html>"
+  },
+  {
+    "name": "Textarea With Placeholder and Maxlength",
+    "attack": "Extraction attack: textarea with character limit",
+    "expected_failure": "lad types long text but maxlength truncates it",
+    "html": "<!DOCTYPE html><html><head><style>textarea{width:100%;height:100px;font-family:monospace}</style></head><body><textarea maxlength='50' placeholder='Enter description (max 50 chars)'></textarea><p>Textarea only accepts 50 characters. Longer input gets cut off.</p></body></html>"
+  },
+  {
+    "name": "Progress Bar With JavaScript Updates",
+    "attack": "Extraction attack: progress element updated dynamically",
+    "expected_failure": "lad doesn't understand progress bar is not interactive",
+    "html": "<!DOCTYPE html><html><head><script>let val=0;setInterval(()=>{document.querySelector('progress').value=(val+=10)%100},100)</script></head><body><progress value='0' max='100'></progress><p>Progress bar animates. lad might try to click it thinking it's a control.</p></body></html>"
+  },
+  {
+    "name": "Meter Element Confusion",
+    "attack": "Extraction attack: meter element looks like button but is read-only",
+    "expected_failure": "lad tries to interact with meter element",
+    "html": "<!DOCTYPE html><html><head></head><body><label>Disk Usage: <meter low='33' high='66' optimum='50' value='80'></meter></label><p>This meter looks interactive but it's not. It's a visual gauge.</p></body></html>"
+  },
+  {
+    "name": "Time and Date Inputs",
+    "attack": "Extraction attack: time/date inputs have special UI",
+    "expected_failure": "lad doesn't understand native date picker UI",
+    "html": "<!DOCTYPE html><html><head></head><body><input type='date' value='2026-04-02'><input type='time' value='14:30'><input type='datetime-local' value='2026-04-02T14:30'><button type='submit'>Submit</button><p>Native date/time pickers have browser-specific UI. lad may not interact correctly.</p></body></html>"
+  },
+  {
+    "name": "Color Input Hidden Behind Label",
+    "attack": "Extraction attack: color input inside label styling",
+    "expected_failure": "lad doesn't recognize color input is interactive",
+    "html": "<!DOCTYPE html><html><head><style>label{display:flex;align-items:center;cursor:pointer}label input[type=color]{margin-right:10px}</style></head><body><label>Pick a color: <input type='color' value='#FF0000'></label><p>Color input is inside label. lad may click the label instead of input.</p></body></html>"
+  }
+]
