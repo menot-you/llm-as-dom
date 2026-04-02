@@ -18,6 +18,7 @@ fn view(elements: Vec<Element>, hint: &str) -> SemanticView {
         visible_text: String::new(),
         state: PageState::Ready,
         element_cap: None,
+        blocked_reason: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn view_with_text(elements: Vec<Element>, hint: &str, text: &str) -> SemanticVie
         visible_text: text.into(),
         state: PageState::Ready,
         element_cap: None,
+        blocked_reason: None,
     }
 }
 
@@ -42,6 +44,7 @@ fn view_with_url(elements: Vec<Element>, hint: &str, url: &str, title: &str) -> 
         visible_text: String::new(),
         state: PageState::Ready,
         element_cap: None,
+        blocked_reason: None,
     }
 }
 

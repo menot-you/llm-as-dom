@@ -5,7 +5,6 @@
 use llm_as_dom::{Error, a11y, backend, pilot, semantic};
 
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 
 use rmcp::handler::server::tool::ToolRouter;
@@ -125,7 +124,9 @@ impl LadServer {
         let browser = self.ensure_browser().await.map_err(mcp_err)?;
         let page = browser.new_page(url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        a11y::wait_for_content(&page, a11y::DEFAULT_WAIT_TIMEOUT)
+            .await
+            .map_err(mcp_err)?;
 
         let view = a11y::extract_semantic_view(&page).await.map_err(mcp_err)?;
         Ok((page, view))
@@ -162,7 +163,9 @@ impl LadServer {
         let browser = self.ensure_browser().await.map_err(mcp_err)?;
         let page = browser.new_page(&p.url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        a11y::wait_for_content(&page, a11y::DEFAULT_WAIT_TIMEOUT)
+            .await
+            .map_err(mcp_err)?;
 
         let backend = backend::ollama::OllamaBackend::new(&self.ollama_url, &self.model);
         let config = pilot::PilotConfig {

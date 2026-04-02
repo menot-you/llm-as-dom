@@ -21,6 +21,7 @@ fn mock_view(elements: Vec<Element>, page_hint: &str) -> SemanticView {
         visible_text: String::new(),
         state: PageState::Ready,
         element_cap: None,
+        blocked_reason: None,
     }
 }
 
@@ -511,5 +512,133 @@ fn test_error_action_failed() {
     assert!(
         msg.contains("element 5 not found"),
         "ActionFailed should contain the detail message"
+    );
+}
+
+// ── Bot-challenge detection tests ──────────────────────────────────
+
+/// Cloudflare "Just a moment" page should be detected as blocked.
+#[test]
+fn test_detect_cloudflare_challenge() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://stackoverflow.com/questions/123".into(),
+        title: "Just a moment...".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        visible_text: "Checking your browser before accessing".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(result.is_some(), "Cloudflare challenge should be detected");
+    assert!(
+        result.unwrap().contains("just a moment"),
+        "reason should mention the title keyword"
+    );
+}
+
+/// Normal page should NOT be detected as blocked.
+#[test]
+fn test_detect_normal_page_not_blocked() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = mock_view(
+        vec![
+            input_element(0, "Email", "email", Some("email"), Some(0)),
+            input_element(1, "Password", "password", Some("pass"), Some(0)),
+            button_element(2, "Sign In", Some(0)),
+        ],
+        "login page",
+    );
+    assert!(
+        detect_bot_challenge(&view).is_none(),
+        "normal login page should not be flagged as blocked"
+    );
+}
+
+/// CAPTCHA text in visible content should trigger detection.
+#[test]
+fn test_detect_captcha_in_text() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com".into(),
+        title: "Example".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        visible_text: "Please complete the CAPTCHA to continue".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(result.is_some(), "CAPTCHA text should trigger detection");
+}
+
+/// Few interactive elements + challenge URL should trigger detection.
+#[test]
+fn test_detect_challenge_url_with_few_elements() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/cdn-cgi/challenge".into(),
+        title: "Example".into(),
+        page_hint: "content page".into(),
+        elements: vec![button_element(0, "Verify", None)],
+        visible_text: String::new(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "challenge URL with few elements should trigger"
+    );
+}
+
+/// Page with many interactive elements and a challenge URL should NOT be blocked.
+#[test]
+fn test_detect_many_elements_not_blocked() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/cdn-cgi/something".into(),
+        title: "Dashboard".into(),
+        page_hint: "form page".into(),
+        elements: vec![
+            input_element(0, "Name", "text", Some("name"), Some(0)),
+            input_element(1, "Email", "email", Some("email"), Some(0)),
+            button_element(2, "Submit", Some(0)),
+        ],
+        visible_text: "Fill out the form".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    assert!(
+        detect_bot_challenge(&view).is_none(),
+        "page with 3+ interactive elements should not be blocked by URL alone"
+    );
+}
+
+/// PageState::Blocked variant serialises and displays correctly.
+#[test]
+fn test_blocked_state_in_prompt() {
+    let mut view = mock_view(vec![], "content page");
+    view.state = PageState::Blocked("Cloudflare challenge".into());
+    view.blocked_reason = Some("Cloudflare challenge".into());
+
+    let prompt = view.to_prompt();
+    assert!(
+        prompt.contains("BLOCKED: Cloudflare challenge"),
+        "prompt should show blocked reason"
+    );
+    assert!(
+        prompt.contains("Blocked"),
+        "prompt should show Blocked state"
     );
 }

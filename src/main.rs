@@ -6,7 +6,6 @@ use futures::StreamExt;
 use llm_as_dom::{Error, a11y, backend, pilot};
 
 use clap::Parser;
-use std::time::Duration;
 
 /// CLI arguments for the `lad` browser pilot.
 #[derive(Parser)]
@@ -43,6 +42,10 @@ struct Cli {
     /// Only extract and print the `SemanticView` (skip pilot loop).
     #[arg(long, default_value_t = false)]
     extract_only: bool,
+
+    /// Timeout in seconds to wait for SPA content to stabilise (default: 5).
+    #[arg(long, default_value_t = a11y::DEFAULT_WAIT_TIMEOUT)]
+    wait_timeout: u64,
 }
 
 #[tokio::main]
@@ -78,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let page = browser.new_page(&cli.url).await?;
     page.wait_for_navigation().await?;
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    a11y::wait_for_content(&page, cli.wait_timeout).await?;
     tracing::info!("page loaded");
 
     if cli.extract_only || cli.goal.is_empty() {

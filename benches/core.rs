@@ -78,6 +78,7 @@ fn login_view() -> SemanticView {
         visible_text: "Login Hacker News".into(),
         state: PageState::Ready,
         element_cap: None,
+        blocked_reason: None,
     }
 }
 
@@ -112,6 +113,7 @@ fn large_view() -> SemanticView {
         visible_text: "This is a complex page with navigation, forms, and buttons. It represents a realistic extraction scenario.".into(),
         state: PageState::Ready,
         element_cap: None,
+        blocked_reason: None,
     }
 }
 

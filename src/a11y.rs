@@ -201,7 +201,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
 
     let page_hint = classify_page(&title, &url, &elements);
 
-    Ok(SemanticView {
+    let mut view = SemanticView {
         url,
         title,
         page_hint,
@@ -209,7 +209,17 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
         visible_text: extraction.visible_text,
         state: PageState::Ready,
         element_cap: extraction.element_cap,
-    })
+        blocked_reason: None,
+    };
+
+    // Detect bot-challenge / CAPTCHA pages after extraction.
+    if let Some(reason) = detect_bot_challenge(&view) {
+        tracing::warn!(reason = %reason, "bot challenge detected");
+        view.state = PageState::Blocked(reason.clone());
+        view.blocked_reason = Some(reason);
+    }
+
+    Ok(view)
 }
 
 /// Raw JS extraction result (mirrors the JS object shape).
@@ -293,4 +303,137 @@ fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
     } else {
         "content page".into()
     }
+}
+
+// ── Bot-challenge detection ────────────────────────────────────────
+
+/// Challenge-page title keywords (Cloudflare, Akamai, generic WAF).
+const CHALLENGE_TITLES: &[&str] = &[
+    "just a moment",
+    "attention required",
+    "access denied",
+    "verify you are human",
+    "please wait",
+    "checking your browser",
+    "one more step",
+    "security check",
+];
+
+/// Challenge-page body text signals.
+const CHALLENGE_TEXTS: &[&str] = &[
+    "checking your browser",
+    "captcha",
+    "security check",
+    "please verify",
+    "enable javascript and cookies",
+    "ray id",
+    "cf-browser-verification",
+    "hcaptcha",
+    "recaptcha",
+    "challenge-platform",
+];
+
+/// Detect whether a [`SemanticView`] looks like a bot-challenge or CAPTCHA page.
+///
+/// Returns `Some(reason)` when a challenge is detected, `None` otherwise.
+pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
+    let lower_title = view.title.to_lowercase();
+    let lower_text = view.visible_text.to_lowercase();
+
+    // 1. Title match
+    for kw in CHALLENGE_TITLES {
+        if lower_title.contains(kw) {
+            return Some(format!("title matches challenge keyword: \"{kw}\""));
+        }
+    }
+
+    // 2. Visible text match
+    for kw in CHALLENGE_TEXTS {
+        if lower_text.contains(kw) {
+            return Some(format!("page text matches challenge keyword: \"{kw}\""));
+        }
+    }
+
+    // 3. Very few interactive elements + challenge-like URL or title
+    let interactive_count = view
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                ElementKind::Button
+                    | ElementKind::Input
+                    | ElementKind::Textarea
+                    | ElementKind::Select
+            )
+        })
+        .count();
+
+    if interactive_count < 3 {
+        let lower_url = view.url.to_lowercase();
+        let has_challenge_signal = lower_url.contains("challenge")
+            || lower_url.contains("captcha")
+            || lower_url.contains("cdn-cgi")
+            || lower_title.contains("cloudflare");
+        if has_challenge_signal {
+            return Some(format!(
+                "few interactive elements ({interactive_count}) with challenge URL/title"
+            ));
+        }
+    }
+
+    None
+}
+
+// ── SPA wait strategy ──────────────────────────────────────────────
+
+/// Default SPA wait timeout in seconds.
+pub const DEFAULT_WAIT_TIMEOUT: u64 = 5;
+
+/// Wait for interactive content to appear and stabilise on a page.
+///
+/// Polls every 200ms. Returns early once the interactive element count
+/// is > 0 and unchanged for two consecutive checks (content stable).
+/// If `timeout_secs` elapses with zero elements, returns anyway
+/// (the page may be a bot-challenge or truly empty).
+pub async fn wait_for_content(page: &Page, timeout_secs: u64) -> Result<(), crate::Error> {
+    use std::time::{Duration, Instant};
+
+    let poll_interval = Duration::from_millis(200);
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+
+    let js = r#"document.querySelectorAll('input, button, a[href], select, textarea, [role="button"]').length"#;
+
+    let mut prev_count: Option<i64> = None;
+    let mut stable_hits = 0u32;
+
+    while Instant::now() < deadline {
+        let count: i64 = page
+            .evaluate(js)
+            .await
+            .ok()
+            .and_then(|v| v.into_value().ok())
+            .unwrap_or(0);
+
+        if count > 0 {
+            if prev_count == Some(count) {
+                stable_hits += 1;
+                if stable_hits >= 2 {
+                    tracing::info!(elements = count, "content stable after polling");
+                    return Ok(());
+                }
+            } else {
+                stable_hits = 0;
+            }
+        }
+
+        prev_count = Some(count);
+        tokio::time::sleep(poll_interval).await;
+    }
+
+    tracing::info!(
+        final_count = prev_count.unwrap_or(0),
+        "wait_for_content timeout reached"
+    );
+    Ok(())
 }

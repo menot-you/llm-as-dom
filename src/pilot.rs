@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 use crate::heuristics;
-use crate::semantic::SemanticView;
+use crate::semantic::{PageState, SemanticView};
 
 /// A single action the pilot can take on the page.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +181,36 @@ pub async fn run_pilot(
             tokens = view.estimated_tokens(),
             "observed"
         );
+
+        // 1b. If the page is blocked (CAPTCHA / WAF), escalate immediately.
+        if let PageState::Blocked(ref reason) = view.state {
+            tracing::warn!(step = step_idx, reason = %reason, "page blocked — escalating");
+            if let Some(b64) = take_screenshot(page).await {
+                screenshots.push(b64);
+            }
+            let final_action = Action::Escalate {
+                reason: format!("page blocked: {reason}"),
+            };
+            let step = Step {
+                index: step_idx,
+                observation: view,
+                action: final_action.clone(),
+                source: DecisionSource::Heuristic,
+                confidence: 1.0,
+                duration: step_start.elapsed(),
+            };
+            history.push(step);
+            return Ok(PilotResult {
+                success: false,
+                steps: history,
+                final_action,
+                total_duration: run_start.elapsed(),
+                heuristic_hits,
+                llm_hits,
+                retry_count: total_retries,
+                screenshots,
+            });
+        }
 
         // 2. Decide (heuristics first, LLM fallback with retry)
         let (action, source, confidence) = decide_with_retry(
