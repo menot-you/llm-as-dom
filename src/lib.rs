@@ -8,6 +8,7 @@ pub mod backend;
 pub mod error;
 pub mod heuristics;
 pub mod pilot;
+pub mod playbook;
 pub mod semantic;
 
 pub use error::Error;
