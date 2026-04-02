@@ -19,6 +19,10 @@ pub enum Error {
     #[error("timeout")]
     Timeout,
 
+    /// An action execution failed (element not found, stale DOM, etc.).
+    #[error("action failed: {0}")]
+    ActionFailed(String),
+
     /// Standard I/O error.
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

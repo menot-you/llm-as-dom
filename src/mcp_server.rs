@@ -169,6 +169,7 @@ impl LadServer {
             goal: p.goal.clone(),
             max_steps: p.max_steps,
             use_heuristics: true,
+            max_retries_per_step: 2,
         };
 
         let result = pilot::run_pilot(&page, &backend, &config)

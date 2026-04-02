@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             goal: cli.goal.clone(),
             max_steps: cli.max_steps,
             use_heuristics: true,
+            max_retries_per_step: 2,
         };
 
         let result = pilot::run_pilot(&page, backend_impl.as_ref(), &config).await?;

@@ -90,6 +90,8 @@ pub struct PilotConfig {
     pub max_steps: u32,
     /// Whether to try heuristics before the LLM (default: `true`).
     pub use_heuristics: bool,
+    /// Maximum retries per step when an action fails (default: 2).
+    pub max_retries_per_step: u32,
 }
 
 impl Default for PilotConfig {
@@ -98,6 +100,7 @@ impl Default for PilotConfig {
             goal: String::new(),
             max_steps: 10,
             use_heuristics: true,
+            max_retries_per_step: 2,
         }
     }
 }
@@ -117,6 +120,8 @@ pub struct PilotResult {
     pub heuristic_hits: u32,
     /// Number of steps resolved by the LLM.
     pub llm_hits: u32,
+    /// Total number of retries across all steps.
+    pub retry_count: u32,
 }
 
 /// Run the pilot loop: observe -> heuristics -> LLM fallback -> act -> repeat.
@@ -205,6 +210,7 @@ pub async fn run_pilot(
                 total_duration: run_start.elapsed(),
                 heuristic_hits,
                 llm_hits,
+                retry_count: 0,
             });
         }
 
@@ -226,6 +232,7 @@ pub async fn run_pilot(
         total_duration: run_start.elapsed(),
         heuristic_hits,
         llm_hits,
+        retry_count: 0,
     })
 }
 

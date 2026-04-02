@@ -94,8 +94,8 @@ pub fn try_form_fill(
                     reason: "username/email field matched".into(),
                 });
             }
-        } else if el.input_type.as_deref() == Some("text") {
-            if let Some(ref user) = username {
+        } else if el.input_type.as_deref() == Some("text")
+            && let Some(ref user) = username {
                 return Some(super::HeuristicResult {
                     action: Some(Action::Type {
                         element: el.id,
@@ -109,7 +109,6 @@ pub fn try_form_fill(
                     reason: "generic text field, guessing username".into(),
                 });
             }
-        }
     }
 
     None

@@ -44,7 +44,7 @@ pub fn try_navigation(
             continue;
         };
 
-        if best.map_or(true, |(_, s)| score > s) {
+        if best.is_none_or(|(_, s)| score > s) {
             best = Some((el.id, score));
         }
     }

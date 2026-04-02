@@ -87,7 +87,7 @@ pub fn extract_kv_pairs(goal: &str) -> Vec<(String, String)> {
         let after = &remaining[eq_pos + 1..];
         let value = if after.starts_with('"') {
             // Quoted value
-            let end = after[1..].find('"').map(|i| i + 2).unwrap_or(after.len());
+            let end = after.get(1..).and_then(|s| s.find('"')).map(|i| i + 2).unwrap_or(after.len());
             after[1..end.saturating_sub(1)].to_string()
         } else {
             // Unquoted: take until whitespace, but stop before a word containing '='
@@ -113,7 +113,7 @@ pub fn extract_kv_pairs(goal: &str) -> Vec<(String, String)> {
         );
         let advance = eq_pos + 1 + {
             if after.starts_with('"') {
-                after[1..].find('"').map(|i| i + 2).unwrap_or(after.len())
+                after.get(1..).and_then(|s| s.find('"')).map(|i| i + 2).unwrap_or(after.len())
             } else {
                 let mut end = after.len();
                 for (i, chunk) in after.split_whitespace().enumerate() {
