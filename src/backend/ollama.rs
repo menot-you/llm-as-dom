@@ -102,13 +102,13 @@ fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String {
 
     prompt.push_str("\nRespond with ONLY a JSON object. Valid actions:\n");
     prompt.push_str(r#"{"action":"type","element":<id>,"value":"<text>","reasoning":"<why>"}"#);
-    prompt.push_str("\n");
+    prompt.push('\n');
     prompt.push_str(r#"{"action":"click","element":<id>,"reasoning":"<why>"}"#);
-    prompt.push_str("\n");
+    prompt.push('\n');
     prompt.push_str(r#"{"action":"wait","reasoning":"<why>"}"#);
-    prompt.push_str("\n");
+    prompt.push('\n');
     prompt.push_str(r#"{"action":"done","result":{...},"reasoning":"<why>"}"#);
-    prompt.push_str("\n");
+    prompt.push('\n');
     prompt.push_str(r#"{"action":"escalate","reason":"<why>"}"#);
     prompt.push_str("\n\nJSON:\n");
 

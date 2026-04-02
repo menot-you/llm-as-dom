@@ -1,4 +1,5 @@
-//! Browser pilot: observe → heuristics → LLM fallback → act loop.
+//! Browser pilot: observe -> heuristics -> LLM fallback -> act loop.
+//!
 //! Heuristics resolve ~70-90% of actions in 10ms. LLM only for ambiguity.
 
 use async_trait::async_trait;
@@ -8,16 +9,23 @@ use std::time::{Duration, Instant};
 use crate::heuristics;
 use crate::semantic::SemanticView;
 
-/// A single action the pilot can take.
+/// A single action the pilot can take on the page.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
+    /// Click an interactive element by its `data-lad-id`.
     Click { element: u32, reasoning: String },
+    /// Type text into an input/textarea by its `data-lad-id`.
     Type { element: u32, value: String, reasoning: String },
+    /// Select an option in a `<select>` element.
     Select { element: u32, value: String, reasoning: String },
+    /// Scroll the viewport in a given direction.
     Scroll { direction: String, reasoning: String },
+    /// Pause and wait for the page to settle.
     Wait { reasoning: String },
+    /// Goal achieved -- includes the structured result.
     Done { result: serde_json::Value, reasoning: String },
+    /// Cannot proceed -- escalate to the caller.
     Escalate { reason: String },
 }
 
@@ -42,6 +50,7 @@ pub struct Step {
 
 /// LLM-agnostic backend for pilot decisions.
 #[async_trait]
+#[allow(unused)]
 pub trait PilotBackend: Send + Sync {
     async fn decide(
         &self,
@@ -57,7 +66,6 @@ pub trait PilotBackend: Send + Sync {
 pub struct PilotConfig {
     pub goal: String,
     pub max_steps: u32,
-    pub step_timeout: Duration,
     /// Use heuristics before LLM (default: true)
     pub use_heuristics: bool,
 }
@@ -67,7 +75,6 @@ impl Default for PilotConfig {
         Self {
             goal: String::new(),
             max_steps: 10,
-            step_timeout: Duration::from_secs(30),
             use_heuristics: true,
         }
     }
@@ -151,7 +158,7 @@ pub async fn run_pilot(
         }
 
         let step = Step {
-            index: step_idx as u32,
+            index: step_idx,
             observation: view,
             action: action.clone(),
             source,

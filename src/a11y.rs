@@ -1,4 +1,5 @@
 //! Accessibility tree extraction via JS injection.
+//!
 //! Falls back from CDP Accessibility API to direct JS DOM walking
 //! because chromiumoxide's CDP bindings have serde issues with some AX nodes.
 
@@ -7,7 +8,10 @@ use serde::Deserialize;
 
 use crate::semantic::{Element, ElementKind, PageState, SemanticView};
 
-/// Extract page structure via JS and compress to SemanticView.
+/// Extract page structure via JS and compress to a [`SemanticView`].
+///
+/// Stamps each interactive element with a `data-lad-id` attribute so that
+/// subsequent actions can target elements by stable numeric ID.
 pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::Error> {
     let url = page.url().await?.unwrap_or_else(|| "unknown".into());
     let title = page.get_title().await?.unwrap_or_default();
@@ -120,6 +124,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
     })
 }
 
+/// Raw JS extraction result (mirrors the JS object shape).
 #[derive(Deserialize)]
 struct JsExtraction {
     elements: Vec<JsElement>,
@@ -127,6 +132,7 @@ struct JsExtraction {
     visible_text: String,
 }
 
+/// A single element as returned by the JS extractor.
 #[derive(Deserialize)]
 struct JsElement {
     id: u32,
@@ -141,19 +147,21 @@ struct JsElement {
     disabled: bool,
 }
 
+/// Map a JS kind string to the strongly-typed [`ElementKind`].
 fn parse_kind(s: &str) -> ElementKind {
     match s {
         "button" => ElementKind::Button,
         "input" => ElementKind::Input,
         "link" => ElementKind::Link,
         "select" => ElementKind::Select,
-        "textarea" => ElementKind::Input,
+        "textarea" => ElementKind::Textarea,
         "checkbox" => ElementKind::Checkbox,
         "radio" => ElementKind::Radio,
         _ => ElementKind::Other,
     }
 }
 
+/// Classify the page type from its title, URL, and element composition.
 fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
     let lower_title = title.to_lowercase();
     let lower_url = url.to_lowercase();

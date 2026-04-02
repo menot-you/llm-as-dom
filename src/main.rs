@@ -1,3 +1,7 @@
+//! CLI binary for the LLM-as-DOM browser pilot.
+//!
+//! Usage: `lad --url <URL> [--goal <GOAL>] [--visible] [--extract-only]`
+
 use futures::StreamExt;
 mod a11y;
 mod backend;
@@ -11,34 +15,35 @@ pub use error::Error;
 use clap::Parser;
 use std::time::Duration;
 
+/// CLI arguments for the `lad` browser pilot.
 #[derive(Parser)]
 #[command(name = "lad", about = "LLM-as-DOM: AI browser pilot")]
 struct Cli {
-    /// URL to navigate to
+    /// URL to navigate to.
     #[arg(short, long)]
     url: String,
 
-    /// Goal for the pilot (natural language)
+    /// Goal for the pilot (natural language).
     #[arg(short, long, default_value = "")]
     goal: String,
 
-    /// Show browser window (default: headless)
+    /// Show browser window (default: headless).
     #[arg(long, default_value_t = false)]
     visible: bool,
 
-    /// Ollama base URL
+    /// Ollama base URL.
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
 
-    /// LLM model name
+    /// LLM model name.
     #[arg(long, default_value = "qwen3:8b")]
     model: String,
 
-    /// Max pilot steps
+    /// Max pilot steps before giving up.
     #[arg(long, default_value_t = 10)]
     max_steps: u32,
 
-    /// Only extract and print SemanticView (no pilot)
+    /// Only extract and print the `SemanticView` (skip pilot loop).
     #[arg(long, default_value_t = false)]
     extract_only: bool,
 }
@@ -67,17 +72,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg("--disable-dev-shm-usage")
         .arg("--window-size=1280,800");
 
-    let config = builder.build().map_err(|e| Error::BrowserStr(e))?;
+    let config = builder.build().map_err(Error::BrowserStr)?;
     let (browser, mut handler) = chromiumoxide::Browser::launch(config)
         .await
         .map_err(|e| Error::BrowserStr(format!("{e}")))?;
 
     let handle = tokio::spawn(async move {
-        loop {
-            if handler.next().await.is_none() {
-                break;
-            }
-        }
+        while handler.next().await.is_some() {}
     });
 
     let page = browser.new_page(&cli.url).await?;
@@ -101,7 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = pilot::PilotConfig {
             goal: cli.goal.clone(),
             max_steps: cli.max_steps,
-            step_timeout: Duration::from_secs(30),
             use_heuristics: true,
         };
 
@@ -109,7 +109,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("\n=== Pilot Result ===");
         println!("Success: {}", result.success);
-        println!("Steps: {} (heuristic: {}, llm: {})", result.steps.len(), result.heuristic_hits, result.llm_hits);
+        println!(
+            "Steps: {} (heuristic: {}, llm: {})",
+            result.steps.len(),
+            result.heuristic_hits,
+            result.llm_hits
+        );
         println!("Duration: {:.1}s", result.total_duration.as_secs_f64());
         println!("\nFinal: {:?}", result.final_action);
 

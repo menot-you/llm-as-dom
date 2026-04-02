@@ -24,24 +24,18 @@ pub fn try_resolve(
     let goal_lower = goal.to_lowercase();
 
     // Strategy 1: Form fill by goal parsing
-    if let Some(result) = try_form_fill(view, &goal_lower, filled_fields) {
-        if result.confidence >= CONFIDENCE_THRESHOLD {
+    if let Some(result) = try_form_fill(view, &goal_lower, filled_fields) && result.confidence >= CONFIDENCE_THRESHOLD {
             return result;
-        }
     }
 
     // Strategy 2: Button click by goal keywords
-    if let Some(result) = try_button_click(view, &goal_lower, filled_fields) {
-        if result.confidence >= CONFIDENCE_THRESHOLD {
+    if let Some(result) = try_button_click(view, &goal_lower, filled_fields) && result.confidence >= CONFIDENCE_THRESHOLD {
             return result;
-        }
     }
 
     // Strategy 3: Goal completion detection
-    if let Some(result) = try_detect_done(view, &goal_lower) {
-        if result.confidence >= CONFIDENCE_THRESHOLD {
+    if let Some(result) = try_detect_done(view, &goal_lower) && result.confidence >= CONFIDENCE_THRESHOLD {
             return result;
-        }
     }
 
     HeuristicResult {
@@ -251,10 +245,11 @@ fn extract_credential(goal: &str, prefixes: &[&str]) -> Option<String> {
         if let Some(pos) = goal.find(prefix) {
             let after = &goal[pos + prefix.len()..];
             let value = after.split_whitespace().next();
-            if let Some(v) = value {
-                if !v.is_empty() && !["with", "and", "then", "password", "pass"].contains(&v) {
-                    return Some(v.to_string());
-                }
+            if let Some(v) = value
+                && !v.is_empty()
+                && !["with", "and", "then", "password", "pass"].contains(&v)
+            {
+                return Some(v.to_string());
             }
         }
     }

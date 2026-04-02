@@ -1,5 +1,6 @@
-//! lad-mcp: MCP server exposing the browser pilot as semantic tools.
-//! 3 tools: lad_browse, lad_extract, lad_assert
+//! `lad-mcp`: MCP server exposing the browser pilot as semantic tools.
+//!
+//! Provides three tools: `lad_browse`, `lad_extract`, `lad_assert`.
 
 mod a11y;
 mod backend;
@@ -25,46 +26,61 @@ use serde::Deserialize;
 
 // ── Tool parameter types ───────────────────────────────────────────
 
+/// Parameters for the `lad_browse` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BrowseParams {
-    /// URL to navigate to
+    /// URL to navigate to.
     url: String,
-    /// Goal in natural language (e.g. "login as user@test.com with password secret123")
+    /// Goal in natural language (e.g. "login as user@test.com with password secret123").
     goal: String,
-    /// Max steps before giving up (default: 10)
+    /// Max steps before giving up (default: 10).
     #[serde(default = "default_max_steps")]
     max_steps: u32,
 }
-fn default_max_steps() -> u32 { 10 }
 
+/// Default step limit for browsing goals.
+fn default_max_steps() -> u32 {
+    10
+}
+
+/// Parameters for the `lad_extract` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ExtractParams {
-    /// URL to navigate to and extract from
+    /// URL to navigate to and extract from.
     url: String,
-    /// What to extract (e.g. "product prices", "form fields", "navigation links")
+    /// What to extract (e.g. "product prices", "form fields", "navigation links").
     what: String,
 }
 
+/// Parameters for the `lad_assert` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct AssertParams {
-    /// URL to navigate to and check
+    /// URL to navigate to and check.
     url: String,
-    /// Assertions to verify (e.g. ["has login form", "title contains Dashboard", "has button Sign In"])
+    /// Assertions to verify (e.g. ["has login form", "title contains Dashboard"]).
     assertions: Vec<String>,
 }
 
 // ── Server state ───────────────────────────────────────────────────
 
+/// MCP server that manages a headless browser and exposes pilot tools.
 #[derive(Clone)]
+#[allow(dead_code)] // tool_router is used internally by rmcp macros
 struct LadServer {
+    /// Router that dispatches MCP tool calls to handler methods.
     tool_router: ToolRouter<Self>,
+    /// Shared browser instance (lazy-initialised on first tool call).
     browser: Arc<Mutex<Option<Arc<chromiumoxide::Browser>>>>,
+    /// Handle to the CDP event-loop task.
     handler_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Ollama API base URL.
     ollama_url: String,
+    /// Model name to use for LLM decisions.
     model: String,
 }
 
 impl LadServer {
+    /// Create a new server reading config from environment variables.
     fn new() -> Self {
         Self {
             tool_router: Self::tool_router(),
@@ -72,15 +88,15 @@ impl LadServer {
             handler_handle: Arc::new(Mutex::new(None)),
             ollama_url: std::env::var("LAD_OLLAMA_URL")
                 .unwrap_or_else(|_| "http://localhost:11434".into()),
-            model: std::env::var("LAD_MODEL")
-                .unwrap_or_else(|_| "qwen3:8b".into()),
+            model: std::env::var("LAD_MODEL").unwrap_or_else(|_| "qwen3:8b".into()),
         }
     }
 
+    /// Return an existing browser or launch a new headless instance.
     async fn ensure_browser(&self) -> Result<Arc<chromiumoxide::Browser>, Error> {
         let mut browser_lock = self.browser.lock().await;
         if let Some(b) = browser_lock.as_ref() {
-            return Ok(b.clone());
+            return Ok(Arc::clone(b));
         }
 
         tracing::info!("launching headless browser");
@@ -91,7 +107,7 @@ impl LadServer {
             .arg("--disable-dev-shm-usage")
             .arg("--window-size=1280,800")
             .build()
-            .map_err(|e| Error::BrowserStr(e))?;
+            .map_err(Error::BrowserStr)?;
 
         let (browser, mut handler) = chromiumoxide::Browser::launch(config)
             .await
@@ -99,20 +115,16 @@ impl LadServer {
 
         let handle = tokio::spawn(async move {
             use futures::StreamExt;
-            loop {
-                if handler.next().await.is_none() {
-                    break;
-                }
-            }
+            while handler.next().await.is_some() {}
         });
 
-        
         let b = Arc::new(browser);
-        *browser_lock = Some(b.clone());
+        *browser_lock = Some(Arc::clone(&b));
         *self.handler_handle.lock().await = Some(handle);
-        Ok(browser_lock.as_ref().unwrap().clone())
+        Ok(b)
     }
 
+    /// Navigate to a URL and return the page handle with its semantic view.
     async fn navigate_and_extract(
         &self,
         url: &str,
@@ -127,8 +139,14 @@ impl LadServer {
     }
 }
 
+/// Convert any `Display` error into an MCP internal-error response.
 fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
     rmcp::ErrorData::internal_error(e.to_string(), None)
+}
+
+/// Serialize a value to pretty JSON, returning a fallback on failure.
+fn to_pretty_json(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
 }
 
 // ── Tool implementations ───────────────────────────────────────────
@@ -155,7 +173,6 @@ impl LadServer {
         let config = pilot::PilotConfig {
             goal: p.goal.clone(),
             max_steps: p.max_steps,
-            step_timeout: Duration::from_secs(30),
             use_heuristics: true,
         };
 
@@ -181,7 +198,7 @@ impl LadServer {
         });
 
         Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&output).unwrap(),
+            to_pretty_json(&output),
         )]))
     }
 
@@ -210,7 +227,7 @@ impl LadServer {
         });
 
         Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&output).unwrap(),
+            to_pretty_json(&output),
         )]))
     }
 
@@ -236,40 +253,72 @@ impl LadServer {
             }));
         }
 
-        let all_pass = results.iter().all(|r| r["pass"].as_bool().unwrap_or(false));
+        let all_pass = results
+            .iter()
+            .all(|r| r["pass"].as_bool().unwrap_or(false));
+
+        let output = serde_json::json!({
+            "url": view.url,
+            "title": view.title,
+            "all_pass": all_pass,
+            "results": results,
+        });
 
         Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&serde_json::json!({
-                "url": view.url,
-                "title": view.title,
-                "all_pass": all_pass,
-                "results": results,
-            })).unwrap(),
+            to_pretty_json(&output),
         )]))
     }
 }
 
+/// Evaluate a single assertion against a semantic view.
+///
+/// Supported patterns:
+/// - `has login form` / `has login`
+/// - `has password`
+/// - `title contains <text>`
+/// - `url contains <text>`
+/// - `has button <label>`
+/// - `has link <label>`
+/// - `has input <name>`
+/// - Fallback: all words present in combined page text.
 fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: &str) -> bool {
-    let full_text = format!("{} {} {} {}", view.url, view.title, view.visible_text, prompt_text).to_lowercase();
+    let full_text = format!(
+        "{} {} {} {}",
+        view.url, view.title, view.visible_text, prompt_text
+    )
+    .to_lowercase();
 
     if assertion.contains("has login form") || assertion.contains("has login") {
         return view.page_hint == "login page";
     }
     if assertion.contains("has password") {
-        return view.elements.iter().any(|e| e.input_type.as_deref() == Some("password"));
+        return view
+            .elements
+            .iter()
+            .any(|e| e.input_type.as_deref() == Some("password"));
     }
     if let Some(rest) = assertion.strip_prefix("title contains ") {
-        return view.title.to_lowercase().contains(rest.trim().trim_matches('"'));
+        return view
+            .title
+            .to_lowercase()
+            .contains(rest.trim().trim_matches('"'));
     }
     if let Some(rest) = assertion.strip_prefix("url contains ") {
-        return view.url.to_lowercase().contains(rest.trim().trim_matches('"'));
+        return view
+            .url
+            .to_lowercase()
+            .contains(rest.trim().trim_matches('"'));
     }
     if let Some(rest) = assertion.strip_prefix("has button ") {
         let label = rest.trim().trim_matches('"').to_lowercase();
         return view.elements.iter().any(|e| {
             e.kind == semantic::ElementKind::Button
                 && (e.label.to_lowercase().contains(&label)
-                    || e.value.as_deref().unwrap_or("").to_lowercase().contains(&label))
+                    || e.value
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&label))
         });
     }
     if let Some(rest) = assertion.strip_prefix("has link ") {
@@ -282,7 +331,11 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
         let name = rest.trim().trim_matches('"').to_lowercase();
         return view.elements.iter().any(|e| {
             e.kind == semantic::ElementKind::Input
-                && (e.name.as_deref().unwrap_or("").to_lowercase().contains(&name)
+                && (e.name
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&name)
                     || e.label.to_lowercase().contains(&name))
         });
     }
