@@ -2,6 +2,7 @@ use futures::StreamExt;
 mod a11y;
 mod backend;
 mod error;
+mod heuristics;
 mod pilot;
 mod semantic;
 
@@ -101,20 +102,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             goal: cli.goal.clone(),
             max_steps: cli.max_steps,
             step_timeout: Duration::from_secs(30),
+            use_heuristics: true,
         };
 
         let result = pilot::run_pilot(&page, &backend, &config).await?;
 
         println!("\n=== Pilot Result ===");
         println!("Success: {}", result.success);
-        println!("Steps: {}", result.steps.len());
+        println!("Steps: {} (heuristic: {}, llm: {})", result.steps.len(), result.heuristic_hits, result.llm_hits);
         println!("Duration: {:.1}s", result.total_duration.as_secs_f64());
         println!("\nFinal: {:?}", result.final_action);
 
         for step in &result.steps {
             println!(
-                "  [{}] {:?} ({:.1}s)",
-                step.index, step.action, step.duration.as_secs_f64()
+                "  [{}] {:?} {:?} ({:.1}s)",
+                step.index, step.source, step.action, step.duration.as_secs_f64()
             );
         }
     }

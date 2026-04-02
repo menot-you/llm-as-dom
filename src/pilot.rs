@@ -1,10 +1,11 @@
-//! Browser pilot: observe → decide → act loop.
-//! LLM-agnostic via the PilotBackend trait.
+//! Browser pilot: observe → heuristics → LLM fallback → act loop.
+//! Heuristics resolve ~70-90% of actions in 10ms. LLM only for ambiguity.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+use crate::heuristics;
 use crate::semantic::SemanticView;
 
 /// A single action the pilot can take.
@@ -20,19 +21,28 @@ pub enum Action {
     Escalate { reason: String },
 }
 
+/// How the action was resolved.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionSource {
+    Heuristic,
+    Llm,
+}
+
 /// A single step in the pilot's action history.
 #[derive(Debug, Clone, Serialize)]
 pub struct Step {
     pub index: u32,
     pub observation: SemanticView,
     pub action: Action,
+    pub source: DecisionSource,
+    pub confidence: f32,
     pub duration: Duration,
 }
 
 /// LLM-agnostic backend for pilot decisions.
 #[async_trait]
 pub trait PilotBackend: Send + Sync {
-    /// Given a semantic view, goal, and action history, decide the next action.
     async fn decide(
         &self,
         view: &SemanticView,
@@ -40,7 +50,6 @@ pub trait PilotBackend: Send + Sync {
         history: &[Step],
     ) -> Result<Action, crate::Error>;
 
-    /// Backend name for logging.
     fn name(&self) -> &str;
 }
 
@@ -49,6 +58,8 @@ pub struct PilotConfig {
     pub goal: String,
     pub max_steps: u32,
     pub step_timeout: Duration,
+    /// Use heuristics before LLM (default: true)
+    pub use_heuristics: bool,
 }
 
 impl Default for PilotConfig {
@@ -57,6 +68,7 @@ impl Default for PilotConfig {
             goal: String::new(),
             max_steps: 10,
             step_timeout: Duration::from_secs(30),
+            use_heuristics: true,
         }
     }
 }
@@ -68,9 +80,11 @@ pub struct PilotResult {
     pub steps: Vec<Step>,
     pub final_action: Action,
     pub total_duration: Duration,
+    pub heuristic_hits: u32,
+    pub llm_hits: u32,
 }
 
-/// Run the pilot loop: observe → decide → act → repeat.
+/// Run the pilot loop: observe → heuristics → LLM fallback → act → repeat.
 pub async fn run_pilot(
     page: &chromiumoxide::Page,
     backend: &dyn PilotBackend,
@@ -78,40 +92,74 @@ pub async fn run_pilot(
 ) -> Result<PilotResult, crate::Error> {
     let run_start = Instant::now();
     let mut history: Vec<Step> = Vec::new();
+    let mut filled_fields: Vec<u32> = Vec::new();
+    let mut heuristic_hits: u32 = 0;
+    let mut llm_hits: u32 = 0;
 
     for step_idx in 0..config.max_steps {
         let step_start = Instant::now();
 
-        // 1. Observe: extract semantic view
+        // 1. Observe: extract semantic view (re-stamps ghost IDs)
         let view = crate::a11y::extract_semantic_view(page).await?;
-        let token_est = view.estimated_tokens();
         tracing::info!(
             step = step_idx,
             elements = view.elements.len(),
-            tokens = token_est,
+            tokens = view.estimated_tokens(),
             "observed"
         );
 
-        // 2. Decide: ask backend for next action
-        let action = backend.decide(&view, &config.goal, &history).await?;
+        // 2. Decide: heuristics first, LLM fallback
+        let (action, source, confidence) = if config.use_heuristics {
+            let h = heuristics::try_resolve(&view, &config.goal, &filled_fields);
+            if let Some(action) = h.action {
+                tracing::info!(
+                    step = step_idx,
+                    source = "heuristic",
+                    confidence = h.confidence,
+                    reason = %h.reason,
+                    "heuristic matched"
+                );
+                (action, DecisionSource::Heuristic, h.confidence)
+            } else {
+                tracing::info!(step = step_idx, "heuristic miss — falling back to LLM");
+                let action = backend.decide(&view, &config.goal, &history).await?;
+                (action, DecisionSource::Llm, 0.5)
+            }
+        } else {
+            let action = backend.decide(&view, &config.goal, &history).await?;
+            (action, DecisionSource::Llm, 0.5)
+        };
+
         let step_duration = step_start.elapsed();
+
+        match source {
+            DecisionSource::Heuristic => heuristic_hits += 1,
+            DecisionSource::Llm => llm_hits += 1,
+        }
 
         tracing::info!(
             step = step_idx,
-            backend = backend.name(),
+            source = ?source,
             action = ?action,
             duration_ms = step_duration.as_millis() as u64,
             "decided"
         );
 
+        // Track filled fields for heuristic state
+        if let Action::Type { element, .. } = &action {
+            filled_fields.push(*element);
+        }
+
         let step = Step {
             index: step_idx as u32,
             observation: view,
             action: action.clone(),
+            source,
+            confidence,
             duration: step_duration,
         };
 
-        // 3. Check for terminal actions before executing
+        // 3. Check for terminal actions
         match &action {
             Action::Done { .. } | Action::Escalate { .. } => {
                 history.push(step);
@@ -120,6 +168,8 @@ pub async fn run_pilot(
                     steps: history,
                     final_action: action,
                     total_duration: run_start.elapsed(),
+                    heuristic_hits,
+                    llm_hits,
                 });
             }
             _ => {}
@@ -133,7 +183,6 @@ pub async fn run_pilot(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    // Max steps reached
     let final_action = Action::Escalate {
         reason: format!("max steps ({}) reached", config.max_steps),
     };
@@ -142,6 +191,8 @@ pub async fn run_pilot(
         steps: history,
         final_action,
         total_duration: run_start.elapsed(),
+        heuristic_hits,
+        llm_hits,
     })
 }
 
@@ -149,7 +200,6 @@ pub async fn run_pilot(
 async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(), crate::Error> {
     match action {
         Action::Click { element, .. } => {
-            // Use JS to click by our assigned ghost-id stored in a data attribute
             let js = format!(
                 r#"document.querySelector('[data-lad-id="{}"]')?.click()"#,
                 element
@@ -197,9 +247,7 @@ async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(
         Action::Wait { .. } => {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
-        Action::Done { .. } | Action::Escalate { .. } => {
-            // Terminal — no browser action needed
-        }
+        Action::Done { .. } | Action::Escalate { .. } => {}
     }
     Ok(())
 }
