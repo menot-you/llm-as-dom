@@ -4,9 +4,11 @@
 //! and uses heuristics + a cheap LLM to accomplish goals autonomously.
 
 pub mod a11y;
+pub mod audit;
 pub mod backend;
 pub mod error;
 pub mod heuristics;
+pub mod locate;
 pub mod pilot;
 pub mod playbook;
 pub mod semantic;
