@@ -75,11 +75,7 @@ fn in_target_form(el: &crate::semantic::Element, target: Option<u32>) -> bool {
 }
 
 /// Parse goal for credentials and fill form fields.
-fn try_form_fill(
-    view: &SemanticView,
-    goal: &str,
-    acted_on: &[u32],
-) -> Option<HeuristicResult> {
+fn try_form_fill(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Option<HeuristicResult> {
     let target = target_form(view, goal);
 
     // Extract credentials from goal text
@@ -163,11 +159,7 @@ fn try_form_fill(
 }
 
 /// Find a submit/login button to click.
-fn try_button_click(
-    view: &SemanticView,
-    goal: &str,
-    acted_on: &[u32],
-) -> Option<HeuristicResult> {
+fn try_button_click(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Option<HeuristicResult> {
     let target = target_form(view, goal);
 
     // Only click submit after at least one field is filled
@@ -180,9 +172,7 @@ fn try_button_click(
         .elements
         .iter()
         .filter(|e| {
-            e.kind == ElementKind::Input
-                && !acted_on.contains(&e.id)
-                && in_target_form(e, target)
+            e.kind == ElementKind::Input && !acted_on.contains(&e.id) && in_target_form(e, target)
         })
         .count();
 

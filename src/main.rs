@@ -3,14 +3,7 @@
 //! Usage: `lad --url <URL> [--goal <GOAL>] [--visible] [--extract-only]`
 
 use futures::StreamExt;
-mod a11y;
-mod backend;
-mod error;
-mod heuristics;
-mod pilot;
-mod semantic;
-
-pub use error::Error;
+use llm_as_dom::{Error, a11y, backend, pilot};
 
 use clap::Parser;
 use std::time::Duration;
@@ -31,7 +24,11 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     visible: bool,
 
-    /// Ollama base URL.
+    /// LLM backend: "ollama" or "zai".
+    #[arg(long, default_value = "ollama")]
+    backend: String,
+
+    /// Ollama base URL (only for --backend ollama).
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
 
@@ -95,7 +92,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n=== JSON ===\n");
         println!("{}", serde_json::to_string_pretty(&view)?);
     } else {
-        let backend = backend::ollama::OllamaBackend::new(&cli.ollama_url, &cli.model);
+        let backend_impl: Box<dyn pilot::PilotBackend> = match cli.backend.as_str() {
+            "zai" => Box::new(backend::zai::ZaiBackend::new("", &cli.model)),
+            _ => Box::new(backend::ollama::OllamaBackend::new(
+                &cli.ollama_url,
+                &cli.model,
+            )),
+        };
 
         let config = pilot::PilotConfig {
             goal: cli.goal.clone(),
@@ -103,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             use_heuristics: true,
         };
 
-        let result = pilot::run_pilot(&page, &backend, &config).await?;
+        let result = pilot::run_pilot(&page, backend_impl.as_ref(), &config).await?;
 
         println!("\n=== Pilot Result ===");
         println!("Success: {}", result.success);

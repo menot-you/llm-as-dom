@@ -2,14 +2,7 @@
 //!
 //! Provides three tools: `lad_browse`, `lad_extract`, `lad_assert`.
 
-mod a11y;
-mod backend;
-mod error;
-mod heuristics;
-mod pilot;
-mod semantic;
-
-pub use error::Error;
+use llm_as_dom::{Error, a11y, backend, pilot, semantic};
 
 use std::sync::Arc;
 use std::time::Duration;

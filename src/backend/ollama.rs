@@ -89,7 +89,7 @@ impl PilotBackend for OllamaBackend {
     }
 }
 
-fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String {
+pub fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String {
     let mut prompt = String::with_capacity(1024);
 
     prompt.push_str("You are a browser pilot. Execute the goal step by step.\n\n");
@@ -120,7 +120,7 @@ fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String {
 
 /// Parse the LLM response into an Action.
 /// Handles Qwen3's <think>...</think> blocks by stripping them.
-fn parse_action(response: &str) -> Result<Action, crate::Error> {
+pub fn parse_action(response: &str) -> Result<Action, crate::Error> {
     // Strip <think>...</think> blocks (Qwen3 reasoning)
     let clean = strip_think_tags(response);
     let trimmed = clean.trim();
@@ -141,7 +141,7 @@ fn parse_action(response: &str) -> Result<Action, crate::Error> {
     })
 }
 
-fn strip_think_tags(s: &str) -> String {
+pub fn strip_think_tags(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut in_think = false;
     let mut chars = s.chars().peekable();
@@ -176,7 +176,7 @@ fn strip_think_tags(s: &str) -> String {
     result
 }
 
-fn extract_json(s: &str) -> Option<&str> {
+pub fn extract_json(s: &str) -> Option<&str> {
     // Try to find a JSON object first
     if let Some(result) = extract_balanced(s, b'{', b'}') {
         return Some(result);
@@ -188,7 +188,7 @@ fn extract_json(s: &str) -> Option<&str> {
     None
 }
 
-fn extract_balanced(s: &str, open: u8, close: u8) -> Option<&str> {
+pub fn extract_balanced(s: &str, open: u8, close: u8) -> Option<&str> {
     let start = s.as_bytes().iter().position(|&b| b == open)?;
     let mut depth = 0;
     for (i, &b) in s.as_bytes().iter().enumerate().skip(start) {
