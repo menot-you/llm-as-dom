@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::heuristics::login::extract_credential;
+use crate::heuristics::extract_credential;
 use crate::pilot::Action;
 use crate::semantic::SemanticView;
 
@@ -115,15 +115,19 @@ pub fn find_playbook<'a>(playbooks: &'a [Playbook], url: &str) -> Option<&'a Pla
 /// - `"username"` -> tries prefixes `["as ", "user ", "username ", "email ", "login "]`
 /// - `"password"` -> tries prefixes `["password ", "pass ", "pw "]`
 /// - anything else -> tries `["<name> "]`
-pub fn extract_params(goal: &str, param_names: &[String]) -> std::collections::HashMap<String, String> {
+pub fn extract_params(
+    goal: &str,
+    param_names: &[String],
+) -> std::collections::HashMap<String, String> {
     let goal_lower = goal.to_lowercase();
     let mut params = std::collections::HashMap::new();
 
     for name in param_names {
         let value = match name.as_str() {
-            "username" | "user" | "email" => {
-                extract_credential(&goal_lower, &["as ", "user ", "username ", "email ", "login "])
-            }
+            "username" | "user" | "email" => extract_credential(
+                &goal_lower,
+                &["as ", "user ", "username ", "email ", "login "],
+            ),
             "password" | "pass" | "pw" => {
                 extract_credential(&goal_lower, &["password ", "pass ", "pw "])
             }
@@ -180,19 +184,19 @@ pub fn match_selector(view: &SemanticView, selector: &str) -> Option<u32> {
 
     // Pass 3: name attribute match
     for el in &view.elements {
-        if let Some(ref name) = el.name {
-            if name.to_lowercase() == sel_lower {
-                return Some(el.id);
-            }
+        if let Some(ref name) = el.name
+            && name.to_lowercase() == sel_lower
+        {
+            return Some(el.id);
         }
     }
 
     // Pass 4: input_type match (e.g. selector="password")
     for el in &view.elements {
-        if let Some(ref itype) = el.input_type {
-            if itype.to_lowercase() == sel_lower {
-                return Some(el.id);
-            }
+        if let Some(ref itype) = el.input_type
+            && itype.to_lowercase() == sel_lower
+        {
+            return Some(el.id);
         }
     }
 
@@ -319,6 +323,7 @@ mod tests {
                     disabled: false,
                     form_index: Some(0),
                     context: None,
+                    hint: None,
                 },
                 Element {
                     id: 1,
@@ -332,6 +337,7 @@ mod tests {
                     disabled: false,
                     form_index: Some(0),
                     context: None,
+                    hint: None,
                 },
                 Element {
                     id: 2,
@@ -345,6 +351,7 @@ mod tests {
                     disabled: false,
                     form_index: Some(0),
                     context: None,
+                    hint: None,
                 },
             ],
             visible_text: "Sign in to GitHub".into(),
@@ -382,11 +389,7 @@ mod tests {
     #[test]
     fn test_playbook_load_from_dir() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("github.json"),
-            sample_playbook_json(),
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("github.json"), sample_playbook_json()).unwrap();
         // Also write a non-json file that should be skipped
         std::fs::write(dir.path().join("readme.txt"), "not a playbook").unwrap();
 
@@ -585,6 +588,7 @@ mod tests {
             disabled: false,
             form_index: Some(0),
             context: None,
+            hint: None,
         });
 
         let step = PlaybookStep {

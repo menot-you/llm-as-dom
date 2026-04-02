@@ -175,6 +175,8 @@ pub async fn run_pilot(
     let run_start = Instant::now();
     let mut history: Vec<Step> = Vec::new();
     let mut acted_on: Vec<u32> = Vec::new();
+    let mut playbook_hits: u32 = 0;
+    let mut hints_hits: u32 = 0;
     let mut heuristic_hits: u32 = 0;
     let mut llm_hits: u32 = 0;
     let mut total_retries: u32 = 0;
@@ -215,6 +217,8 @@ pub async fn run_pilot(
                 steps: history,
                 final_action,
                 total_duration: run_start.elapsed(),
+                playbook_hits,
+                hints_hits,
                 heuristic_hits,
                 llm_hits,
                 retry_count: total_retries,
@@ -239,6 +243,8 @@ pub async fn run_pilot(
         let step_duration = step_start.elapsed();
 
         match source {
+            DecisionSource::Playbook => playbook_hits += 1,
+            DecisionSource::Hints => hints_hits += 1,
             DecisionSource::Heuristic => heuristic_hits += 1,
             DecisionSource::Llm => llm_hits += 1,
         }
@@ -273,6 +279,8 @@ pub async fn run_pilot(
                 steps: history,
                 final_action: action,
                 total_duration: run_start.elapsed(),
+                playbook_hits,
+                hints_hits,
                 heuristic_hits,
                 llm_hits,
                 retry_count: total_retries,
@@ -313,6 +321,8 @@ pub async fn run_pilot(
         steps: history,
         final_action,
         total_duration: run_start.elapsed(),
+        playbook_hits,
+        hints_hits,
         heuristic_hits,
         llm_hits,
         retry_count: total_retries,
@@ -336,6 +346,26 @@ async fn decide_with_retry(
     total_retries: &mut u32,
     screenshots: &mut Vec<String>,
 ) -> Result<(Action, DecisionSource, f32), crate::Error> {
+    // Tier 0: Playbook replay (not yet implemented — hook for future).
+    // TODO: look for .lad/playbooks/ and try to match URL patterns.
+
+    // Tier 1: Hints (@lad/hints data-lad attributes).
+    if use_heuristics {
+        let h = heuristics::hints::try_hints(view, goal, acted_on);
+        if let Some(action) = h.action
+            && h.confidence >= 0.9
+        {
+            tracing::info!(
+                source = "hints",
+                confidence = h.confidence,
+                reason = %h.reason,
+                "hint matched"
+            );
+            return Ok((action, DecisionSource::Hints, h.confidence));
+        }
+    }
+
+    // Tier 2: Heuristics (rule-based).
     if use_heuristics {
         let h = heuristics::try_resolve(view, goal, acted_on);
         if let Some(action) = h.action {
@@ -349,8 +379,8 @@ async fn decide_with_retry(
         }
     }
 
-    // LLM fallback with one retry on parse failure
-    tracing::info!("heuristic miss — falling back to LLM");
+    // Tier 3: LLM fallback with one retry on parse failure.
+    tracing::info!("tiers 0-2 miss — falling back to LLM");
     match backend.decide(view, goal, history).await {
         Ok(action) => Ok((action, DecisionSource::Llm, 0.5)),
         Err(e) => {
