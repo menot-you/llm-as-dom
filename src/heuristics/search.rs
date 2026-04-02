@@ -27,9 +27,17 @@ pub fn try_search(
         let is_search = match el.kind {
             ElementKind::Input | ElementKind::Textarea => {
                 el.input_type.as_deref() == Some("search")
-                    || el.name.as_deref().map(|n| n == "q" || n == "query" || n == "search").unwrap_or(false)
+                    || el
+                        .name
+                        .as_deref()
+                        .map(|n| n == "q" || n == "query" || n == "search")
+                        .unwrap_or(false)
                     || el.label.to_lowercase().contains("search")
-                    || el.placeholder.as_deref().map(|p| p.to_lowercase().contains("search")).unwrap_or(false)
+                    || el
+                        .placeholder
+                        .as_deref()
+                        .map(|p| p.to_lowercase().contains("search"))
+                        .unwrap_or(false)
             }
             _ => false,
         };
@@ -50,13 +58,15 @@ pub fn try_search(
     None
 }
 
-/// Extract the search query from a goal string.
+/// Extract the search query from a goal string (case-insensitive prefix match).
 ///
 /// Supports patterns: "search for X", "search X", "find X", "look up X".
+/// Preserves the original case of the extracted query.
 fn extract_search_query(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase();
     let prefixes = ["search for ", "search ", "find ", "look up "];
     for prefix in &prefixes {
-        if let Some(pos) = goal.find(prefix) {
+        if let Some(pos) = lower.find(prefix) {
             let rest = goal[pos + prefix.len()..].trim();
             if !rest.is_empty() {
                 return Some(rest.to_string());

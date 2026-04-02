@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dr. Whiskers' Exotic Pets & More!!!</title>
+  <style>
+    /* Chaos: inline styles everywhere, inconsistent naming, nested tables */
+    body { font-family: "Comic Sans MS", cursive, sans-serif; background: #fffacd; margin: 0; }
+    marquee { background: red; color: yellow; font-weight: bold; padding: 4px; }
+    .popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: white; border: 3px solid #ff6600; padding: 20px; z-index: 9999; box-shadow: 0 0 40px rgba(0,0,0,.5); border-radius: 0; display: none; }
+    .popup.show { display: block; }
+    .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.4); z-index: 9998; display: none; }
+    .overlay.show { display: block; }
+    blink { animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    table { border-collapse: collapse; }
+    td { padding: 4px 8px; }
+    .hidden-field { position: absolute; left: -9999px; }
+    .btn-big { font-size: 24px; padding: 15px 40px; cursor: pointer; }
+    .tiny-link { font-size: 9px; color: #999; }
+    #real-submit { background: green; color: white; border: 2px solid darkgreen; }
+    #fake-submit { background: green; color: white; border: 2px solid darkgreen; opacity: 0.3; }
+    .ad-banner { background: linear-gradient(90deg, #ff0000, #ff6600, #ffff00); padding: 10px; text-align: center; animation: rainbow 2s linear infinite; }
+    @keyframes rainbow { 0% { filter: hue-rotate(0deg); } 100% { filter: hue-rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <!-- Chaos 1: Cookie consent that blocks everything -->
+  <div id="cookieOverlay" class="overlay show"></div>
+  <div id="cookiePopup" class="popup show">
+    <h2 style="color:red">🍪 WE USE COOKIES!!!</h2>
+    <p>We use cookies, trackers, local storage, session storage, IndexedDB, and carrier pigeons.</p>
+    <div style="display:flex;gap:10px;margin-top:15px">
+      <button id="acceptCookies" style="background:#27ae60;color:white;border:none;padding:10px 20px;cursor:pointer">Accept All 847 Cookies</button>
+      <button id="rejectCookies" style="background:#ccc;color:#333;border:none;padding:10px 20px;cursor:pointer;font-size:8px">Manage preferences (takes 45 minutes)</button>
+    </div>
+  </div>
+
+  <!-- Chaos 2: Annoying marquee -->
+  <marquee>🎉 SALE! 99% OFF EVERYTHING! USE CODE: NOTREAL 🎉 FREE SHIPPING ON ORDERS OVER $999,999 🎉</marquee>
+
+  <!-- Chaos 3: Ad banner -->
+  <div class="ad-banner">
+    <blink>⚡ CLICK HERE FOR FREE iPHONE ⚡</blink>
+    <button onclick="alert('gotcha')" style="margin-left:20px">CLAIM PRIZE</button>
+  </div>
+
+  <!-- Chaos 4: Nested tables layout (2003 called) -->
+  <table width="100%" cellpadding="10">
+    <tr>
+      <td valign="top" width="200" style="background:#f0f0f0">
+        <!-- Nav in a table cell -->
+        <b>Navigation</b><br><br>
+        <a href="#home">Home</a><br>
+        <a href="#pets">Pets</a><br>
+        <a href="#about">About</a><br>
+        <a href="#contact">Contact</a><br>
+        <a href="javascript:void(0)" onclick="alert('broken link')">Secret Page</a><br>
+        <br>
+        <a href="/login" class="tiny-link">admin login (don't click)</a>
+      </td>
+      <td valign="top">
+        <h1 style="color:purple;text-shadow:2px 2px red">Dr. Whiskers' Exotic Pet Emporium</h1>
+        <p><i>Est. 1847 (not really)</i></p>
+
+        <!-- Chaos 5: Login form with traps -->
+        <div style="border:2px dashed orange;padding:15px;margin:20px 0;background:#fff8e1">
+          <h2>🔐 Member Login</h2>
+
+          <!-- Honeypot field (hidden, should be ignored by bot) -->
+          <input type="text" name="website" class="hidden-field" tabindex="-1" autocomplete="off" placeholder="Leave empty">
+
+          <form id="chaosLogin" method="POST" action="/api/chaos-login">
+            <table>
+              <tr>
+                <td><label>Your Email or Username or Phone or Pet Name:</label></td>
+                <td>
+                  <!-- Chaos 6: Multiple inputs that look similar -->
+                  <input type="text" name="usr" placeholder="email/username/phone/pet" style="width:250px" id="mainUser">
+                </td>
+              </tr>
+              <tr>
+                <td><label>Secret Code (aka password):</label></td>
+                <td><input type="password" name="pwd" id="mainPass" style="width:250px"></td>
+              </tr>
+              <tr>
+                <td></td>
+                <td>
+                  <!-- Chaos 7: Multiple submit buttons, one is fake -->
+                  <button type="button" id="fake-submit" class="btn-big" disabled>Logging in...</button>
+                  <button type="submit" id="real-submit" class="btn-big">Login NOW!</button>
+                  <br>
+                  <button type="button" onclick="alert('nope')" style="background:red;color:white;border:none;padding:5px;margin-top:5px">DELETE MY ACCOUNT</button>
+                </td>
+              </tr>
+            </table>
+          </form>
+
+          <!-- Chaos 8: Social login buttons that go nowhere -->
+          <div style="margin-top:10px">
+            <button onclick="alert('not implemented')" style="background:#4267B2;color:white;border:none;padding:8px 16px">Login with Facebook</button>
+            <button onclick="alert('not implemented')" style="background:#1DA1F2;color:white;border:none;padding:8px 16px">Login with Twitter</button>
+            <button onclick="alert('not implemented')" style="background:#333;color:white;border:none;padding:8px 16px">Login with GitHub</button>
+          </div>
+        </div>
+
+        <!-- Chaos 9: Dynamically loaded content after 2s -->
+        <div id="dynamicContent">
+          <p style="color:#888"><i>Loading product reviews... (this is real content that loads late)</i></p>
+        </div>
+
+        <!-- Chaos 10: Invisible elements that exist in DOM -->
+        <div style="display:none">
+          <form id="hidden-form">
+            <input type="text" name="trap_field" value="you found me">
+            <button type="submit">Hidden Submit</button>
+          </form>
+        </div>
+        <div style="visibility:hidden;height:0;overflow:hidden">
+          <a href="/admin">Secret Admin Link</a>
+          <button>Invisible Button</button>
+        </div>
+        <div style="opacity:0;position:absolute">
+          <input type="text" name="ghost_input" placeholder="zero opacity field">
+        </div>
+
+      </td>
+      <td valign="top" width="250" style="background:#f5f5f5">
+        <!-- Chaos 11: Sidebar with distracting elements -->
+        <h3>🐦 Today's Pets</h3>
+        <div style="border:1px solid #ddd;padding:8px;margin:5px 0;background:white">
+          <b>Sir Barksalot</b><br>
+          <span style="color:green">$9,999.99</span><br>
+          <button style="background:#e67e22;color:white;border:none;padding:4px 8px;cursor:pointer">Add to Cart</button>
+        </div>
+        <div style="border:1px solid #ddd;padding:8px;margin:5px 0;background:white">
+          <b>Lord Meowington III</b><br>
+          <span style="color:green">$14,500.00</span><br>
+          <button style="background:#e67e22;color:white;border:none;padding:4px 8px;cursor:pointer">Add to Cart</button>
+        </div>
+        <div style="border:1px solid #ddd;padding:8px;margin:5px 0;background:white">
+          <b>Captain Fluffybutt</b><br>
+          <span style="color:green">$7,777.77</span><br>
+          <button style="background:#e67e22;color:white;border:none;padding:4px 8px;cursor:pointer">Add to Cart</button>
+        </div>
+        <hr>
+        <p style="font-size:10px;color:#aaa">Not responsible for escaped parrots. All sales final. Pets may or may not be real.</p>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Chaos 12: Footer with 30+ links -->
+  <div style="background:#333;color:#888;padding:20px;font-size:11px;display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+    <a href="#" style="color:#888">Terms</a><a href="#" style="color:#888">Privacy</a><a href="#" style="color:#888">Cookies</a>
+    <a href="#" style="color:#888">GDPR</a><a href="#" style="color:#888">CCPA</a><a href="#" style="color:#888">Accessibility</a>
+    <a href="#" style="color:#888">Sitemap</a><a href="#" style="color:#888">RSS</a><a href="#" style="color:#888">API</a>
+    <a href="#" style="color:#888">Status</a><a href="#" style="color:#888">Blog</a><a href="#" style="color:#888">Careers</a>
+    <a href="#" style="color:#888">Press</a><a href="#" style="color:#888">Investors</a><a href="#" style="color:#888">Partners</a>
+    <a href="#" style="color:#888">Affiliates</a><a href="#" style="color:#888">Legal</a><a href="#" style="color:#888">Refunds</a>
+    <a href="#" style="color:#888">Shipping</a><a href="#" style="color:#888">Returns</a><a href="#" style="color:#888">FAQ</a>
+    <a href="#" style="color:#888">Support</a><a href="#" style="color:#888">Contact</a><a href="#" style="color:#888">Feedback</a>
+  </div>
+
+  <script>
+    // Cookie popup dismiss
+    document.getElementById('acceptCookies').addEventListener('click', () => {
+      document.getElementById('cookiePopup').classList.remove('show');
+      document.getElementById('cookieOverlay').classList.remove('show');
+    });
+    document.getElementById('rejectCookies').addEventListener('click', () => {
+      document.getElementById('cookiePopup').classList.remove('show');
+      document.getElementById('cookieOverlay').classList.remove('show');
+    });
+
+    // Login handler
+    document.getElementById('chaosLogin').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const usr = document.getElementById('mainUser').value;
+      const pwd = document.getElementById('mainPass').value;
+      if (usr === 'chaos@test.com' && pwd === 'chaos123') {
+        document.title = 'Dr. Whiskers - Welcome ' + usr;
+        alert('Login successful! (yes, via alert, because chaos)');
+      } else {
+        // Chaos: error shown as a new DOM element appended randomly
+        const err = document.createElement('div');
+        err.style.cssText = 'background:#ffcccc;color:red;padding:10px;margin:10px 0;border-left:4px solid red';
+        err.textContent = 'Wrong credentials! Try chaos@test.com / chaos123 (yes we show the answer)';
+        document.getElementById('chaosLogin').prepend(err);
+      }
+    });
+
+    // Delayed content load
+    setTimeout(() => {
+      document.getElementById('dynamicContent').innerHTML = `
+        <h3>⭐ Customer Reviews (loaded after 2s)</h3>
+        <div style="border:1px solid #ddd;padding:10px;margin:5px 0;background:white">
+          <b>★★★★★</b> "My parrot now speaks 3 languages!" - Happy Customer
+        </div>
+        <div style="border:1px solid #ddd;padding:10px;margin:5px 0;background:white">
+          <b>★☆☆☆☆</b> "The hamster escaped on day 1." - Less Happy Customer
+        </div>
+        <form id="reviewForm">
+          <h4>Leave a Review</h4>
+          <select name="rating"><option>5 Stars</option><option>4 Stars</option><option>3 Stars</option><option>2 Stars</option><option>1 Star</option></select>
+          <input type="text" name="review" placeholder="Write your review..." style="width:300px;margin:5px">
+          <button type="submit">Submit Review</button>
+        </form>
+      `;
+    }, 2000);
+  </script>
+</body>
+</html>

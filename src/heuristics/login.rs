@@ -85,30 +85,28 @@ pub fn try_form_fill(
                     action: Some(Action::Type {
                         element: el.id,
                         value: user.clone(),
-                        reasoning: format!(
-                            "heuristic: fill username/email field [{}]",
-                            el.id
-                        ),
+                        reasoning: format!("heuristic: fill username/email field [{}]", el.id),
                     }),
                     confidence: 0.90,
                     reason: "username/email field matched".into(),
                 });
             }
         } else if el.input_type.as_deref() == Some("text")
-            && let Some(ref user) = username {
-                return Some(super::HeuristicResult {
-                    action: Some(Action::Type {
-                        element: el.id,
-                        value: user.clone(),
-                        reasoning: format!(
-                            "heuristic: fill first text input [{}] (likely username)",
-                            el.id
-                        ),
-                    }),
-                    confidence: 0.70,
-                    reason: "generic text field, guessing username".into(),
-                });
-            }
+            && let Some(ref user) = username
+        {
+            return Some(super::HeuristicResult {
+                action: Some(Action::Type {
+                    element: el.id,
+                    value: user.clone(),
+                    reasoning: format!(
+                        "heuristic: fill first text input [{}] (likely username)",
+                        el.id
+                    ),
+                }),
+                confidence: 0.70,
+                reason: "generic text field, guessing username".into(),
+            });
+        }
     }
 
     None

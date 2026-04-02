@@ -45,22 +45,22 @@ pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Heurist
         return result;
     }
 
-    // Strategy 2: Search input detection
-    if let Some(result) = search::try_search(view, &goal_lower, acted_on)
+    // Strategy 2: Search input detection (original case for query value)
+    if let Some(result) = search::try_search(view, goal, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;
     }
 
-    // Strategy 3: Navigation target matching
-    if let Some(result) = navigation::try_navigation(view, &goal_lower, acted_on)
+    // Strategy 3: Navigation target matching (original case for target)
+    if let Some(result) = navigation::try_navigation(view, goal, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;
     }
 
-    // Strategy 4: Generic form fill (key=value)
-    if let Some(result) = form::try_generic_form(view, &goal_lower, acted_on)
+    // Strategy 4: Generic form fill (original case for key=value pairs)
+    if let Some(result) = form::try_generic_form(view, goal, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;

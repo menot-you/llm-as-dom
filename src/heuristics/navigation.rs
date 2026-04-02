@@ -27,11 +27,7 @@ pub fn try_navigation(
         }
 
         let label_lower = el.label.to_lowercase();
-        let href_lower = el
-            .href
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase();
+        let href_lower = el.href.as_deref().unwrap_or("").to_lowercase();
 
         // Exact label match is highest confidence
         let score = if label_lower == target_lower {
@@ -62,13 +58,15 @@ pub fn try_navigation(
     })
 }
 
-/// Extract the navigation target from a goal string.
+/// Extract the navigation target from a goal string (case-insensitive prefix match).
 ///
 /// Supports patterns: "click X", "go to X", "navigate to X", "open X".
+/// Preserves the original case of the extracted target.
 fn extract_nav_target(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase();
     let prefixes = ["click ", "go to ", "navigate to ", "open "];
     for prefix in &prefixes {
-        if let Some(pos) = goal.find(prefix) {
+        if let Some(pos) = lower.find(prefix) {
             let rest = goal[pos + prefix.len()..].trim();
             if !rest.is_empty() {
                 return Some(rest.to_string());

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>404 - Pet Not Found</title>
+  <style>
+    body { font-family: monospace; background: #1a1a2e; color: #e94560; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .error-page { text-align: center; }
+    h1 { font-size: 8rem; margin: 0; }
+    p { color: #888; }
+    a { color: #0f3460; }
+    /* Chaos: form that submits to nowhere, JS errors in console */
+  </style>
+</head>
+<body>
+  <div class="error-page">
+    <h1>404</h1>
+    <h2>Pet Not Found</h2>
+    <p>The hamster you were looking for has escaped.</p>
+    <p>Perhaps try one of these:</p>
+    <a href="/">Go Home</a> |
+    <a href="/search">Search Pets</a> |
+    <a href="javascript:history.back()">Go Back</a>
+    <form id="searchForm" style="margin-top:20px" action="/search">
+      <input type="search" name="q" placeholder="Search for another pet..." style="padding:8px;width:300px;background:#16213e;color:white;border:1px solid #333;border-radius:4px">
+      <button type="submit" style="padding:8px 16px;background:#e94560;color:white;border:none;border-radius:4px;cursor:pointer">Search</button>
+    </form>
+  </div>
+  <script>
+    // Intentional JS errors (chaos)
+    console.error("TypeError: Cannot read property 'legs' of undefined");
+    console.warn("Pet database connection timed out after 30s");
+    // Unhandled promise rejection
+    Promise.reject(new Error("NetworkError: Failed to fetch pet photos from CDN"));
+    // But the form still works
+    document.getElementById('searchForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const q = document.querySelector('[name=q]').value;
+      if (q) document.title = 'Search: ' + q;
+    });
+  </script>
+</body>
+</html>

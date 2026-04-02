@@ -62,6 +62,23 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
     }
 }
 
+/// Build a link element with `href` and label.
+fn link_element(id: u32, label: &str, href: &str) -> Element {
+    Element {
+        id,
+        kind: ElementKind::Link,
+        label: label.into(),
+        name: None,
+        value: None,
+        placeholder: None,
+        href: Some(href.into()),
+        input_type: None,
+        disabled: false,
+        form_index: None,
+        context: None,
+    }
+}
+
 // ── Browser tests (#[ignore]) ────────────────────────────────────────
 
 /// Launches a real browser, extracts example.com, asserts elements > 0.
@@ -323,5 +340,175 @@ fn test_semantic_view_token_estimate() {
     assert!(
         empty_tokens < 30,
         "empty view tokens too high: {empty_tokens}"
+    );
+}
+
+// ── Wave 12: New tests ──────────────────────────────────────────────
+
+/// Test search heuristic: a SemanticView with a search input and a "search for X" goal.
+#[test]
+fn test_heuristic_search() {
+    let view = mock_view(
+        vec![
+            input_element(0, "Search the web", "search", Some("q"), None),
+            button_element(1, "Search", None),
+        ],
+        "search page",
+    );
+
+    let goal = "search for rust tutorials";
+
+    let r = heuristics::try_resolve(&view, goal, &[]);
+    assert!(r.action.is_some(), "should resolve search fill");
+    assert!(r.confidence >= 0.6, "confidence should meet threshold");
+    match r.action.unwrap() {
+        Action::Type { element, value, .. } => {
+            assert_eq!(element, 0, "should target search input");
+            assert_eq!(value, "rust tutorials", "should extract search query");
+        }
+        other => panic!("expected Type action, got {other:?}"),
+    }
+}
+
+/// Test navigation heuristic: a SemanticView with links, goal "click About".
+#[test]
+fn test_heuristic_navigation() {
+    let view = mock_view(
+        vec![
+            link_element(0, "Home", "/home"),
+            link_element(1, "About", "/about"),
+            link_element(2, "Contact", "/contact"),
+        ],
+        "content page",
+    );
+
+    let goal = "click About";
+
+    let r = heuristics::try_resolve(&view, goal, &[]);
+    assert!(r.action.is_some(), "should resolve navigation click");
+    assert!(r.confidence >= 0.6, "confidence should meet threshold");
+    match r.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 1, "should click the About link");
+        }
+        other => panic!("expected Click action, got {other:?}"),
+    }
+}
+
+/// Test generic form fill: SemanticView with name+email inputs, goal with key=value pairs.
+#[test]
+fn test_heuristic_generic_form() {
+    let view = mock_view(
+        vec![
+            input_element(0, "Full Name", "text", Some("name"), Some(0)),
+            input_element(1, "Email Address", "email", Some("email"), Some(0)),
+            button_element(2, "Submit", Some(0)),
+        ],
+        "form page",
+    );
+
+    let goal = "fill form with name=John email=john@test.com";
+
+    // Step 1: should fill name field
+    let r1 = heuristics::try_resolve(&view, goal, &[]);
+    assert!(r1.action.is_some(), "should resolve name fill");
+    match r1.action.unwrap() {
+        Action::Type { element, value, .. } => {
+            assert_eq!(element, 0, "should target name input");
+            assert_eq!(value, "John");
+        }
+        other => panic!("expected Type for name, got {other:?}"),
+    }
+
+    // Step 2: should fill email field
+    let r2 = heuristics::try_resolve(&view, goal, &[0]);
+    assert!(r2.action.is_some(), "should resolve email fill");
+    match r2.action.unwrap() {
+        Action::Type { element, value, .. } => {
+            assert_eq!(element, 1, "should target email input");
+            assert_eq!(value, "john@test.com");
+        }
+        other => panic!("expected Type for email, got {other:?}"),
+    }
+}
+
+/// Test that build_prompt contains few-shot examples relevant to the goal type.
+#[test]
+fn test_prompt_format() {
+    use llm_as_dom::backend::ollama::build_prompt;
+
+    let view = mock_view(
+        vec![
+            input_element(0, "Email", "email", Some("email"), Some(0)),
+            input_element(1, "Secret", "text", Some("pw"), Some(0)),
+            button_element(2, "Login", Some(0)),
+        ],
+        "login page",
+    );
+
+    // Login prompt should contain login few-shot
+    let prompt = build_prompt(&view, "login as alice@test.com", &[]);
+    assert!(
+        prompt.contains("FEW-SHOT EXAMPLES"),
+        "prompt should have few-shot section"
+    );
+    assert!(
+        prompt.contains("alice@test.com") || prompt.contains("login"),
+        "login prompt should contain login-related example"
+    );
+    assert!(
+        prompt.contains("SYSTEM:"),
+        "prompt should have system instruction"
+    );
+    assert!(
+        prompt.contains("exactly ONE JSON"),
+        "prompt should enforce single JSON response"
+    );
+    assert!(
+        prompt.contains("No markdown"),
+        "prompt should forbid markdown"
+    );
+
+    // Search prompt should contain search few-shot
+    let search_prompt = build_prompt(&view, "search for tutorials", &[]);
+    assert!(
+        search_prompt.contains("search"),
+        "search prompt should contain search example"
+    );
+
+    // Navigation prompt should contain click example
+    let nav_prompt = build_prompt(&view, "click About", &[]);
+    assert!(
+        nav_prompt.contains("click"),
+        "nav prompt should contain click example"
+    );
+}
+
+/// Test PilotConfig retry defaults and PilotResult retry tracking.
+#[test]
+fn test_pilot_config_retry_defaults() {
+    use llm_as_dom::pilot::PilotConfig;
+
+    let config = PilotConfig::default();
+    assert_eq!(
+        config.max_retries_per_step, 2,
+        "default retries should be 2"
+    );
+    assert_eq!(config.max_steps, 10, "default max steps should be 10");
+    assert!(config.use_heuristics, "heuristics should be on by default");
+}
+
+/// Test error::ActionFailed variant exists and formats correctly.
+#[test]
+fn test_error_action_failed() {
+    let err = llm_as_dom::Error::ActionFailed("element 5 not found".into());
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("action failed"),
+        "ActionFailed should format with prefix"
+    );
+    assert!(
+        msg.contains("element 5 not found"),
+        "ActionFailed should contain the detail message"
     );
 }

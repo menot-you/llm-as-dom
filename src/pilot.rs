@@ -125,6 +125,11 @@ pub struct PilotResult {
 }
 
 /// Run the pilot loop: observe -> heuristics -> LLM fallback -> act -> repeat.
+///
+/// Includes retry logic:
+/// - If `execute_action` fails, re-extracts the DOM and retries (stale DOM recovery).
+/// - If heuristic returns `None` AND LLM returns an unparseable response, retries LLM once.
+/// - If all retries fail on a step, logs the failure and continues to the next step.
 pub async fn run_pilot(
     page: &chromiumoxide::Page,
     backend: &dyn PilotBackend,
@@ -135,11 +140,12 @@ pub async fn run_pilot(
     let mut acted_on: Vec<u32> = Vec::new();
     let mut heuristic_hits: u32 = 0;
     let mut llm_hits: u32 = 0;
+    let mut total_retries: u32 = 0;
 
     for step_idx in 0..config.max_steps {
         let step_start = Instant::now();
 
-        // 1. Observe: extract semantic view (re-stamps ghost IDs)
+        // 1. Observe
         let view = crate::a11y::extract_semantic_view(page).await?;
         tracing::info!(
             step = step_idx,
@@ -148,27 +154,18 @@ pub async fn run_pilot(
             "observed"
         );
 
-        // 2. Decide: heuristics first, LLM fallback
-        let (action, source, confidence) = if config.use_heuristics {
-            let h = heuristics::try_resolve(&view, &config.goal, &acted_on);
-            if let Some(action) = h.action {
-                tracing::info!(
-                    step = step_idx,
-                    source = "heuristic",
-                    confidence = h.confidence,
-                    reason = %h.reason,
-                    "heuristic matched"
-                );
-                (action, DecisionSource::Heuristic, h.confidence)
-            } else {
-                tracing::info!(step = step_idx, "heuristic miss — falling back to LLM");
-                let action = backend.decide(&view, &config.goal, &history).await?;
-                (action, DecisionSource::Llm, 0.5)
-            }
-        } else {
-            let action = backend.decide(&view, &config.goal, &history).await?;
-            (action, DecisionSource::Llm, 0.5)
-        };
+        // 2. Decide (heuristics first, LLM fallback with retry)
+        let (action, source, confidence) = decide_with_retry(
+            &view,
+            &config.goal,
+            &acted_on,
+            backend,
+            &history,
+            config.use_heuristics,
+            page,
+            &mut total_retries,
+        )
+        .await?;
 
         let step_duration = step_start.elapsed();
 
@@ -185,7 +182,6 @@ pub async fn run_pilot(
             "decided"
         );
 
-        // Track filled fields for heuristic state
         if let Action::Type { element, .. } | Action::Click { element, .. } = &action {
             acted_on.push(*element);
         }
@@ -210,15 +206,27 @@ pub async fn run_pilot(
                 total_duration: run_start.elapsed(),
                 heuristic_hits,
                 llm_hits,
-                retry_count: 0,
+                retry_count: total_retries,
             });
         }
 
-        // 4. Act: execute the action on the page
-        execute_action(page, &action).await?;
-        history.push(step);
+        // 4. Act with retry on failure
+        if let Err(e) = execute_action_with_retry(
+            page,
+            &action,
+            config.max_retries_per_step,
+            &mut total_retries,
+        )
+        .await
+        {
+            tracing::warn!(
+                step = step_idx,
+                error = %e,
+                "action failed after retries, continuing to next step"
+            );
+        }
 
-        // Brief settle after action
+        history.push(step);
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
@@ -232,8 +240,96 @@ pub async fn run_pilot(
         total_duration: run_start.elapsed(),
         heuristic_hits,
         llm_hits,
-        retry_count: 0,
+        retry_count: total_retries,
     })
+}
+
+/// Decide the next action, retrying the LLM on parse failure with a fresh DOM.
+#[allow(clippy::too_many_arguments)]
+async fn decide_with_retry(
+    view: &crate::semantic::SemanticView,
+    goal: &str,
+    acted_on: &[u32],
+    backend: &dyn PilotBackend,
+    history: &[Step],
+    use_heuristics: bool,
+    page: &chromiumoxide::Page,
+    total_retries: &mut u32,
+) -> Result<(Action, DecisionSource, f32), crate::Error> {
+    if use_heuristics {
+        let h = heuristics::try_resolve(view, goal, acted_on);
+        if let Some(action) = h.action {
+            tracing::info!(
+                source = "heuristic",
+                confidence = h.confidence,
+                reason = %h.reason,
+                "heuristic matched"
+            );
+            return Ok((action, DecisionSource::Heuristic, h.confidence));
+        }
+    }
+
+    // LLM fallback with one retry on parse failure
+    tracing::info!("heuristic miss — falling back to LLM");
+    match backend.decide(view, goal, history).await {
+        Ok(action) => Ok((action, DecisionSource::Llm, 0.5)),
+        Err(e) => {
+            tracing::warn!(error = %e, "LLM decision failed, retrying with fresh DOM");
+            *total_retries += 1;
+
+            // Re-extract DOM (stale DOM recovery) and retry
+            if let Ok(fresh_view) = crate::a11y::extract_semantic_view(page).await {
+                if let Ok(action) = backend.decide(&fresh_view, goal, history).await {
+                    return Ok((action, DecisionSource::Llm, 0.4));
+                }
+                *total_retries += 1;
+            }
+
+            // All retries failed -- escalate
+            Ok((
+                Action::Escalate {
+                    reason: format!("LLM failed after retries: {e}"),
+                },
+                DecisionSource::Llm,
+                0.0,
+            ))
+        }
+    }
+}
+
+/// Execute an action with retry on failure (stale DOM recovery).
+async fn execute_action_with_retry(
+    page: &chromiumoxide::Page,
+    action: &Action,
+    max_retries: u32,
+    total_retries: &mut u32,
+) -> Result<(), crate::Error> {
+    match execute_action(page, action).await {
+        Ok(()) => Ok(()),
+        Err(first_err) => {
+            tracing::warn!(error = %first_err, "action execution failed, retrying");
+            let mut last_err = first_err;
+
+            for attempt in 1..=max_retries {
+                *total_retries += 1;
+                tracing::info!(attempt, max_retries, "retry: re-extracting DOM");
+                tokio::time::sleep(Duration::from_millis(300)).await;
+
+                match execute_action(page, action).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        tracing::warn!(attempt, error = %e, "retry failed");
+                        last_err = e;
+                    }
+                }
+            }
+
+            Err(crate::Error::ActionFailed(format!(
+                "action failed after {} retries: {}",
+                max_retries, last_err
+            )))
+        }
+    }
 }
 
 /// Execute an action on the page via CDP.

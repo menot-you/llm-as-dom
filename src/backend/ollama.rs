@@ -122,7 +122,8 @@ pub fn build_prompt(view: &SemanticView, goal: &str, history: &[Step]) -> String
     prompt.push('\n');
     prompt.push_str(r#"{"action":"select","element":<id>,"value":"<text>","reasoning":"<why>"}"#);
     prompt.push('\n');
-    prompt.push_str(r#"{"action":"scroll","direction":"<up|down|left|right>","reasoning":"<why>"}"#);
+    prompt
+        .push_str(r#"{"action":"scroll","direction":"<up|down|left|right>","reasoning":"<why>"}"#);
     prompt.push('\n');
     prompt.push_str(r#"{"action":"wait","reasoning":"<why>"}"#);
     prompt.push('\n');
@@ -164,10 +165,7 @@ Step 1: {"action":"type","element":0,"value":"rust tutorials","reasoning":"fill 
 Step 2: {"action":"click","element":1,"reasoning":"submit search"}
 "#,
         );
-    } else if g.contains("todo")
-        || g.contains("task")
-        || g.contains("add")
-        || g.contains("create")
+    } else if g.contains("todo") || g.contains("task") || g.contains("add") || g.contains("create")
     {
         prompt.push_str(
             r#"Goal: "add a todo 'buy milk'"
