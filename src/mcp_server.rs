@@ -1,8 +1,8 @@
 //! `lad-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
-//! Provides three tools: `lad_browse`, `lad_extract`, `lad_assert`.
+//! Provides five tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`.
 
-use llm_as_dom::{Error, a11y, backend, pilot, semantic};
+use llm_as_dom::{Error, a11y, audit, backend, locate, pilot, semantic};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -51,6 +51,25 @@ struct AssertParams {
     url: String,
     /// Assertions to verify (e.g. ["has login form", "title contains Dashboard"]).
     assertions: Vec<String>,
+}
+
+/// Parameters for the `lad_locate` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct LocateParams {
+    /// URL to navigate to.
+    url: String,
+    /// CSS selector or text description of the element to locate.
+    selector: String,
+}
+
+/// Parameters for the `lad_audit` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AuditParams {
+    /// URL to audit.
+    url: String,
+    /// Categories to check: "a11y", "forms", "links" (default: all).
+    #[serde(default = "audit::default_categories")]
+    categories: Vec<String>,
 }
 
 // ── Server state ───────────────────────────────────────────────────
@@ -274,6 +293,72 @@ impl LadServer {
             to_pretty_json(&output),
         )]))
     }
+
+    /// Locate a DOM element's source file using dev-mode source maps.
+    /// Checks React __source, data-ds (domscribe), data-lad hints, and DOM path fallback.
+    #[tool(
+        description = "Map a DOM element back to its source file. Checks React dev source, data-ds, data-lad attributes. Returns source file/line or DOM path fallback."
+    )]
+    async fn lad_locate(
+        &self,
+        params: Parameters<LocateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(url = %p.url, selector = %p.selector, "lad_locate");
+
+        let (page, _view) = self.navigate_and_extract(&p.url).await?;
+        let js = locate::build_locate_js(&p.selector);
+        let result = page.evaluate(js).await.map_err(mcp_err)?;
+
+        let raw: locate::RawLocateResult = result
+            .into_value()
+            .map_err(|e| mcp_err(format!("locate JS parse failed: {e:?}")))?;
+
+        match locate::parse_locate_result(raw) {
+            Ok(locate_result) => {
+                let output = serde_json::to_value(&locate_result)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+                Ok(CallToolResult::success(vec![Content::text(
+                    to_pretty_json(&output),
+                )]))
+            }
+            Err(msg) => Ok(CallToolResult::success(vec![Content::text(
+                to_pretty_json(&serde_json::json!({
+                    "error": msg,
+                    "source_maps": "not available",
+                })),
+            )])),
+        }
+    }
+
+    /// Audit a web page for accessibility, forms, and links issues.
+    /// Returns structured issues with severity, element, message, and suggestion.
+    #[tool(
+        description = "Audit a URL for quality issues: a11y (alt text, labels, lang), forms (autocomplete, minlength), links (void hrefs, noopener). Returns issues with severity and fix suggestions."
+    )]
+    async fn lad_audit(
+        &self,
+        params: Parameters<AuditParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(url = %p.url, categories = ?p.categories, "lad_audit");
+
+        let (page, _view) = self.navigate_and_extract(&p.url).await?;
+        let js = audit::build_audit_js(&p.categories);
+        let result = page.evaluate(js).await.map_err(mcp_err)?;
+
+        let raw: Vec<audit::RawAuditIssue> = result
+            .into_value()
+            .map_err(|e| mcp_err(format!("audit JS parse failed: {e:?}")))?;
+
+        let audit_result = audit::parse_audit_result(&p.url, raw);
+        let output = serde_json::to_value(&audit_result)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+
+        Ok(CallToolResult::success(vec![Content::text(
+            to_pretty_json(&output),
+        )]))
+    }
 }
 
 /// Evaluate a single assertion against a semantic view.
@@ -358,7 +443,7 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
 impl ServerHandler for LadServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification.")
+            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks.")
     }
 }
 
