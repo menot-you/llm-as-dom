@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== pre-push: running quality gates ==="
+
+echo "[1/4] cargo fmt --check"
+cargo fmt --check || { echo "BLOCKED: formatting issues. Run: cargo fmt"; exit 1; }
+
+echo "[2/4] cargo clippy --all-targets -- -D warnings"
+cargo clippy --all-targets -- -D warnings || { echo "BLOCKED: clippy warnings. Fix them."; exit 1; }
+
+echo "[3/4] cargo test"
+cargo test || { echo "BLOCKED: tests failing."; exit 1; }
+
+echo "[4/4] cargo test --test chaos"
+cargo test --test chaos || { echo "BLOCKED: chaos tests failing."; exit 1; }
+
+echo "=== pre-push: ALL GATES PASSED ==="
