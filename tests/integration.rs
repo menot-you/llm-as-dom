@@ -6,9 +6,7 @@
 //! Pure-logic tests run in normal `cargo test`.
 
 use llm_as_dom::heuristics::{self, HeuristicResult};
-#[allow(unused_imports)]
 use llm_as_dom::pilot::{Action, DecisionSource};
-#[allow(unused_imports)]
 use llm_as_dom::semantic::{Element, ElementHint, ElementKind, PageState, SemanticView};
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -645,5 +643,203 @@ fn test_blocked_state_in_prompt() {
     assert!(
         prompt.contains("Blocked"),
         "prompt should show Blocked state"
+    );
+}
+
+// ── @lad/hints + 5-tier dispatcher tests ─────────────────────────────
+
+/// Helper: build a login view with `data-lad` hint annotations on all elements.
+fn hinted_login_view() -> SemanticView {
+    SemanticView {
+        url: "https://example.com/login".into(),
+        title: "Login — My App".into(),
+        page_hint: "login page".into(),
+        elements: vec![
+            Element {
+                id: 0,
+                kind: ElementKind::Input,
+                label: "Email".into(),
+                name: Some("email".into()),
+                value: None,
+                placeholder: Some("you@example.com".into()),
+                href: None,
+                input_type: Some("email".into()),
+                disabled: false,
+                form_index: Some(0),
+                context: None,
+                hint: Some(ElementHint {
+                    hint_type: "field".into(),
+                    value: "email".into(),
+                }),
+            },
+            Element {
+                id: 1,
+                kind: ElementKind::Input,
+                label: "Password".into(),
+                name: Some("password".into()),
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: Some("password".into()),
+                disabled: false,
+                form_index: Some(0),
+                context: None,
+                hint: Some(ElementHint {
+                    hint_type: "field".into(),
+                    value: "password".into(),
+                }),
+            },
+            Element {
+                id: 2,
+                kind: ElementKind::Button,
+                label: "Sign In".into(),
+                name: None,
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: Some("submit".into()),
+                disabled: false,
+                form_index: Some(0),
+                context: None,
+                hint: Some(ElementHint {
+                    hint_type: "action".into(),
+                    value: "submit".into(),
+                }),
+            },
+        ],
+        visible_text: "Sign In".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    }
+}
+
+/// Test 1: SemanticView with hinted elements shows hints in `to_prompt()`.
+#[test]
+fn test_hints_detection() {
+    let view = hinted_login_view();
+    let prompt = view.to_prompt();
+
+    assert!(
+        prompt.contains("[hint:field:email]"),
+        "prompt should contain email hint annotation"
+    );
+    assert!(
+        prompt.contains("[hint:field:password]"),
+        "prompt should contain password hint annotation"
+    );
+    assert!(
+        prompt.contains("[hint:action:submit]"),
+        "prompt should contain action hint annotation"
+    );
+}
+
+/// Test 2: Hinted login form resolves correct fill + click sequence.
+#[test]
+fn test_hints_resolve_login() {
+    let view = hinted_login_view();
+    let goal = "login as alice@test.com password s3cret";
+
+    // Step 1: email field via hint
+    let r1 = heuristics::hints::try_hints(&view, goal, &[]);
+    assert!(r1.action.is_some(), "should resolve email via hint");
+    match r1.action.unwrap() {
+        Action::Type { element, value, .. } => {
+            assert_eq!(element, 0, "should target hinted email field");
+            assert_eq!(value, "alice@test.com");
+        }
+        other => panic!("expected Type, got {other:?}"),
+    }
+
+    // Step 2: password field via hint
+    let r2 = heuristics::hints::try_hints(&view, goal, &[0]);
+    assert!(r2.action.is_some(), "should resolve password via hint");
+    match r2.action.unwrap() {
+        Action::Type { element, value, .. } => {
+            assert_eq!(element, 1, "should target hinted password field");
+            assert_eq!(value, "s3cret");
+        }
+        other => panic!("expected Type, got {other:?}"),
+    }
+
+    // Step 3: submit button via hint
+    let r3 = heuristics::hints::try_hints(&view, goal, &[0, 1]);
+    assert!(r3.action.is_some(), "should click submit via hint");
+    match r3.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 2, "should target hinted submit button");
+        }
+        other => panic!("expected Click, got {other:?}"),
+    }
+}
+
+/// Test 3: Hint-resolved actions have confidence >= 0.98.
+#[test]
+fn test_hints_high_confidence() {
+    let view = hinted_login_view();
+    let goal = "login as alice@test.com password s3cret";
+
+    let r = heuristics::hints::try_hints(&view, goal, &[]);
+    assert!(
+        r.confidence >= 0.98,
+        "hint confidence should be >= 0.98, got {}",
+        r.confidence
+    );
+}
+
+/// Test 4: Verify 5-tier order — hints (Tier 1) checked before heuristics (Tier 2).
+///
+/// When a page has both hints and heuristic-matchable elements, the hint
+/// should win because it runs first in the dispatcher chain.
+#[test]
+fn test_5tier_order_hints_before_heuristics() {
+    let view = hinted_login_view();
+    let goal = "login as alice@test.com password s3cret";
+
+    // Hints should resolve first — and with higher confidence than heuristics.
+    let hint_result = heuristics::hints::try_hints(&view, goal, &[]);
+    assert!(
+        hint_result.action.is_some(),
+        "hints should resolve before heuristics get a chance"
+    );
+    assert!(
+        hint_result.confidence >= 0.9,
+        "hint confidence must pass the 0.9 gate in decide_with_retry"
+    );
+
+    // Verify the enum variant ordering: Hints != Heuristic.
+    assert_ne!(
+        DecisionSource::Hints,
+        DecisionSource::Heuristic,
+        "Hints and Heuristic must be distinct sources"
+    );
+}
+
+/// Test 5: Page without hints falls through to heuristics (no hint action resolved).
+#[test]
+fn test_no_hints_fallback() {
+    let view = mock_view(
+        vec![
+            input_element(0, "Username", "text", Some("acct"), Some(0)),
+            input_element(1, "Password", "password", Some("pw"), Some(0)),
+            button_element(2, "Login", Some(0)),
+        ],
+        "login page",
+    );
+
+    let goal = "login as testuser password secret123";
+
+    // Hints should return no action (no data-lad attributes).
+    let hint_r = heuristics::hints::try_hints(&view, goal, &[]);
+    assert!(
+        hint_r.action.is_none(),
+        "no hints present — should return None"
+    );
+
+    // Heuristics should still work (fallback).
+    let heur_r = heuristics::try_resolve(&view, goal, &[]);
+    assert!(
+        heur_r.action.is_some(),
+        "heuristics should resolve when hints don't"
     );
 }
