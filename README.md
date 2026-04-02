@@ -11,6 +11,8 @@
 
 [Quick Start](#quick-start) · [How It Works](#how-it-works) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
 
+![lad demo](assets/demo.gif)
+
 </div>
 
 ---
