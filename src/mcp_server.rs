@@ -13,7 +13,7 @@ use rmcp::model::*;
 use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
 use rmcp::service::ServiceExt;
-use rmcp::{ServerHandler, tool, tool_router};
+use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
 // ── Tool parameter types ───────────────────────────────────────────
@@ -354,6 +354,7 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
 
 // ── ServerHandler ──────────────────────────────────────────────────
 
+#[tool_handler]
 impl ServerHandler for LadServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
