@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Login — My App</title>
+</head>
+<body>
+  <h1>Sign In</h1>
+  <form data-lad="form:login" action="/auth/login" method="POST">
+    <label for="email">Email</label>
+    <input id="email" type="email" name="email" data-lad="field:email" placeholder="you@example.com" />
+
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" data-lad="field:password" />
+
+    <button type="submit" data-lad="action:submit">Sign In</button>
+  </form>
+</body>
+</html>

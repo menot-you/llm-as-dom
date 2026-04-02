@@ -6,7 +6,7 @@
 use chromiumoxide::Page;
 use serde::Deserialize;
 
-use crate::semantic::{Element, ElementKind, PageState, SemanticView};
+use crate::semantic::{Element, ElementHint, ElementKind, PageState, SemanticView};
 
 /// Extract page structure via JS and compress to a [`SemanticView`].
 ///
@@ -109,6 +109,18 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                         || lcHref.includes('youtube.com') || lcHref.includes('tiktok.com')) score -= 3;
                 }
 
+                // ── @lad/hints detection ─────────────────────────────
+                let hintType = null;
+                let hintValue = null;
+                const ladHint = el.getAttribute('data-lad');
+                if (ladHint) {
+                    const colonIdx = ladHint.indexOf(':');
+                    if (colonIdx > 0) {
+                        hintType = ladHint.substring(0, colonIdx);
+                        hintValue = ladHint.substring(colonIdx + 1);
+                    }
+                }
+
                 rawElements.push({
                     el, kind, label: label.substring(0, 80),
                     name: el.getAttribute('name') || null,
@@ -118,6 +130,8 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                     input_type: el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
                     disabled: el.disabled || false,
                     form_index: formIndex,
+                    hint_type: hintType,
+                    hint_value: hintValue,
                     score,
                     isActionable: kind !== 'link' && kind !== 'other',
                 });
@@ -151,6 +165,8 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                     input_type: raw.input_type,
                     disabled: raw.disabled,
                     form_index: raw.form_index,
+                    hint_type: raw.hint_type,
+                    hint_value: raw.hint_value,
                 });
                 id++;
             }
@@ -184,18 +200,28 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
     let elements: Vec<Element> = extraction
         .elements
         .into_iter()
-        .map(|e| Element {
-            id: e.id,
-            kind: parse_kind(&e.kind),
-            label: e.label,
-            name: e.name,
-            value: e.value,
-            placeholder: e.placeholder,
-            href: e.href,
-            input_type: e.input_type,
-            disabled: e.disabled,
-            form_index: e.form_index,
-            context: None,
+        .map(|e| {
+            let hint = match (e.hint_type, e.hint_value) {
+                (Some(ht), Some(hv)) => Some(ElementHint {
+                    hint_type: ht,
+                    value: hv,
+                }),
+                _ => None,
+            };
+            Element {
+                id: e.id,
+                kind: parse_kind(&e.kind),
+                label: e.label,
+                name: e.name,
+                value: e.value,
+                placeholder: e.placeholder,
+                href: e.href,
+                input_type: e.input_type,
+                disabled: e.disabled,
+                form_index: e.form_index,
+                context: None,
+                hint,
+            }
         })
         .collect();
 
@@ -249,6 +275,10 @@ struct JsElement {
     #[serde(default)]
     disabled: bool,
     form_index: Option<u32>,
+    /// `@lad/hints` hint type (e.g. `"field"`, `"form"`, `"action"`).
+    hint_type: Option<String>,
+    /// `@lad/hints` hint value (e.g. `"email"`, `"login"`, `"submit"`).
+    hint_value: Option<String>,
 }
 
 /// Map a JS kind string to the strongly-typed [`ElementKind`].
