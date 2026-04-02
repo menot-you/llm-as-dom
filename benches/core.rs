@@ -27,6 +27,7 @@ fn input_element(
         disabled: false,
         form_index: form,
         context: None,
+        hint: None,
     }
 }
 
@@ -43,6 +44,7 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         disabled: false,
         form_index: form,
         context: None,
+        hint: None,
     }
 }
 
@@ -59,6 +61,7 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         disabled: false,
         form_index: None,
         context: None,
+        hint: None,
     }
 }
 
