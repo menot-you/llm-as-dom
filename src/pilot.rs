@@ -3,6 +3,7 @@
 //! Heuristics resolve ~70-90% of actions in 10ms. LLM only for ambiguity.
 
 use async_trait::async_trait;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -122,6 +123,32 @@ pub struct PilotResult {
     pub llm_hits: u32,
     /// Total number of retries across all steps.
     pub retry_count: u32,
+    /// Base64-encoded PNG screenshots taken during the run (e.g. on escalation).
+    pub screenshots: Vec<String>,
+}
+
+/// Capture a full-page screenshot as a base64-encoded PNG string.
+///
+/// Returns `None` if the screenshot fails (non-fatal; logs a warning).
+pub async fn take_screenshot(page: &chromiumoxide::Page) -> Option<String> {
+    match page
+        .screenshot(
+            chromiumoxide::page::ScreenshotParams::builder()
+                .full_page(true)
+                .build(),
+        )
+        .await
+    {
+        Ok(png_bytes) => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+            tracing::info!(bytes = png_bytes.len(), "screenshot captured");
+            Some(b64)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "screenshot capture failed");
+            None
+        }
+    }
 }
 
 /// Run the pilot loop: observe -> heuristics -> LLM fallback -> act -> repeat.
@@ -141,6 +168,7 @@ pub async fn run_pilot(
     let mut heuristic_hits: u32 = 0;
     let mut llm_hits: u32 = 0;
     let mut total_retries: u32 = 0;
+    let mut screenshots: Vec<String> = Vec::new();
 
     for step_idx in 0..config.max_steps {
         let step_start = Instant::now();
@@ -164,6 +192,7 @@ pub async fn run_pilot(
             config.use_heuristics,
             page,
             &mut total_retries,
+            &mut screenshots,
         )
         .await?;
 
@@ -207,6 +236,7 @@ pub async fn run_pilot(
                 heuristic_hits,
                 llm_hits,
                 retry_count: total_retries,
+                screenshots,
             });
         }
 
@@ -230,6 +260,11 @@ pub async fn run_pilot(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
+    // Max steps reached -- take a screenshot for escalation context.
+    if let Some(b64) = take_screenshot(page).await {
+        screenshots.push(b64);
+    }
+
     let final_action = Action::Escalate {
         reason: format!("max steps ({}) reached", config.max_steps),
     };
@@ -241,10 +276,14 @@ pub async fn run_pilot(
         heuristic_hits,
         llm_hits,
         retry_count: total_retries,
+        screenshots,
     })
 }
 
 /// Decide the next action, retrying the LLM on parse failure with a fresh DOM.
+///
+/// When all retries are exhausted, captures a screenshot and embeds it as
+/// base64 PNG in the `Escalate` reason for visual debugging context.
 #[allow(clippy::too_many_arguments)]
 async fn decide_with_retry(
     view: &crate::semantic::SemanticView,
@@ -255,6 +294,7 @@ async fn decide_with_retry(
     use_heuristics: bool,
     page: &chromiumoxide::Page,
     total_retries: &mut u32,
+    screenshots: &mut Vec<String>,
 ) -> Result<(Action, DecisionSource, f32), crate::Error> {
     if use_heuristics {
         let h = heuristics::try_resolve(view, goal, acted_on);
@@ -285,14 +325,14 @@ async fn decide_with_retry(
                 *total_retries += 1;
             }
 
-            // All retries failed -- escalate
-            Ok((
-                Action::Escalate {
-                    reason: format!("LLM failed after retries: {e}"),
-                },
-                DecisionSource::Llm,
-                0.0,
-            ))
+            // All retries failed -- take a screenshot for escalation context.
+            let mut reason = format!("LLM failed after retries: {e}");
+            if let Some(b64) = take_screenshot(page).await {
+                reason.push_str("\n[screenshot attached]");
+                screenshots.push(b64);
+            }
+
+            Ok((Action::Escalate { reason }, DecisionSource::Llm, 0.0))
         }
     }
 }

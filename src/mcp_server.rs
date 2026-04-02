@@ -193,9 +193,14 @@ impl LadServer {
             }).collect::<Vec<_>>(),
         });
 
-        Ok(CallToolResult::success(vec![Content::text(
-            to_pretty_json(&output),
-        )]))
+        let mut content_blocks: Vec<Content> = vec![Content::text(to_pretty_json(&output))];
+
+        // Append any screenshots as image content blocks.
+        for b64_png in &result.screenshots {
+            content_blocks.push(Content::image(b64_png, "image/png"));
+        }
+
+        Ok(CallToolResult::success(content_blocks))
     }
 
     /// Extract structured information from a web page.
