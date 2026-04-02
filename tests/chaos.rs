@@ -17,6 +17,7 @@ fn view(elements: Vec<Element>, hint: &str) -> SemanticView {
         elements,
         visible_text: String::new(),
         state: PageState::Ready,
+        element_cap: None,
     }
 }
 
@@ -28,6 +29,7 @@ fn view_with_text(elements: Vec<Element>, hint: &str, text: &str) -> SemanticVie
         elements,
         visible_text: text.into(),
         state: PageState::Ready,
+        element_cap: None,
     }
 }
 
@@ -39,6 +41,7 @@ fn view_with_url(elements: Vec<Element>, hint: &str, url: &str, title: &str) -> 
         elements,
         visible_text: String::new(),
         state: PageState::Ready,
+        element_cap: None,
     }
 }
 
@@ -331,7 +334,10 @@ fn heuristic_multiple_forms_ambiguous_goal() {
     // and extracts "newsletter@test.com", then matches the first email input (form 0).
     // This is a false positive -- it treats any mention of "email" as a login credential.
     // Document this behavior: heuristic fires with high confidence on non-login forms.
-    assert!(r.action.is_some(), "login heuristic falsely matches non-login goal");
+    assert!(
+        r.action.is_some(),
+        "login heuristic falsely matches non-login goal"
+    );
     assert!(
         r.confidence >= 0.6,
         "BUG: high confidence on non-login context, confidence={:.2}",
@@ -353,7 +359,10 @@ fn heuristic_special_chars_in_credential() {
     // Password with single quotes, backslashes, and special chars
     let goal = r#"login as admin password p@ss'w\"ord\n<script>"#;
     let r = heuristics::try_resolve(&v, goal, &[]);
-    assert!(r.action.is_some(), "should still resolve with special chars");
+    assert!(
+        r.action.is_some(),
+        "should still resolve with special chars"
+    );
     match r.action.unwrap() {
         Action::Type { value, .. } => {
             // The extracted value should be the raw token, not escaped.
@@ -806,7 +815,10 @@ fn error_variants_format() {
 fn error_debug_all_variants() {
     let err = llm_as_dom::Error::Timeout;
     let debug = format!("{err:?}");
-    assert!(debug.contains("Timeout"), "debug format should name variant");
+    assert!(
+        debug.contains("Timeout"),
+        "debug format should name variant"
+    );
 }
 
 // ── 10. Navigation heuristic edge cases ─────────────────────────────
@@ -815,17 +827,17 @@ fn error_debug_all_variants() {
 #[test]
 fn navigation_exact_match_beats_partial() {
     let v = view(
-        vec![
-            link(0, "About Us", "/about-us"),
-            link(1, "About", "/about"),
-        ],
+        vec![link(0, "About Us", "/about-us"), link(1, "About", "/about")],
         "content page",
     );
     let r = heuristics::try_resolve(&v, "click About", &[]);
     assert!(r.action.is_some());
     match r.action.unwrap() {
         Action::Click { element, .. } => {
-            assert_eq!(element, 1, "exact match 'About' should beat partial 'About Us'");
+            assert_eq!(
+                element, 1,
+                "exact match 'About' should beat partial 'About Us'"
+            );
         }
         other => panic!("expected Click, got {other:?}"),
     }
@@ -835,10 +847,7 @@ fn navigation_exact_match_beats_partial() {
 #[test]
 fn navigation_no_match_returns_none() {
     let v = view(
-        vec![
-            link(0, "Home", "/"),
-            link(1, "Contact", "/contact"),
-        ],
+        vec![link(0, "Home", "/"), link(1, "Contact", "/contact")],
         "content page",
     );
     let r = heuristics::try_resolve(&v, "click Settings", &[]);
@@ -851,10 +860,7 @@ fn navigation_no_match_returns_none() {
 /// Href-only match (label doesn't match but href does).
 #[test]
 fn navigation_matches_by_href() {
-    let v = view(
-        vec![link(0, "Click Here", "/settings")],
-        "content page",
-    );
+    let v = view(vec![link(0, "Click Here", "/settings")], "content page");
     let r = heuristics::try_resolve(&v, "go to settings", &[]);
     assert!(r.action.is_some(), "should match via href");
     match r.action.unwrap() {
@@ -868,10 +874,7 @@ fn navigation_matches_by_href() {
 /// Search input detection by name="q" (Google-style).
 #[test]
 fn search_detects_name_q() {
-    let v = view(
-        vec![inp(0, "", "text", Some("q"), None)],
-        "search page",
-    );
+    let v = view(vec![inp(0, "", "text", Some("q"), None)], "search page");
     let r = heuristics::try_resolve(&v, "search for weather", &[]);
     assert!(r.action.is_some(), "name=q should trigger search heuristic");
 }

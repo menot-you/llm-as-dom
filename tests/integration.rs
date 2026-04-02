@@ -20,6 +20,7 @@ fn mock_view(elements: Vec<Element>, page_hint: &str) -> SemanticView {
         elements,
         visible_text: String::new(),
         state: PageState::Ready,
+        element_cap: None,
     }
 }
 

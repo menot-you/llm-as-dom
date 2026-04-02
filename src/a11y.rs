@@ -19,9 +19,10 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
 
     let js = r#"
         (() => {
+            const MAX_ELEMENTS = 50;
             const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"]';
             const els = document.querySelectorAll(selectors);
-            const elements = [];
+            const rawElements = [];
             let id = 0;
 
             // Build a form index: map each <form> to a sequential number
@@ -29,11 +30,45 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
             const formMap = new Map();
             allForms.forEach((f, i) => formMap.set(f, i));
 
-            for (const el of els) {
+            // ── Visibility helpers ──────────────────────────────────────
+            function hasZeroAncestorOpacity(el, maxDepth) {
+                let cur = el.parentElement;
+                for (let d = 0; d < maxDepth && cur; d++, cur = cur.parentElement) {
+                    if (parseFloat(window.getComputedStyle(cur).opacity) === 0) return true;
+                }
+                return false;
+            }
+
+            function isHoneypot(el) {
+                const name = (el.getAttribute('name') || '').toLowerCase();
+                if (name === 'website' || name === 'url' || name === 'honeypot') return true;
+                const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+                const ti = el.getAttribute('tabindex');
                 const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+                const invisible = style.display === 'none' || style.visibility === 'hidden'
+                    || parseFloat(style.opacity) === 0;
+                if (ac === 'off' && invisible) return true;
+                if (ti === '-1' && invisible) return true;
+                return false;
+            }
+
+            function isVisible(el) {
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                if (parseFloat(style.opacity) === 0) return false;
                 const rect = el.getBoundingClientRect();
-                if (rect.width === 0 && rect.height === 0) continue;
+                if (rect.width === 0 && rect.height === 0) return false;
+                if (rect.right < 0 || rect.bottom < 0
+                    || rect.left > window.innerWidth
+                    || rect.top > window.innerHeight) return false;
+                if (hasZeroAncestorOpacity(el, 3)) return false;
+                if (isHoneypot(el)) return false;
+                return true;
+            }
+
+            // ── Collect visible elements ────────────────────────────────
+            for (const el of els) {
+                if (!isVisible(el)) continue;
 
                 const tag = el.tagName.toLowerCase();
                 let kind = 'other';
@@ -54,23 +89,68 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                 const elTitle = el.getAttribute('title');
                 const label = ariaLabel || labelText || placeholder || textContent || elTitle || '';
 
-                // Determine which form this element belongs to (null if none)
                 const closestForm = el.closest('form');
                 const formIndex = closestForm ? (formMap.get(closestForm) ?? null) : null;
 
-                el.setAttribute('data-lad-id', String(id));
+                // ── Relevance score (used when cap triggers) ────────────
+                let score = 0;
+                if (closestForm) score += 3;
+                if (kind === 'input' || kind === 'textarea' || kind === 'select'
+                    || kind === 'checkbox' || kind === 'radio') score += 5;
+                if (kind === 'button') score += 4;
+                if (tag === 'input' && el.type === 'submit') score += 2;
+                if (ariaLabel) score += 2;
+                const href = el.getAttribute('href') || '';
+                if (kind === 'link') {
+                    if (href === '#' || href.startsWith('#')) score -= 2;
+                    const lcHref = href.toLowerCase();
+                    if (lcHref.includes('facebook.com') || lcHref.includes('twitter.com')
+                        || lcHref.includes('instagram.com') || lcHref.includes('linkedin.com')
+                        || lcHref.includes('youtube.com') || lcHref.includes('tiktok.com')) score -= 3;
+                }
 
-                elements.push({
-                    id: id,
-                    kind: kind,
-                    label: label.substring(0, 80),
+                rawElements.push({
+                    el, kind, label: label.substring(0, 80),
                     name: el.getAttribute('name') || null,
                     value: el.value || null,
                     placeholder: placeholder || null,
-                    href: el.getAttribute('href') || null,
+                    href: href || null,
                     input_type: el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
                     disabled: el.disabled || false,
                     form_index: formIndex,
+                    score,
+                    isActionable: kind !== 'link' && kind !== 'other',
+                });
+            }
+
+            // ── Element cap: keep top MAX_ELEMENTS by score ─────────────
+            const totalCount = rawElements.length;
+            let kept = rawElements;
+            let elementCap = null;
+            if (totalCount > MAX_ELEMENTS) {
+                const actionable = rawElements.filter(e => e.isActionable);
+                const rest = rawElements.filter(e => !e.isActionable);
+                rest.sort((a, b) => b.score - a.score);
+                const slotsLeft = Math.max(0, MAX_ELEMENTS - actionable.length);
+                kept = actionable.concat(rest.slice(0, slotsLeft));
+                elementCap = kept.length + '/' + totalCount;
+            }
+
+            // ── Assign stable IDs and build output ──────────────────────
+            const elements = [];
+            for (const raw of kept) {
+                raw.el.setAttribute('data-lad-id', String(id));
+                elements.push({
+                    id: id,
+                    kind: raw.kind,
+                    label: raw.label,
+                    name: raw.name,
+                    value: raw.value,
+                    placeholder: raw.placeholder,
+                    href: raw.href,
+                    input_type: raw.input_type,
+                    disabled: raw.disabled,
+                    form_index: raw.form_index,
                 });
                 id++;
             }
@@ -85,7 +165,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                 }
             }
 
-            return { elements, visibleText, formCount: allForms.length };
+            return { elements, visibleText, formCount: allForms.length, elementCap };
         })()
     "#;
 
@@ -128,6 +208,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
         elements,
         visible_text: extraction.visible_text,
         state: PageState::Ready,
+        element_cap: extraction.element_cap,
     })
 }
 
@@ -139,6 +220,9 @@ struct JsExtraction {
     visible_text: String,
     #[serde(rename = "formCount")]
     form_count: u32,
+    /// `"50/316"` when elements were capped, `null` otherwise.
+    #[serde(rename = "elementCap")]
+    element_cap: Option<String>,
 }
 
 /// A single element as returned by the JS extractor.

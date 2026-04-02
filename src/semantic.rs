@@ -21,6 +21,10 @@ pub struct SemanticView {
     pub visible_text: String,
     /// Current page lifecycle state.
     pub state: PageState,
+    /// Element cap indicator: `"50/316"` means 50 kept out of 316 total.
+    /// `None` when no filtering was applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub element_cap: Option<String>,
 }
 
 /// A single interactive element extracted from the DOM.
@@ -98,7 +102,11 @@ impl SemanticView {
         let _ = writeln!(out, "URL: {}", self.url);
         let _ = writeln!(out, "TITLE: {}", self.title);
         let _ = writeln!(out, "HINT: {}", self.page_hint);
-        let _ = writeln!(out, "STATE: {:?}\n", self.state);
+        let _ = writeln!(out, "STATE: {:?}", self.state);
+        if let Some(cap) = &self.element_cap {
+            let _ = writeln!(out, "ELEMENT_CAP: {cap}");
+        }
+        out.push('\n');
         out.push_str("ELEMENTS:\n");
         for el in &self.elements {
             let _ = write!(out, "[{}] {:?}", el.id, el.kind);
