@@ -127,7 +127,7 @@ pub async fn run_pilot(
 ) -> Result<PilotResult, crate::Error> {
     let run_start = Instant::now();
     let mut history: Vec<Step> = Vec::new();
-    let mut filled_fields: Vec<u32> = Vec::new();
+    let mut acted_on: Vec<u32> = Vec::new();
     let mut heuristic_hits: u32 = 0;
     let mut llm_hits: u32 = 0;
 
@@ -145,7 +145,7 @@ pub async fn run_pilot(
 
         // 2. Decide: heuristics first, LLM fallback
         let (action, source, confidence) = if config.use_heuristics {
-            let h = heuristics::try_resolve(&view, &config.goal, &filled_fields);
+            let h = heuristics::try_resolve(&view, &config.goal, &acted_on);
             if let Some(action) = h.action {
                 tracing::info!(
                     step = step_idx,
@@ -181,8 +181,8 @@ pub async fn run_pilot(
         );
 
         // Track filled fields for heuristic state
-        if let Action::Type { element, .. } = &action {
-            filled_fields.push(*element);
+        if let Action::Type { element, .. } | Action::Click { element, .. } = &action {
+            acted_on.push(*element);
         }
 
         let step = Step {

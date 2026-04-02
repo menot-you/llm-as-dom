@@ -12,26 +12,29 @@ use crate::semantic::{Element, ElementKind, PageState, SemanticView};
 ///
 /// Stamps each interactive element with a `data-lad-id` attribute so that
 /// subsequent actions can target elements by stable numeric ID.
+/// Also tracks which `<form>` each element belongs to for scoping.
 pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::Error> {
     let url = page.url().await?.unwrap_or_else(|| "unknown".into());
     let title = page.get_title().await?.unwrap_or_default();
 
-    // Extract interactive elements + visible text via JS
     let js = r#"
         (() => {
-            // Collect interactive elements
             const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"]';
             const els = document.querySelectorAll(selectors);
             const elements = [];
             let id = 0;
-            
+
+            // Build a form index: map each <form> to a sequential number
+            const allForms = document.querySelectorAll('form');
+            const formMap = new Map();
+            allForms.forEach((f, i) => formMap.set(f, i));
+
             for (const el of els) {
-                // Skip hidden elements
                 const style = window.getComputedStyle(el);
                 if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
                 const rect = el.getBoundingClientRect();
                 if (rect.width === 0 && rect.height === 0) continue;
-                
+
                 const tag = el.tagName.toLowerCase();
                 let kind = 'other';
                 if (tag === 'button' || el.getAttribute('role') === 'button' || (tag === 'input' && el.type === 'submit')) kind = 'button';
@@ -42,19 +45,21 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                 else if (el.getAttribute('role') === 'checkbox' || (tag === 'input' && el.type === 'checkbox')) kind = 'checkbox';
                 else if (el.getAttribute('role') === 'radio' || (tag === 'input' && el.type === 'radio')) kind = 'radio';
                 else if (el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'menuitem') kind = 'button';
-                
-                // Build label from multiple sources
+
                 const ariaLabel = el.getAttribute('aria-label');
                 const labelEl = el.labels?.[0];
                 const labelText = labelEl?.textContent?.trim();
                 const placeholder = el.getAttribute('placeholder');
                 const textContent = el.textContent?.trim()?.substring(0, 80);
-                const title = el.getAttribute('title');
-                const label = ariaLabel || labelText || placeholder || textContent || title || '';
-                
-                // Stamp a data attribute for action execution
+                const elTitle = el.getAttribute('title');
+                const label = ariaLabel || labelText || placeholder || textContent || elTitle || '';
+
+                // Determine which form this element belongs to (null if none)
+                const closestForm = el.closest('form');
+                const formIndex = closestForm ? (formMap.get(closestForm) ?? null) : null;
+
                 el.setAttribute('data-lad-id', String(id));
-                
+
                 elements.push({
                     id: id,
                     kind: kind,
@@ -65,11 +70,11 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                     href: el.getAttribute('href') || null,
                     input_type: el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
                     disabled: el.disabled || false,
+                    form_index: formIndex,
                 });
                 id++;
             }
-            
-            // Collect visible text (headings + paragraphs)
+
             const textNodes = document.querySelectorAll('h1, h2, h3, h4, p, label, legend, [role="heading"]');
             let visibleText = '';
             for (const node of textNodes) {
@@ -79,8 +84,8 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                     visibleText += text.substring(0, 100);
                 }
             }
-            
-            return { elements, visibleText };
+
+            return { elements, visibleText, formCount: allForms.length };
         })()
     "#;
 
@@ -91,6 +96,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
 
     tracing::info!(
         elements = extraction.elements.len(),
+        forms = extraction.form_count,
         visible_text_len = extraction.visible_text.len(),
         "DOM extracted via JS"
     );
@@ -108,6 +114,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
             href: e.href,
             input_type: e.input_type,
             disabled: e.disabled,
+            form_index: e.form_index,
             context: None,
         })
         .collect();
@@ -130,6 +137,8 @@ struct JsExtraction {
     elements: Vec<JsElement>,
     #[serde(rename = "visibleText")]
     visible_text: String,
+    #[serde(rename = "formCount")]
+    form_count: u32,
 }
 
 /// A single element as returned by the JS extractor.
@@ -145,6 +154,7 @@ struct JsElement {
     input_type: Option<String>,
     #[serde(default)]
     disabled: bool,
+    form_index: Option<u32>,
 }
 
 /// Map a JS kind string to the strongly-typed [`ElementKind`].

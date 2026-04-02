@@ -49,6 +49,9 @@ pub struct Element {
     pub input_type: Option<String>,
     /// Whether the element is disabled.
     pub disabled: bool,
+    /// Index of the `<form>` this element belongs to (`None` if outside any form).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form_index: Option<u32>,
     /// Optional contextual hint added by heuristics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,

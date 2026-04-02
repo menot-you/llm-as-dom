@@ -19,18 +19,18 @@ pub struct HeuristicResult {
 
 /// Try to resolve the next action using rules only (no LLM).
 /// Returns None if confidence is too low — caller should use LLM.
-pub fn try_resolve(view: &SemanticView, goal: &str, filled_fields: &[u32]) -> HeuristicResult {
+pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> HeuristicResult {
     let goal_lower = goal.to_lowercase();
 
     // Strategy 1: Form fill by goal parsing
-    if let Some(result) = try_form_fill(view, &goal_lower, filled_fields)
+    if let Some(result) = try_form_fill(view, &goal_lower, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;
     }
 
     // Strategy 2: Button click by goal keywords
-    if let Some(result) = try_button_click(view, &goal_lower, filled_fields)
+    if let Some(result) = try_button_click(view, &goal_lower, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;
@@ -50,19 +50,45 @@ pub fn try_resolve(view: &SemanticView, goal: &str, filled_fields: &[u32]) -> He
     }
 }
 
+/// Determine which form to target based on goal keywords.
+///
+/// For login goals, picks the first form containing a password field.
+/// Returns `None` to allow all forms (no scoping).
+fn target_form(view: &SemanticView, goal: &str) -> Option<u32> {
+    let is_login = goal.contains("login") || goal.contains("sign in") || goal.contains("log in");
+    if !is_login {
+        return None;
+    }
+    // Find the first form that has a password input
+    view.elements
+        .iter()
+        .find(|e| e.input_type.as_deref() == Some("password") && e.form_index.is_some())
+        .and_then(|e| e.form_index)
+}
+
+/// Returns `true` if the element belongs to the target form (or no scoping is active).
+fn in_target_form(el: &crate::semantic::Element, target: Option<u32>) -> bool {
+    match target {
+        None => true,
+        Some(idx) => el.form_index == Some(idx),
+    }
+}
+
 /// Parse goal for credentials and fill form fields.
 fn try_form_fill(
     view: &SemanticView,
     goal: &str,
-    filled_fields: &[u32],
+    acted_on: &[u32],
 ) -> Option<HeuristicResult> {
+    let target = target_form(view, goal);
+
     // Extract credentials from goal text
     let username = extract_credential(goal, &["as ", "user ", "username ", "email ", "login "]);
     let password = extract_credential(goal, &["password ", "pass ", "pw "]);
 
-    // Find unfilled input fields
+    // Find unfilled input fields (scoped to target form)
     for el in &view.elements {
-        if filled_fields.contains(&el.id) {
+        if acted_on.contains(&el.id) || !in_target_form(el, target) {
             continue;
         }
 
@@ -140,18 +166,24 @@ fn try_form_fill(
 fn try_button_click(
     view: &SemanticView,
     goal: &str,
-    filled_fields: &[u32],
+    acted_on: &[u32],
 ) -> Option<HeuristicResult> {
+    let target = target_form(view, goal);
+
     // Only click submit after at least one field is filled
-    if filled_fields.is_empty() {
+    if acted_on.is_empty() {
         return None;
     }
 
-    // Check if all input fields have been filled
+    // Check if all input fields in the target form have been filled
     let unfilled_inputs = view
         .elements
         .iter()
-        .filter(|e| e.kind == ElementKind::Input && !filled_fields.contains(&e.id))
+        .filter(|e| {
+            e.kind == ElementKind::Input
+                && !acted_on.contains(&e.id)
+                && in_target_form(e, target)
+        })
         .count();
 
     if unfilled_inputs > 0 {
@@ -173,7 +205,11 @@ fn try_button_click(
     let mut best_button: Option<(u32, f32)> = None;
 
     for el in &view.elements {
-        if el.kind != ElementKind::Button || el.disabled {
+        if el.kind != ElementKind::Button
+            || el.disabled
+            || !in_target_form(el, target)
+            || acted_on.contains(&el.id)
+        {
             continue;
         }
 
