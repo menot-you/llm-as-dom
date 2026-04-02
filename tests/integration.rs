@@ -6,8 +6,10 @@
 //! Pure-logic tests run in normal `cargo test`.
 
 use llm_as_dom::heuristics::{self, HeuristicResult};
-use llm_as_dom::pilot::Action;
-use llm_as_dom::semantic::{Element, ElementKind, PageState, SemanticView};
+#[allow(unused_imports)]
+use llm_as_dom::pilot::{Action, DecisionSource};
+#[allow(unused_imports)]
+use llm_as_dom::semantic::{Element, ElementHint, ElementKind, PageState, SemanticView};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
