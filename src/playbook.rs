@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::heuristics::extract_credential;
+use crate::heuristics::login::extract_credential;
 use crate::pilot::Action;
 use crate::semantic::SemanticView;
 
