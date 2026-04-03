@@ -9,6 +9,7 @@ pub mod backend;
 pub mod error;
 pub mod heuristics;
 pub mod locate;
+pub mod oauth;
 pub mod pilot;
 pub mod playbook;
 pub mod semantic;
