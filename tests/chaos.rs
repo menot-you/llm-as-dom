@@ -815,7 +815,7 @@ fn build_prompt_empty_goal() {
 #[test]
 fn error_variants_format() {
     let errors = vec![
-        llm_as_dom::Error::BrowserStr("chrome crashed".into()),
+        llm_as_dom::Error::Browser("chrome crashed".into()),
         llm_as_dom::Error::Backend("timeout".into()),
         llm_as_dom::Error::Timeout,
         llm_as_dom::Error::ActionFailed("element not found".into()),

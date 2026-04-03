@@ -2,8 +2,9 @@
 //!
 //! Usage: `lad --url <URL> [--goal <GOAL> | "goal words..."] [--visible] [--extract-only]`
 
-use futures::StreamExt;
-use llm_as_dom::{Error, a11y, backend, pilot};
+use llm_as_dom::engine::chromium::ChromiumEngine;
+use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
+use llm_as_dom::{a11y, backend, pilot};
 
 use clap::Parser;
 
@@ -85,41 +86,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let visible = cli.visible || cli.interactive;
     tracing::info!(url = %cli.url, visible, interactive = cli.interactive, "launching browser");
 
-    let tmp = std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()));
-    let mut builder = chromiumoxide::BrowserConfig::builder();
-    if cli.interactive {
-        // App mode: minimal Chrome window (no address bar, no tabs).
-        builder = builder
-            .arg("--app=about:blank")
-            .arg("--disable-extensions")
-            .arg("--disable-default-apps")
-            .arg("--disable-component-extensions-with-background-pages")
-            .arg("--disable-translate")
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .arg("--window-size=1024,768");
-    } else if !visible {
-        builder = builder.arg("--headless=new");
-    }
-    builder = builder
-        .arg("--disable-gpu")
-        .arg("--no-sandbox")
-        .arg("--disable-dev-shm-usage")
-        .arg(format!("--user-data-dir={}", tmp.display()));
-    if !cli.interactive {
-        builder = builder.arg("--window-size=1280,800");
-    }
+    let engine_config = EngineConfig {
+        visible,
+        interactive: cli.interactive,
+        user_data_dir: std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id())),
+        window_size: if cli.interactive {
+            (1024, 768)
+        } else {
+            (1280, 800)
+        },
+    };
 
-    let config = builder.build().map_err(Error::BrowserStr)?;
-    let (browser, mut handler) = chromiumoxide::Browser::launch(config)
-        .await
-        .map_err(|e| Error::BrowserStr(format!("{e}")))?;
-
-    let handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
-
-    let page = browser.new_page(&cli.url).await?;
+    let engine = ChromiumEngine::launch(engine_config).await?;
+    let page: Box<dyn PageHandle> = engine.new_page(&cli.url).await?;
     page.wait_for_navigation().await?;
-    a11y::wait_for_content(&page, cli.wait_timeout).await?;
+    a11y::wait_for_content(page.as_ref(), cli.wait_timeout).await?;
     tracing::info!("page loaded");
 
     // Inject Chrome profile cookies if --profile is set
@@ -128,13 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match llm_as_dom::profile::extract_cookies_from_profile(&profile_path) {
                 Ok(cookies) => {
                     tracing::info!(count = cookies.len(), "injecting Chrome profile cookies");
-                    for cookie in &cookies {
-                        let _ = llm_as_dom::session::inject_cookies_cdp(
-                            &page,
-                            std::slice::from_ref(cookie),
-                        )
-                        .await;
-                    }
+                    page.set_cookies(&cookies).await?;
                 }
                 Err(e) => tracing::warn!(error = %e, "failed to load Chrome profile cookies"),
             }
@@ -144,7 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if cli.extract_only || goal.is_empty() {
-        let view = a11y::extract_semantic_view(&page).await?;
+        let view = a11y::extract_semantic_view(page.as_ref()).await?;
         println!(
             "\n=== SemanticView ({} elements, ~{} tokens) ===\n",
             view.elements.len(),
@@ -196,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             interactive: cli.interactive,
         };
 
-        let result = pilot::run_pilot(&page, backend_impl.as_ref(), &config).await?;
+        let result = pilot::run_pilot(page.as_ref(), backend_impl.as_ref(), &config).await?;
 
         println!("\n=== Pilot Result ===");
         println!("Success: {}", result.success);
@@ -221,8 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     drop(page);
-    drop(browser);
-    handle.abort();
+    engine.close().await?;
 
     Ok(())
 }

@@ -3,9 +3,9 @@
 //! Falls back from CDP Accessibility API to direct JS DOM walking
 //! because chromiumoxide's CDP bindings have serde issues with some AX nodes.
 
-use chromiumoxide::Page;
 use serde::Deserialize;
 
+use crate::engine::PageHandle;
 use crate::semantic::{Element, ElementHint, ElementKind, FormMeta, PageState, SemanticView};
 
 /// Extract page structure via JS and compress to a [`SemanticView`].
@@ -13,9 +13,9 @@ use crate::semantic::{Element, ElementHint, ElementKind, FormMeta, PageState, Se
 /// Stamps each interactive element with a `data-lad-id` attribute so that
 /// subsequent actions can target elements by stable numeric ID.
 /// Also tracks which `<form>` each element belongs to for scoping.
-pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::Error> {
-    let url = page.url().await?.unwrap_or_else(|| "unknown".into());
-    let title = page.get_title().await?.unwrap_or_default();
+pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView, crate::Error> {
+    let url = page.url().await.unwrap_or_else(|_| "unknown".into());
+    let title = page.title().await.unwrap_or_else(|_| String::new());
 
     let js = r#"
         (() => {
@@ -208,10 +208,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
         })()
     "#;
 
-    let result = page.evaluate(js).await?;
-    let extraction: JsExtraction = result
-        .into_value()
-        .map_err(|e| crate::Error::Backend(format!("JS extraction parse failed: {e:?}")))?;
+    let extraction: JsExtraction = crate::engine::eval_js_into(page, js).await?;
 
     tracing::info!(
         elements = extraction.elements.len(),
@@ -551,7 +548,10 @@ pub const DEFAULT_WAIT_TIMEOUT: u64 = 5;
 /// is > 0 and unchanged for two consecutive checks (content stable).
 /// If `timeout_secs` elapses with zero elements, returns anyway
 /// (the page may be a bot-challenge or truly empty).
-pub async fn wait_for_content(page: &Page, timeout_secs: u64) -> Result<(), crate::Error> {
+pub async fn wait_for_content(
+    page: &dyn PageHandle,
+    timeout_secs: u64,
+) -> Result<(), crate::Error> {
     use std::time::{Duration, Instant};
 
     let poll_interval = Duration::from_millis(200);
@@ -564,10 +564,10 @@ pub async fn wait_for_content(page: &Page, timeout_secs: u64) -> Result<(), crat
 
     while Instant::now() < deadline {
         let count: i64 = page
-            .evaluate(js)
+            .eval_js(js)
             .await
             .ok()
-            .and_then(|v| v.into_value().ok())
+            .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or(0);
 
         if count > 0 {

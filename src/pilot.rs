@@ -167,15 +167,8 @@ pub struct PilotResult {
 /// Capture a full-page screenshot as a base64-encoded PNG string.
 ///
 /// Returns `None` if the screenshot fails (non-fatal; logs a warning).
-pub async fn take_screenshot(page: &chromiumoxide::Page) -> Option<String> {
-    match page
-        .screenshot(
-            chromiumoxide::page::ScreenshotParams::builder()
-                .full_page(true)
-                .build(),
-        )
-        .await
-    {
+pub async fn take_screenshot(page: &dyn crate::engine::PageHandle) -> Option<String> {
+    match page.screenshot_png().await {
         Ok(png_bytes) => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
             tracing::info!(bytes = png_bytes.len(), "screenshot captured");
@@ -195,7 +188,7 @@ pub async fn take_screenshot(page: &chromiumoxide::Page) -> Option<String> {
 /// - If heuristic returns `None` AND LLM returns an unparseable response, retries LLM once.
 /// - If all retries fail on a step, logs the failure and continues to the next step.
 pub async fn run_pilot(
-    page: &chromiumoxide::Page,
+    page: &dyn crate::engine::PageHandle,
     backend: &dyn PilotBackend,
     config: &PilotConfig,
 ) -> Result<PilotResult, crate::Error> {
@@ -641,7 +634,7 @@ async fn decide_with_retry(
     playbooks: &[crate::playbook::Playbook],
     use_hints: bool,
     use_heuristics: bool,
-    page: &chromiumoxide::Page,
+    page: &dyn crate::engine::PageHandle,
     total_retries: &mut u32,
     screenshots: &mut Vec<String>,
 ) -> Result<(Action, DecisionSource, f32), crate::Error> {
@@ -726,7 +719,7 @@ async fn decide_with_retry(
 
 /// Execute an action with retry on failure (stale DOM recovery).
 async fn execute_action_with_retry(
-    page: &chromiumoxide::Page,
+    page: &dyn crate::engine::PageHandle,
     action: &Action,
     max_retries: u32,
     total_retries: &mut u32,
@@ -765,7 +758,7 @@ async fn execute_action_with_retry(
 /// is no longer `Blocked`. Returns `Ok(())` when resolved, or
 /// `Err(Error::Timeout)` if the timeout elapses.
 async fn wait_for_captcha_resolution(
-    page: &chromiumoxide::Page,
+    page: &dyn crate::engine::PageHandle,
     timeout: Duration,
 ) -> Result<(), crate::Error> {
     let start = Instant::now();
@@ -830,15 +823,18 @@ pub fn js_escape(s: &str) -> String {
     out
 }
 
-/// Execute an action on the page via CDP.
-async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(), crate::Error> {
+/// Execute an action on the page via the engine-agnostic page handle.
+async fn execute_action(
+    page: &dyn crate::engine::PageHandle,
+    action: &Action,
+) -> Result<(), crate::Error> {
     match action {
         Action::Click { element, .. } => {
             let js = format!(
                 r#"document.querySelector('[data-lad-id="{}"]')?.click()"#,
                 element
             );
-            page.evaluate(js).await?;
+            let _ = page.eval_js(&js).await?;
         }
         Action::Type { element, value, .. } => {
             let escaped = js_escape(value);
@@ -854,7 +850,7 @@ async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(
                 }})()"#,
                 element,
             );
-            page.evaluate(js).await?;
+            let _ = page.eval_js(&js).await?;
         }
         Action::Select { element, value, .. } => {
             let escaped = js_escape(value);
@@ -865,7 +861,7 @@ async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(
                 }})()"#,
                 element,
             );
-            page.evaluate(js).await?;
+            let _ = page.eval_js(&js).await?;
         }
         Action::Scroll { direction, .. } => {
             let (x, y) = match direction.as_str() {
@@ -876,13 +872,13 @@ async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(
                 _ => (0, 300),
             };
             let js = format!("window.scrollBy({x}, {y})");
-            page.evaluate(js).await?;
+            let _ = page.eval_js(&js).await?;
         }
         Action::Wait { .. } => {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
         Action::Navigate { url, .. } => {
-            page.goto(url).await?;
+            page.navigate(url).await?;
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
         Action::Done { .. } | Action::Escalate { .. } => {}
