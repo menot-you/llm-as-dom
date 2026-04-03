@@ -23,6 +23,7 @@ fn mock_view(elements: Vec<Element>, page_hint: &str) -> SemanticView {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
@@ -536,6 +537,7 @@ fn test_detect_cloudflare_challenge() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Cloudflare challenge should be detected");
@@ -579,6 +581,7 @@ fn test_detect_captcha_in_text() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "CAPTCHA text should trigger detection");
@@ -599,6 +602,7 @@ fn test_detect_challenge_url_with_few_elements() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -626,6 +630,7 @@ fn test_detect_many_elements_not_blocked() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     assert!(
         detect_bot_challenge(&view).is_none(),
@@ -717,6 +722,7 @@ fn hinted_login_view() -> SemanticView {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
@@ -871,6 +877,7 @@ fn test_detect_reddit_challenge_url() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -899,6 +906,7 @@ fn test_detect_verify_url() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -922,6 +930,7 @@ fn test_detect_security_check_url() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -949,6 +958,7 @@ fn test_detect_github_404() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -977,6 +987,7 @@ fn test_detect_generic_404_title() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Generic 404 title should be detected");
@@ -997,6 +1008,7 @@ fn test_detect_access_denied_title() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Access Denied title should be detected");
@@ -1017,6 +1029,7 @@ fn test_detect_forbidden_title() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Forbidden title should be detected");
@@ -1041,6 +1054,7 @@ fn test_no_false_positive_not_in_title() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1162,6 +1176,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     let pb = find_playbook(&playbooks, &view.url).unwrap();
@@ -1221,6 +1236,7 @@ fn test_hints_active_when_heuristics_disabled() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     // Hints should resolve even though we conceptually disable heuristics.
@@ -1257,4 +1273,185 @@ fn test_default_config_enables_both() {
     assert!(config.use_hints, "hints should be on by default");
     assert!(config.use_heuristics, "heuristics should be on by default");
     assert!(config.playbook_dir.is_none(), "no playbook dir by default");
+}
+
+// ── Wave 2: Multi-page state tracking tests ──────────────────────────
+
+/// Navigate action variant serializes/deserializes correctly.
+#[test]
+fn test_navigate_action_variant() {
+    let action = Action::Navigate {
+        url: "https://example.com/dashboard".into(),
+        reasoning: "proceed to dashboard after login".into(),
+    };
+    let json = serde_json::to_string(&action).unwrap();
+    assert!(json.contains("navigate"), "should serialize as 'navigate'");
+    assert!(json.contains("dashboard"), "should contain the URL");
+
+    let parsed: Action = serde_json::from_str(&json).unwrap();
+    match parsed {
+        Action::Navigate { url, reasoning } => {
+            assert_eq!(url, "https://example.com/dashboard");
+            assert_eq!(reasoning, "proceed to dashboard after login");
+        }
+        other => panic!("expected Navigate, got {other:?}"),
+    }
+}
+
+/// SemanticView with session context includes session info in prompt.
+#[test]
+fn test_session_context_in_prompt() {
+    use llm_as_dom::session::{AuthState, SessionState};
+
+    let mut session = SessionState::new();
+    session.record_navigation(
+        "https://example.com/login".into(),
+        "Login".into(),
+        vec!["type: entered email".into()],
+        false,
+        true,
+    );
+    session.auth_state = AuthState::InProgress;
+
+    let view = mock_view(
+        vec![input_element(
+            0,
+            "Password",
+            "password",
+            Some("pass"),
+            Some(0),
+        )],
+        "login page",
+    );
+    let prompt = view.to_prompt_with_session(&session);
+    assert!(
+        prompt.contains("SESSION CONTEXT:"),
+        "should include session context header"
+    );
+    assert!(
+        prompt.contains("https://example.com/login"),
+        "should include visited URL"
+    );
+    assert!(
+        prompt.contains("entered email"),
+        "should include action taken"
+    );
+    assert!(
+        prompt.contains("AUTH: in progress"),
+        "should include auth state"
+    );
+}
+
+/// session_context field is skipped when None in JSON serialization.
+#[test]
+fn test_session_context_field_serialization() {
+    let view = mock_view(vec![], "test");
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(
+        !json.contains("session_context"),
+        "session_context should be omitted when None"
+    );
+
+    let mut view_with_ctx = mock_view(vec![], "test");
+    view_with_ctx.session_context = Some("AUTH: authenticated\n".into());
+    let json_with = serde_json::to_string(&view_with_ctx).unwrap();
+    assert!(
+        json_with.contains("session_context"),
+        "session_context should be present when Some"
+    );
+
+    // Round-trip: deserialize back
+    let parsed: SemanticView = serde_json::from_str(&json_with).unwrap();
+    assert!(parsed.session_context.is_some());
+    assert!(parsed.session_context.unwrap().contains("authenticated"));
+}
+
+/// PilotConfig with session Some works.
+#[test]
+fn test_pilot_config_with_session() {
+    use llm_as_dom::pilot::PilotConfig;
+    use llm_as_dom::session::SessionState;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    let session = Arc::new(Mutex::new(SessionState::new()));
+    let config = PilotConfig {
+        goal: "multi-page login".into(),
+        session: Some(session),
+        ..PilotConfig::default()
+    };
+    assert!(config.session.is_some());
+}
+
+/// Navigate action can be created programmatically.
+#[test]
+fn test_navigate_action_creation() {
+    let action = Action::Navigate {
+        url: "https://oauth.provider.com/authorize".into(),
+        reasoning: "redirect to OAuth provider".into(),
+    };
+    assert!(matches!(action, Action::Navigate { .. }));
+
+    // Ensure it is not a terminal action
+    assert!(!matches!(
+        action,
+        Action::Done { .. } | Action::Escalate { .. }
+    ));
+}
+
+/// Session context appears in to_prompt() when field is set.
+#[test]
+fn test_session_context_in_to_prompt() {
+    let mut view = mock_view(vec![], "test page");
+    let without = view.to_prompt();
+    assert!(
+        !without.contains("SESSION"),
+        "no session context by default"
+    );
+
+    view.session_context = Some("SESSION CONTEXT:\n  - visited: https://a.com (A)\n".into());
+    let with = view.to_prompt();
+    assert!(
+        with.contains("SESSION CONTEXT:"),
+        "session context should appear when set"
+    );
+    assert!(
+        with.contains("https://a.com"),
+        "should include the visited URL"
+    );
+}
+
+/// format_session_context produces correct output for auth cookies.
+#[test]
+fn test_format_session_context_with_auth_cookies() {
+    use llm_as_dom::semantic::format_session_context;
+    use llm_as_dom::session::{AuthState, CookieEntry, SessionState};
+
+    let mut session = SessionState::new();
+    session.add_cookie(CookieEntry {
+        name: "session_token".into(),
+        value: "abc123".into(),
+        domain: ".example.com".into(),
+        path: "/".into(),
+        expires: 0.0,
+        secure: true,
+        http_only: true,
+        same_site: None,
+    });
+    session.auth_state = AuthState::Authenticated;
+
+    let ctx = format_session_context(&session);
+    assert!(ctx.contains("AUTH: authenticated"));
+    assert!(ctx.contains("AUTH COOKIES: present"));
+}
+
+/// format_session_context returns empty string for fresh session.
+#[test]
+fn test_format_session_context_empty() {
+    use llm_as_dom::semantic::format_session_context;
+    use llm_as_dom::session::SessionState;
+
+    let session = SessionState::new();
+    let ctx = format_session_context(&session);
+    assert!(ctx.is_empty(), "fresh session should produce empty context");
 }
