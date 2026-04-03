@@ -354,6 +354,7 @@ mod tests {
                     hint: None,
                 },
             ],
+            forms: vec![],
             visible_text: "Sign in to GitHub".into(),
             state: PageState::Ready,
             element_cap: None,

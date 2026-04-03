@@ -49,6 +49,9 @@ pub struct LocateResult {
     pub css: Vec<CssSource>,
     /// DOM path fallback selector.
     pub fallback: String,
+    /// Explanatory note when source maps are unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// Build the JS script that locates an element and extracts source info.
@@ -229,6 +232,16 @@ pub fn parse_locate_result(raw: RawLocateResult) -> Result<LocateResult, String>
     let element_info = raw.element.ok_or("No element info returned")?;
     let fallback = raw.fallback.unwrap_or_default();
 
+    let note = if raw.source.is_none() {
+        Some(
+            "No source maps detected. Source mapping works with dev servers \
+             (next dev, vite dev) that enable source maps."
+                .into(),
+        )
+    } else {
+        None
+    };
+
     Ok(LocateResult {
         element: ElementInfo {
             tag: element_info.tag,
@@ -238,6 +251,7 @@ pub fn parse_locate_result(raw: RawLocateResult) -> Result<LocateResult, String>
         source: raw.source,
         css: raw.css,
         fallback,
+        note,
     })
 }
 
@@ -308,6 +322,10 @@ mod tests {
         assert_eq!(result.source.as_ref().unwrap().file, "src/LoginForm.tsx");
         assert_eq!(result.source.as_ref().unwrap().line, 42);
         assert!(result.fallback.contains("button.btn-primary"));
+        assert!(
+            result.note.is_none(),
+            "should have no note when source is present"
+        );
     }
 
     #[test]
@@ -327,6 +345,14 @@ mod tests {
         let result = parse_locate_result(raw).unwrap();
         assert!(result.source.is_none(), "should have no source");
         assert_eq!(result.fallback, "body > div.greeting");
+        assert!(
+            result.note.is_some(),
+            "should have explanatory note when no source"
+        );
+        assert!(
+            result.note.as_ref().unwrap().contains("source maps"),
+            "note should mention source maps"
+        );
     }
 
     #[test]
@@ -357,6 +383,7 @@ mod tests {
             }),
             css: vec![],
             fallback: "body > form > button#submit".into(),
+            note: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -364,5 +391,7 @@ mod tests {
         assert!(json.contains("\"line\":10"));
         // css should be omitted when empty
         assert!(!json.contains("\"css\""), "empty css should be skipped");
+        // note should be omitted when None
+        assert!(!json.contains("\"note\""), "None note should be skipped");
     }
 }

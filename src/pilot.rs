@@ -181,6 +181,9 @@ pub async fn run_pilot(
     let mut llm_hits: u32 = 0;
     let mut total_retries: u32 = 0;
     let mut screenshots: Vec<String> = Vec::new();
+    let mut prev_url: Option<String> = None;
+    let mut prev_element_count: Option<usize> = None;
+    let mut stale_streak: u32 = 0;
 
     for step_idx in 0..config.max_steps {
         let step_start = Instant::now();
@@ -194,7 +197,59 @@ pub async fn run_pilot(
             "observed"
         );
 
-        // 1b. If the page is blocked (CAPTCHA / WAF), escalate immediately.
+        // 1b. Stale-state detection: if the URL and element count are
+        // unchanged for 2+ consecutive observations after an action,
+        // the page is stuck (e.g. button re-click doing nothing).
+        let current_element_count = view.elements.len();
+        let current_url = &view.url;
+        if prev_url.as_deref() == Some(current_url.as_str())
+            && prev_element_count == Some(current_element_count)
+            && step_idx > 0
+        {
+            stale_streak += 1;
+        } else {
+            stale_streak = 0;
+        }
+        prev_url = Some(current_url.clone());
+        prev_element_count = Some(current_element_count);
+
+        if stale_streak >= 2 {
+            tracing::warn!(
+                step = step_idx,
+                stale_streak,
+                "page state unchanged for {} observations — escalating",
+                stale_streak
+            );
+            let final_action = Action::Escalate {
+                reason: format!(
+                    "stale state: URL and element count unchanged for {} consecutive observations",
+                    stale_streak
+                ),
+            };
+            let step = Step {
+                index: step_idx,
+                observation: view,
+                action: final_action.clone(),
+                source: DecisionSource::Heuristic,
+                confidence: 1.0,
+                duration: step_start.elapsed(),
+            };
+            history.push(step);
+            return Ok(PilotResult {
+                success: false,
+                steps: history,
+                final_action,
+                total_duration: run_start.elapsed(),
+                playbook_hits,
+                hints_hits,
+                heuristic_hits,
+                llm_hits,
+                retry_count: total_retries,
+                screenshots,
+            });
+        }
+
+        // 1c. If the page is blocked (CAPTCHA / WAF), escalate immediately.
         if let PageState::Blocked(ref reason) = view.state {
             tracing::warn!(step = step_idx, reason = %reason, "page blocked — escalating");
             if let Some(b64) = take_screenshot(page).await {
