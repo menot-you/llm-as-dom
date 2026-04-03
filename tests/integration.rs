@@ -957,9 +957,7 @@ fn test_detect_github_404() {
     );
     let reason = result.unwrap();
     assert!(
-        reason.contains("page not found")
-            || reason.contains("404")
-            || reason.contains("not found"),
+        reason.contains("page not found") || reason.contains("404") || reason.contains("not found"),
         "reason should mention the error, got: {reason}"
     );
 }
@@ -1001,10 +999,7 @@ fn test_detect_access_denied_title() {
         blocked_reason: None,
     };
     let result = detect_bot_challenge(&view);
-    assert!(
-        result.is_some(),
-        "Access Denied title should be detected"
-    );
+    assert!(result.is_some(), "Access Denied title should be detected");
 }
 
 /// "Forbidden" title should be detected.
@@ -1024,10 +1019,7 @@ fn test_detect_forbidden_title() {
         blocked_reason: None,
     };
     let result = detect_bot_challenge(&view);
-    assert!(
-        result.is_some(),
-        "Forbidden title should be detected"
-    );
+    assert!(result.is_some(), "Forbidden title should be detected");
 }
 
 /// Normal page with "not" in title should NOT trigger false positive.
