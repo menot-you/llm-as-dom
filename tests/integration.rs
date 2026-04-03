@@ -1529,7 +1529,8 @@ fn mfa_page_escalates() {
         visible_text: "Enter the verification code sent to your phone".into(),
         state: PageState::Ready,
         element_cap: None,
-        blocked_reason: None, session_context: None,
+        blocked_reason: None,
+        session_context: None,
     };
 
     // Use a generic goal so login/search/nav heuristics don't fire first
