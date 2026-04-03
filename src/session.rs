@@ -480,8 +480,8 @@ mod tests {
 
         assert_eq!(state.navigation_history.len(), 2);
         assert_eq!(state.navigation_history[0].url, "https://a.com");
-        assert_eq!(state.navigation_history[1].form_submitted, true);
-        assert_eq!(state.navigation_history[1].auth_related, true);
+        assert!(state.navigation_history[1].form_submitted);
+        assert!(state.navigation_history[1].auth_related);
         // Timestamps should be monotonically increasing
         assert!(
             state.navigation_history[0].timestamp_ms <= state.navigation_history[1].timestamp_ms

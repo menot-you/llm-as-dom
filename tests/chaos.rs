@@ -21,6 +21,7 @@ fn view(elements: Vec<Element>, hint: &str) -> SemanticView {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
@@ -35,6 +36,7 @@ fn view_with_text(elements: Vec<Element>, hint: &str, text: &str) -> SemanticVie
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
@@ -49,6 +51,7 @@ fn view_with_url(elements: Vec<Element>, hint: &str, url: &str, title: &str) -> 
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
