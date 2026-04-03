@@ -46,6 +46,10 @@ struct Cli {
     /// Timeout in seconds to wait for SPA content to stabilise (default: 5).
     #[arg(long, default_value_t = a11y::DEFAULT_WAIT_TIMEOUT)]
     wait_timeout: u64,
+
+    /// Directory containing `.json` playbook files for Tier 0 replay.
+    #[arg(long, default_value = ".lad/playbooks")]
+    playbook_dir: String,
 }
 
 #[tokio::main]
@@ -105,10 +109,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )),
         };
 
+        let playbook_path = std::path::PathBuf::from(&cli.playbook_dir);
         let config = pilot::PilotConfig {
             goal: cli.goal.clone(),
             max_steps: cli.max_steps,
+            use_hints: true,
             use_heuristics: true,
+            playbook_dir: if playbook_path.is_dir() {
+                Some(playbook_path)
+            } else {
+                None
+            },
             max_retries_per_step: 2,
         };
 

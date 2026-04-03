@@ -95,8 +95,18 @@ pub struct PilotConfig {
     pub goal: String,
     /// Maximum number of steps before auto-escalation.
     pub max_steps: u32,
-    /// Whether to try heuristics before the LLM (default: `true`).
+    /// Whether to check Tier 1 `@lad/hints` before other strategies (default: `true`).
+    ///
+    /// Hints are explicit developer annotations (`data-lad` attributes) and
+    /// should almost always remain enabled — they are not guesses.
+    pub use_hints: bool,
+    /// Whether to try Tier 2 rule-based heuristics before the LLM (default: `true`).
     pub use_heuristics: bool,
+    /// Directory containing `.json` playbook files for Tier 0 replay.
+    ///
+    /// When `Some`, playbooks are loaded at the start of the pilot run and
+    /// checked before hints or heuristics on every step.
+    pub playbook_dir: Option<std::path::PathBuf>,
     /// Maximum retries per step when an action fails (default: 2).
     pub max_retries_per_step: u32,
 }
@@ -106,7 +116,9 @@ impl Default for PilotConfig {
         Self {
             goal: String::new(),
             max_steps: 10,
+            use_hints: true,
             use_heuristics: true,
+            playbook_dir: None,
             max_retries_per_step: 2,
         }
     }
@@ -173,6 +185,17 @@ pub async fn run_pilot(
     config: &PilotConfig,
 ) -> Result<PilotResult, crate::Error> {
     let run_start = Instant::now();
+
+    // Tier 0: load playbooks from disk (empty vec when no dir configured).
+    let playbooks = config
+        .playbook_dir
+        .as_deref()
+        .map(crate::playbook::load_playbooks)
+        .unwrap_or_default();
+    if !playbooks.is_empty() {
+        tracing::info!(count = playbooks.len(), "loaded playbooks");
+    }
+
     let mut history: Vec<Step> = Vec::new();
     let mut acted_on: Vec<u32> = Vec::new();
     let mut playbook_hits: u32 = 0;
@@ -281,13 +304,15 @@ pub async fn run_pilot(
             });
         }
 
-        // 2. Decide (heuristics first, LLM fallback with retry)
+        // 2. Decide (playbook -> hints -> heuristics -> LLM fallback with retry)
         let (action, source, confidence) = decide_with_retry(
             &view,
             &config.goal,
             &acted_on,
             backend,
             &history,
+            &playbooks,
+            config.use_hints,
             config.use_heuristics,
             page,
             &mut total_retries,
@@ -396,16 +421,36 @@ async fn decide_with_retry(
     acted_on: &[u32],
     backend: &dyn PilotBackend,
     history: &[Step],
+    playbooks: &[crate::playbook::Playbook],
+    use_hints: bool,
     use_heuristics: bool,
     page: &chromiumoxide::Page,
     total_retries: &mut u32,
     screenshots: &mut Vec<String>,
 ) -> Result<(Action, DecisionSource, f32), crate::Error> {
-    // Tier 0: Playbook replay (not yet implemented — hook for future).
-    // TODO: look for .lad/playbooks/ and try to match URL patterns.
+    // Tier 0: Playbook replay — match URL and execute the next playbook step.
+    if let Some(pb) = crate::playbook::find_playbook(playbooks, &view.url) {
+        let params = crate::playbook::extract_params(goal, &pb.params);
+        // Walk the playbook steps, skipping those whose selectors already acted on.
+        for step in &pb.steps {
+            if let Some(id) = crate::playbook::match_step_selector(view, step) {
+                if acted_on.contains(&id) {
+                    continue;
+                }
+                if let Some(action) = crate::playbook::step_to_action(view, step, &params) {
+                    tracing::info!(
+                        playbook = %pb.name,
+                        selector = %step.selector,
+                        "playbook step matched"
+                    );
+                    return Ok((action, DecisionSource::Playbook, 0.99));
+                }
+            }
+        }
+    }
 
     // Tier 1: Hints (@lad/hints data-lad attributes).
-    if use_heuristics {
+    if use_hints {
         let h = heuristics::hints::try_hints(view, goal, acted_on);
         if let Some(action) = h.action
             && h.confidence >= 0.9
@@ -506,7 +551,7 @@ async fn execute_action_with_retry(
 /// - Newline, carriage return (line terminator injection)
 /// - Null byte (string truncation in some JS engines)
 /// - `</` (prevents `</script>` tag breakout in HTML contexts)
-fn js_escape(s: &str) -> String {
+pub fn js_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + s.len() / 8);
     for ch in s.chars() {
         match ch {

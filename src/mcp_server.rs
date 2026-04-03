@@ -196,7 +196,9 @@ impl LadServer {
         let config = pilot::PilotConfig {
             goal: p.goal.clone(),
             max_steps: p.max_steps,
+            use_hints: true,
             use_heuristics: true,
+            playbook_dir: None,
             max_retries_per_step: 2,
         };
 
