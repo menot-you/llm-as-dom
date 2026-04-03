@@ -62,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(url = %cli.url, visible = cli.visible, "launching browser");
 
+    let tmp = std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()));
     let mut builder = chromiumoxide::BrowserConfig::builder();
     if !cli.visible {
         builder = builder.arg("--headless=new");
@@ -70,7 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg("--disable-gpu")
         .arg("--no-sandbox")
         .arg("--disable-dev-shm-usage")
-        .arg("--window-size=1280,800");
+        .arg("--window-size=1280,800")
+        .arg(format!("--user-data-dir={}", tmp.display()));
 
     let config = builder.build().map_err(Error::BrowserStr)?;
     let (browser, mut handler) = chromiumoxide::Browser::launch(config)
