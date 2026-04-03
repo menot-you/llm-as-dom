@@ -73,12 +73,28 @@ fn home_dir() -> Option<PathBuf> {
 pub fn extract_cookies_from_profile(
     profile_path: &Path,
 ) -> Result<Vec<crate::session::CookieEntry>, crate::Error> {
+    // Try to obtain the Chrome decryption key so we can decrypt cookie values.
+    let decryption_key = match crate::crypto::get_chrome_password() {
+        Ok(password) => {
+            let key = crate::crypto::derive_key(&password);
+            tracing::info!("Chrome Safe Storage key derived successfully");
+            Some(key)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "could not get Chrome decryption key — encrypted cookies will be skipped"
+            );
+            None
+        }
+    };
+
     let cookies_db = profile_path.join("Cookies");
     if !cookies_db.exists() {
         // User may have passed the Chrome data dir, not the profile
         let alt = profile_path.join("Default/Cookies");
         if alt.exists() {
-            return extract_cookies_from_db(&alt);
+            return extract_cookies_from_db(&alt, decryption_key.as_ref());
         }
         return Err(crate::Error::ActionFailed(format!(
             "Chrome Cookies database not found at {}",
@@ -94,14 +110,18 @@ pub fn extract_cookies_from_profile(
         ))
     })?;
 
-    let result = extract_cookies_from_db(&tmp);
+    let result = extract_cookies_from_db(&tmp, decryption_key.as_ref());
     let _ = std::fs::remove_file(&tmp);
     result
 }
 
 /// Read cookies from a SQLite database file.
+///
+/// If `decryption_key` is `Some`, encrypted cookies will be decrypted.
+/// Otherwise they are silently skipped.
 fn extract_cookies_from_db(
     db_path: &Path,
+    decryption_key: Option<&[u8; 16]>,
 ) -> Result<Vec<crate::session::CookieEntry>, crate::Error> {
     let conn =
         rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -118,6 +138,7 @@ fn extract_cookies_from_db(
 
     let mut cookies = Vec::new();
     let mut encrypted_count = 0u32;
+    let mut decrypt_failures = 0u32;
 
     let rows = stmt
         .query_map([], |row| {
@@ -136,26 +157,43 @@ fn extract_cookies_from_db(
         .map_err(|e| crate::Error::ActionFailed(format!("SQL query error: {e}")))?;
 
     for row in rows {
-        let r = row.map_err(|e| crate::Error::ActionFailed(format!("row error: {e}")))?;
+        let mut r = row.map_err(|e| crate::Error::ActionFailed(format!("row error: {e}")))?;
 
         // Chrome stores the value either in `value` (plaintext) or
         // `encrypted_value` (encrypted). If `value` is empty and
         // `encrypted_value` is non-empty, the cookie is encrypted.
-        if r.value.is_empty() {
-            if !r.encrypted_value.is_empty() {
-                encrypted_count += 1;
+        if r.value.is_empty() && !r.encrypted_value.is_empty() {
+            match &decryption_key {
+                Some(key) => match crate::crypto::decrypt_cookie_value(&r.encrypted_value, key) {
+                    Ok(decrypted) => r.value = decrypted,
+                    Err(e) => {
+                        tracing::debug!(
+                            cookie = %r.name,
+                            error = %e,
+                            "failed to decrypt cookie"
+                        );
+                        decrypt_failures += 1;
+                        continue;
+                    }
+                },
+                None => {
+                    encrypted_count += 1;
+                    continue;
+                }
             }
+        } else if r.value.is_empty() {
             continue;
         }
 
         cookies.push(cookie_entry_from_row(&r));
     }
 
-    if encrypted_count > 0 {
+    if encrypted_count > 0 || decrypt_failures > 0 {
         tracing::info!(
-            encrypted = encrypted_count,
             loaded = cookies.len(),
-            "loaded cookies from Chrome profile (encrypted cookies skipped)"
+            encrypted_skipped = encrypted_count,
+            decrypt_failures = decrypt_failures,
+            "loaded cookies from Chrome profile"
         );
     } else {
         tracing::info!(loaded = cookies.len(), "loaded cookies from Chrome profile");
@@ -253,6 +291,7 @@ mod tests {
     #[test]
     fn extract_from_sqlite_db() {
         let dir = std::env::temp_dir().join("lad-profile-test");
+        let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         let db_path = dir.join("Cookies");
 
@@ -278,7 +317,8 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let cookies = extract_cookies_from_profile(&dir).unwrap();
+        // Use extract_cookies_from_db directly (no keychain access)
+        let cookies = extract_cookies_from_db(&db_path, None).unwrap();
 
         // Should have 1 plaintext cookie, skipping the encrypted one
         assert_eq!(cookies.len(), 1);
@@ -289,6 +329,60 @@ mod tests {
         assert_eq!(cookies[0].expires, 0.0); // session cookie
 
         // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extract_decrypts_encrypted_cookies() {
+        use aes::Aes128;
+        use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+
+        let dir = std::env::temp_dir().join("lad-profile-decrypt-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("Cookies");
+
+        // Derive a test key and encrypt a value
+        let key = crate::crypto::derive_key("test_password");
+        let iv: [u8; 16] = [0x20; 16];
+
+        type Aes128CbcEnc = cbc::Encryptor<Aes128>;
+        let encryptor = Aes128CbcEnc::new(&key.into(), &iv.into());
+        let ciphertext = encryptor
+            .encrypt_padded_vec_mut::<cbc::cipher::block_padding::Pkcs7>(b"decrypted_value");
+
+        let mut encrypted_blob = b"v10".to_vec();
+        encrypted_blob.extend_from_slice(&ciphertext);
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS cookies (
+                host_key TEXT NOT NULL,
+                name TEXT NOT NULL,
+                value TEXT NOT NULL DEFAULT '',
+                encrypted_value BLOB NOT NULL DEFAULT X'',
+                path TEXT NOT NULL DEFAULT '/',
+                expires_utc INTEGER NOT NULL DEFAULT 0,
+                is_secure INTEGER NOT NULL DEFAULT 0,
+                is_httponly INTEGER NOT NULL DEFAULT 0,
+                samesite INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cookies (host_key, name, value, encrypted_value, path, is_secure)
+             VALUES ('.secure.com', 'token', '', ?1, '/', 1)",
+            [&encrypted_blob],
+        )
+        .unwrap();
+        drop(conn);
+
+        let cookies = extract_cookies_from_db(&db_path, Some(&key)).unwrap();
+
+        assert_eq!(cookies.len(), 1);
+        assert_eq!(cookies[0].name, "token");
+        assert_eq!(cookies[0].value, "decrypted_value");
+        assert_eq!(cookies[0].domain, ".secure.com");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
