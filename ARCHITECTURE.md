@@ -13,7 +13,7 @@
 ```
 src/
 ├── main.rs              CLI binary (lad)
-├── mcp_server.rs        MCP binary (lad-mcp), 3 semantic tools
+├── mcp_server.rs        MCP binary (llm-as-dom-mcp), 3 semantic tools
 ├── a11y.rs              DOM extraction + ghost-ID stamping via JS injection
 ├── semantic.rs          SemanticView data model + prompt serialization
 ├── pilot.rs             observe → heuristics → LLM → act loop
@@ -87,10 +87,10 @@ Pages with multiple `<form>` elements (e.g., HN has login + create account) are 
 
 ## MCP protocol
 
-The MCP server (`lad-mcp`) uses `rmcp 1.3` with stdio transport.
+The MCP server (`llm-as-dom-mcp`) uses `rmcp 1.3` with stdio transport.
 
 ```
-Client (Claude)                    lad-mcp
+Client (Claude)                    llm-as-dom-mcp
     │                                 │
     ├─ initialize ───────────────────►│
     │◄──── capabilities (tools) ──────┤

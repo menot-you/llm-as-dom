@@ -117,10 +117,10 @@ lad --url "https://staging.myapp.com/login" \
 
 ## MCP Server
 
-`lad-mcp` turns your browser into a tool that Claude can call directly.
+`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly.
 
 ```bash
-lad-mcp  # starts MCP server (stdio)
+llm-as-dom-mcp  # starts MCP server (stdio)
 ```
 
 | Tool | What it does |
@@ -136,10 +136,10 @@ lad-mcp  # starts MCP server (stdio)
 {
   "mcpServers": {
     "lad": {
-      "command": "lad-mcp",
+      "command": "llm-as-dom-mcp",
       "env": {
-        "LAD_OLLAMA_URL": "http://localhost:11434",
-        "LAD_MODEL": "qwen2.5:7b"
+        "LAD_LLM_URL": "http://localhost:11434",
+        "LAD_LLM_MODEL": "qwen2.5:7b"
       }
     }
   }
@@ -198,7 +198,7 @@ Full results: [docs/BATTLE_TEST_RESULTS.md](docs/BATTLE_TEST_RESULTS.md)
 - Ollama with `qwen2.5:7b` — optional, only for LLM fallback
 
 ```bash
-cargo install llm-as-dom  # installs both lad and lad-mcp
+cargo install llm-as-dom  # installs both lad and llm-as-dom-mcp
 ```
 
 ## Architecture
