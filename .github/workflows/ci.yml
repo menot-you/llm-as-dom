@@ -128,7 +128,44 @@ jobs:
           name: llm-benchmark-results
           path: bench/results.json
 
-  # ── Release ────────────────────────────────────────────────────────
+  # ── Auto-tag on main ───────────────────────────────────────────────
+  auto-tag:
+    name: auto-tag release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [check, build, fixture-tests, integration]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      created: ${{ steps.tag.outputs.created }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: ${VERSION}"
+
+      - name: Create tag if not exists
+        id: tag
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists — skipping"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+            echo "Created tag ${TAG}"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Release (cross-platform binaries) ──────────────────────────────
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -169,6 +206,7 @@ jobs:
           name: release-${{ matrix.artifact }}
           path: dist/
 
+  # ── Publish GitHub Release ─────────────────────────────────────────
   publish-release:
     name: publish GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -196,3 +234,71 @@ jobs:
         with:
           generate_release_notes: true
           files: dist/*
+
+  # ── Publish to crates.io ───────────────────────────────────────────
+  publish-crate:
+    name: publish crate
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --allow-dirty || echo "Version may already be published"
+
+  # ── Publish to npm ─────────────────────────────────────────────────
+  publish-npm:
+    name: publish npm
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Sync version from Cargo.toml
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          cd npm
+          node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
+
+      - name: Publish @example-org/llm-as-dom-mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd npm && npm publish --access public || echo "Version may already be published"
+
+  # ── Publish to PyPI ────────────────────────────────────────────────
+  publish-pypi:
+    name: publish pypi
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync version from Cargo.toml
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          sed -i "s/^version = .*/version = \"${VERSION}\"/" python/pyproject.toml
+          sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" python/llm_as_dom_mcp/__init__.py
+
+      - name: Build and publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          pip install build twine
+          cd python && python -m build && twine upload dist/* || echo "Version may already be published"

@@ -1,0 +1,28 @@
+{
+  "name": "@example-org/llm-as-dom-mcp",
+  "version": "0.0.0-dev",
+  "description": "AI browser pilot — test your app 60x cheaper. MCP server binary wrapper.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example-org/llm-as-dom"
+  },
+  "homepage": "https://github.com/example-org/llm-as-dom",
+  "keywords": ["browser", "automation", "mcp", "ai-agent", "headless", "llm"],
+  "bin": {
+    "llm-as-dom-mcp": "run.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "install.js",
+    "run.js",
+    "README.md"
+  ],
+  "os": ["darwin", "linux"],
+  "cpu": ["arm64", "x64"],
+  "engines": {
+    "node": ">=16"
+  }
+}
