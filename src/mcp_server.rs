@@ -1,6 +1,6 @@
 //! `lad-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
-//! Provides five tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`.
+//! Provides six tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`, `lad_session`.
 
 use llm_as_dom::{Error, a11y, audit, backend, locate, pilot, semantic};
 
@@ -14,7 +14,7 @@ use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
 use rmcp::service::ServiceExt;
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // ── Tool parameter types ───────────────────────────────────────────
 
@@ -72,6 +72,31 @@ struct AuditParams {
     categories: Vec<String>,
 }
 
+/// Parameters for the `lad_session` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SessionParams {
+    /// Action: "get" to view current session state, "clear" to reset.
+    action: String,
+}
+
+// ── Session state (lightweight, server-side) ──────────────────────
+
+/// Lightweight session state tracked across MCP tool calls.
+///
+/// Persists auth status, visited URLs, and browse counts between
+/// consecutive `lad_browse` invocations within the same MCP session.
+#[derive(Debug, Clone, Default, Serialize)]
+struct McpSessionState {
+    /// Whether the pilot has successfully logged in during this session.
+    authenticated: bool,
+    /// Total number of `lad_browse` calls in this session.
+    browse_count: u32,
+    /// URLs visited during this session (most recent last).
+    visited_urls: Vec<String>,
+    /// Last goal that succeeded (if any).
+    last_success_goal: Option<String>,
+}
+
 // ── Server state ───────────────────────────────────────────────────
 
 /// MCP server that manages a headless browser and exposes pilot tools.
@@ -88,6 +113,8 @@ struct LadServer {
     ollama_url: String,
     /// Model name to use for LLM decisions.
     model: String,
+    /// Session state carried across tool calls within this MCP session.
+    session: Arc<Mutex<McpSessionState>>,
 }
 
 impl LadServer {
@@ -100,6 +127,7 @@ impl LadServer {
             ollama_url: std::env::var("LAD_OLLAMA_URL")
                 .unwrap_or_else(|_| "http://localhost:11434".into()),
             model: std::env::var("LAD_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into()),
+            session: Arc::new(Mutex::new(McpSessionState::default())),
         }
     }
 
@@ -213,9 +241,33 @@ impl LadServer {
             "pilot complete"
         );
 
+        // Update session state
+        {
+            let mut session = self.session.lock().await;
+            session.browse_count += 1;
+            session.visited_urls.push(p.url.clone());
+            if result.success {
+                session.last_success_goal = Some(p.goal.clone());
+                // Detect if login was the goal
+                let goal_lower = p.goal.to_lowercase();
+                if goal_lower.contains("login") || goal_lower.contains("sign in") {
+                    session.authenticated = true;
+                }
+            }
+        }
+
         // Always capture a final screenshot for visual verification.
         tracing::info!("capturing final screenshot");
         let final_screenshot = pilot::take_screenshot(&page).await;
+
+        let session_snapshot = {
+            let session = self.session.lock().await;
+            serde_json::json!({
+                "authenticated": session.authenticated,
+                "browse_count": session.browse_count,
+                "visited_urls_count": session.visited_urls.len(),
+            })
+        };
 
         let output = serde_json::json!({
             "success": result.success,
@@ -224,6 +276,7 @@ impl LadServer {
             "llm_steps": result.llm_hits,
             "duration_secs": result.total_duration.as_secs_f64(),
             "final_action": format!("{:?}", result.final_action),
+            "session": session_snapshot,
             "actions": result.steps.iter().map(|s| {
                 serde_json::json!({
                     "step": s.index,
@@ -384,6 +437,44 @@ impl LadServer {
             to_pretty_json(&output),
         )]))
     }
+
+    /// Inspect or reset the MCP session state.
+    /// Tracks authentication status, visited URLs, and browse history across tool calls.
+    #[tool(
+        description = "View or reset MCP session state: auth status, visited URLs, browse count. Actions: 'get' or 'clear'."
+    )]
+    async fn lad_session(
+        &self,
+        params: Parameters<SessionParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(action = %p.action, "lad_session");
+
+        match p.action.as_str() {
+            "get" => {
+                let session = self.session.lock().await;
+                let output = serde_json::to_value(&*session)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+                Ok(CallToolResult::success(vec![Content::text(
+                    to_pretty_json(&output),
+                )]))
+            }
+            "clear" => {
+                let mut session = self.session.lock().await;
+                *session = McpSessionState::default();
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "session cleared"}"#.to_string(),
+                )]))
+            }
+            other => {
+                let msg = format!(
+                    "unknown session action '{}'. Valid actions: 'get', 'clear'.",
+                    other
+                );
+                Err(rmcp::ErrorData::invalid_params(msg, None))
+            }
+        }
+    }
 }
 
 /// Evaluate a single assertion against a semantic view.
@@ -468,7 +559,7 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
 impl ServerHandler for LadServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks.")
+            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset.")
     }
 }
 
