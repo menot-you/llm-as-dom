@@ -180,8 +180,39 @@ impl LadServer {
             .await
             .map_err(mcp_err)?;
 
+        // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
+        self.inject_profile_cookies(&page).await;
+
         let view = a11y::extract_semantic_view(&page).await.map_err(mcp_err)?;
         Ok((page, view))
+    }
+
+    /// Inject cookies from the user's Chrome profile if `LAD_CHROME_PROFILE` is set.
+    async fn inject_profile_cookies(&self, page: &chromiumoxide::Page) {
+        let profile_name = match std::env::var("LAD_CHROME_PROFILE") {
+            Ok(name) if !name.is_empty() => name,
+            _ => return,
+        };
+
+        let profile_path = match llm_as_dom::profile::resolve_profile_path(&profile_name) {
+            Some(p) => p,
+            None => {
+                tracing::warn!(profile = %profile_name, "Chrome profile not found");
+                return;
+            }
+        };
+
+        match llm_as_dom::profile::extract_cookies_from_profile(&profile_path) {
+            Ok(cookies) => {
+                tracing::info!(count = cookies.len(), "injecting Chrome profile cookies");
+                for cookie in &cookies {
+                    let _ =
+                        llm_as_dom::session::inject_cookies_cdp(page, std::slice::from_ref(cookie))
+                            .await;
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "failed to load Chrome profile cookies"),
+        }
     }
 
     /// Auto-detect which LLM backend to use based on env/URL.
@@ -253,6 +284,9 @@ impl LadServer {
             .await
             .map_err(mcp_err)?;
         tracing::info!("page ready, initialising pilot");
+
+        // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
+        self.inject_profile_cookies(&page).await;
 
         let backend = Self::create_backend(&self.llm_url, &self.llm_model);
         let config = pilot::PilotConfig {
