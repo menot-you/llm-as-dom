@@ -92,27 +92,19 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
 #[ignore]
 #[tokio::test]
 async fn test_extract_example_com() {
-    use futures::StreamExt;
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
     use std::time::Duration;
 
-    let config = chromiumoxide::BrowserConfig::builder()
-        .arg("--headless=new")
-        .arg("--disable-gpu")
-        .arg("--no-sandbox")
-        .arg("--disable-dev-shm-usage")
-        .build()
-        .expect("browser config");
-
-    let (browser, mut handler) = chromiumoxide::Browser::launch(config)
+    let engine = ChromiumEngine::launch(EngineConfig::default())
         .await
         .expect("browser launch");
-    let handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
-    let page = browser.new_page("https://example.com").await.unwrap();
+    let page = engine.new_page("https://example.com").await.unwrap();
     page.wait_for_navigation().await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let view = llm_as_dom::a11y::extract_semantic_view(&page)
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
         .await
         .unwrap();
     assert!(
@@ -123,38 +115,29 @@ async fn test_extract_example_com() {
     assert_eq!(view.state, PageState::Ready);
 
     drop(page);
-    drop(browser);
-    handle.abort();
+    engine.close().await.unwrap();
 }
 
 /// Extracts HN login page, asserts page_hint == "login page".
 #[ignore]
 #[tokio::test]
 async fn test_extract_classifies_login_page() {
-    use futures::StreamExt;
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
     use std::time::Duration;
 
-    let config = chromiumoxide::BrowserConfig::builder()
-        .arg("--headless=new")
-        .arg("--disable-gpu")
-        .arg("--no-sandbox")
-        .arg("--disable-dev-shm-usage")
-        .build()
-        .expect("browser config");
-
-    let (browser, mut handler) = chromiumoxide::Browser::launch(config)
+    let engine = ChromiumEngine::launch(EngineConfig::default())
         .await
         .expect("browser launch");
-    let handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
-    let page = browser
+    let page = engine
         .new_page("https://news.ycombinator.com/login")
         .await
         .unwrap();
     page.wait_for_navigation().await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let view = llm_as_dom::a11y::extract_semantic_view(&page)
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
         .await
         .unwrap();
     assert_eq!(
@@ -163,8 +146,7 @@ async fn test_extract_classifies_login_page() {
     );
 
     drop(page);
-    drop(browser);
-    handle.abort();
+    engine.close().await.unwrap();
 }
 
 // ── Pure-logic tests (no browser needed) ─────────────────────────────

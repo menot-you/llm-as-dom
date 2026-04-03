@@ -2,7 +2,9 @@
 //!
 //! Provides six tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`, `lad_session`.
 
-use llm_as_dom::{Error, a11y, audit, backend, locate, pilot, semantic};
+use llm_as_dom::engine::chromium::ChromiumEngine;
+use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
+use llm_as_dom::{a11y, audit, backend, locate, pilot, semantic};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -105,10 +107,8 @@ struct McpSessionState {
 struct LadServer {
     /// Router that dispatches MCP tool calls to handler methods.
     tool_router: ToolRouter<Self>,
-    /// Shared browser instance (lazy-initialised on first tool call).
-    browser: Arc<Mutex<Option<Arc<chromiumoxide::Browser>>>>,
-    /// Handle to the CDP event-loop task.
-    handler_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Shared browser engine (lazy-initialised on first tool call).
+    engine: Arc<Mutex<Option<Arc<dyn BrowserEngine>>>>,
     /// LLM API base URL (Ollama, Z.AI, or any compatible endpoint).
     llm_url: String,
     /// LLM model name.
@@ -124,8 +124,7 @@ impl LadServer {
     fn new() -> Self {
         Self {
             tool_router: Self::tool_router(),
-            browser: Arc::new(Mutex::new(None)),
-            handler_handle: Arc::new(Mutex::new(None)),
+            engine: Arc::new(Mutex::new(None)),
             llm_url: read_env_with_fallback(
                 "LAD_LLM_URL",
                 "LAD_OLLAMA_URL",
@@ -139,11 +138,11 @@ impl LadServer {
         }
     }
 
-    /// Return an existing browser or launch a new headless instance.
-    async fn ensure_browser(&self) -> Result<Arc<chromiumoxide::Browser>, Error> {
-        let mut browser_lock = self.browser.lock().await;
-        if let Some(b) = browser_lock.as_ref() {
-            return Ok(Arc::clone(b));
+    /// Return an existing engine or launch a new one.
+    async fn ensure_engine(&self) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
+        let mut engine_lock = self.engine.lock().await;
+        if let Some(e) = engine_lock.as_ref() {
+            return Ok(Arc::clone(e));
         }
 
         let mode = if self.interactive {
@@ -152,65 +151,47 @@ impl LadServer {
             "headless"
         };
         tracing::info!(mode, "launching browser");
-        let tmp = std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()));
-        let mut builder = chromiumoxide::BrowserConfig::builder();
-        if self.interactive {
-            builder = builder
-                .arg("--app=about:blank")
-                .arg("--disable-extensions")
-                .arg("--disable-default-apps")
-                .arg("--disable-component-extensions-with-background-pages")
-                .arg("--disable-translate")
-                .arg("--no-first-run")
-                .arg("--no-default-browser-check")
-                .arg("--window-size=1024,768");
-        } else {
-            builder = builder.arg("--headless=new").arg("--window-size=1280,800");
-        }
-        let config = builder
-            .arg("--disable-gpu")
-            .arg("--no-sandbox")
-            .arg("--disable-dev-shm-usage")
-            .arg(format!("--user-data-dir={}", tmp.display()))
-            .build()
-            .map_err(Error::BrowserStr)?;
 
-        let (browser, mut handler) = chromiumoxide::Browser::launch(config)
-            .await
-            .map_err(|e| Error::BrowserStr(format!("{e}")))?;
+        let config = EngineConfig {
+            visible: self.interactive,
+            interactive: self.interactive,
+            user_data_dir: std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id())),
+            window_size: if self.interactive {
+                (1024, 768)
+            } else {
+                (1280, 800)
+            },
+        };
 
-        let handle = tokio::spawn(async move {
-            use futures::StreamExt;
-            while handler.next().await.is_some() {}
-        });
-
-        let b = Arc::new(browser);
-        *browser_lock = Some(Arc::clone(&b));
-        *self.handler_handle.lock().await = Some(handle);
-        Ok(b)
+        let engine = ChromiumEngine::launch(config).await?;
+        let e: Arc<dyn BrowserEngine> = Arc::new(engine);
+        *engine_lock = Some(Arc::clone(&e));
+        Ok(e)
     }
 
     /// Navigate to a URL and return the page handle with its semantic view.
     async fn navigate_and_extract(
         &self,
         url: &str,
-    ) -> Result<(chromiumoxide::Page, semantic::SemanticView), rmcp::ErrorData> {
-        let browser = self.ensure_browser().await.map_err(mcp_err)?;
-        let page = browser.new_page(url).await.map_err(mcp_err)?;
+    ) -> Result<(Box<dyn PageHandle>, semantic::SemanticView), rmcp::ErrorData> {
+        let engine = self.ensure_engine().await.map_err(mcp_err)?;
+        let page = engine.new_page(url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
-        a11y::wait_for_content(&page, a11y::DEFAULT_WAIT_TIMEOUT)
+        a11y::wait_for_content(page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
             .await
             .map_err(mcp_err)?;
 
         // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
-        self.inject_profile_cookies(&page).await;
+        self.inject_profile_cookies(page.as_ref()).await;
 
-        let view = a11y::extract_semantic_view(&page).await.map_err(mcp_err)?;
+        let view = a11y::extract_semantic_view(page.as_ref())
+            .await
+            .map_err(mcp_err)?;
         Ok((page, view))
     }
 
     /// Inject cookies from the user's Chrome profile if `LAD_CHROME_PROFILE` is set.
-    async fn inject_profile_cookies(&self, page: &chromiumoxide::Page) {
+    async fn inject_profile_cookies(&self, page: &dyn PageHandle) {
         let profile_name = match std::env::var("LAD_CHROME_PROFILE") {
             Ok(name) if !name.is_empty() => name,
             _ => return,
@@ -227,11 +208,7 @@ impl LadServer {
         match llm_as_dom::profile::extract_cookies_from_profile(&profile_path) {
             Ok(cookies) => {
                 tracing::info!(count = cookies.len(), "injecting Chrome profile cookies");
-                for cookie in &cookies {
-                    let _ =
-                        llm_as_dom::session::inject_cookies_cdp(page, std::slice::from_ref(cookie))
-                            .await;
-                }
+                let _ = page.set_cookies(&cookies).await;
             }
             Err(e) => tracing::warn!(error = %e, "failed to load Chrome profile cookies"),
         }
@@ -297,18 +274,18 @@ impl LadServer {
         tracing::info!(url = %p.url, goal = %p.goal, "lad_browse");
 
         tracing::info!(url = %p.url, "launching page");
-        let browser = self.ensure_browser().await.map_err(mcp_err)?;
-        let page = browser.new_page(&p.url).await.map_err(mcp_err)?;
+        let engine = self.ensure_engine().await.map_err(mcp_err)?;
+        let page = engine.new_page(&p.url).await.map_err(mcp_err)?;
         tracing::info!("waiting for navigation");
         page.wait_for_navigation().await.map_err(mcp_err)?;
         tracing::info!("waiting for content to stabilise");
-        a11y::wait_for_content(&page, a11y::DEFAULT_WAIT_TIMEOUT)
+        a11y::wait_for_content(page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
             .await
             .map_err(mcp_err)?;
         tracing::info!("page ready, initialising pilot");
 
         // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
-        self.inject_profile_cookies(&page).await;
+        self.inject_profile_cookies(page.as_ref()).await;
 
         let backend = Self::create_backend(&self.llm_url, &self.llm_model);
         let config = pilot::PilotConfig {
@@ -323,7 +300,7 @@ impl LadServer {
         };
 
         tracing::info!("running pilot");
-        let result = pilot::run_pilot(&page, backend.as_ref(), &config)
+        let result = pilot::run_pilot(page.as_ref(), backend.as_ref(), &config)
             .await
             .map_err(mcp_err)?;
         tracing::info!(
@@ -350,7 +327,7 @@ impl LadServer {
 
         // Always capture a final screenshot for visual verification.
         tracing::info!("capturing final screenshot");
-        let final_screenshot = pilot::take_screenshot(&page).await;
+        let final_screenshot = pilot::take_screenshot(page.as_ref()).await;
 
         let session_snapshot = {
             let session = self.session.lock().await;
@@ -478,10 +455,9 @@ impl LadServer {
 
         let (page, _view) = self.navigate_and_extract(&p.url).await?;
         let js = locate::build_locate_js(&p.selector);
-        let result = page.evaluate(js).await.map_err(mcp_err)?;
+        let raw_value = page.eval_js(&js).await.map_err(mcp_err)?;
 
-        let raw: locate::RawLocateResult = result
-            .into_value()
+        let raw: locate::RawLocateResult = serde_json::from_value(raw_value)
             .map_err(|e| mcp_err(format!("locate JS parse failed: {e:?}")))?;
 
         match locate::parse_locate_result(raw) {
@@ -515,10 +491,9 @@ impl LadServer {
 
         let (page, _view) = self.navigate_and_extract(&p.url).await?;
         let js = audit::build_audit_js(&p.categories);
-        let result = page.evaluate(js).await.map_err(mcp_err)?;
+        let raw_value = page.eval_js(&js).await.map_err(mcp_err)?;
 
-        let raw: Vec<audit::RawAuditIssue> = result
-            .into_value()
+        let raw: Vec<audit::RawAuditIssue> = serde_json::from_value(raw_value)
             .map_err(|e| mcp_err(format!("audit JS parse failed: {e:?}")))?;
 
         let audit_result = audit::parse_audit_result(&p.url, raw);
