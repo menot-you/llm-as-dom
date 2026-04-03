@@ -12,5 +12,6 @@ pub mod locate;
 pub mod pilot;
 pub mod playbook;
 pub mod semantic;
+pub mod session;
 
 pub use error::Error;

@@ -109,6 +109,9 @@ pub struct PilotConfig {
     pub playbook_dir: Option<std::path::PathBuf>,
     /// Maximum retries per step when an action fails (default: 2).
     pub max_retries_per_step: u32,
+    /// Session state for multi-page tracking. When `Some`, cookies and navigation
+    /// history are persisted across steps and can be carried between pilot runs.
+    pub session: Option<std::sync::Arc<tokio::sync::Mutex<crate::session::SessionState>>>,
 }
 
 impl Default for PilotConfig {
@@ -120,6 +123,7 @@ impl Default for PilotConfig {
             use_heuristics: true,
             playbook_dir: None,
             max_retries_per_step: 2,
+            session: None,
         }
     }
 }
@@ -147,6 +151,8 @@ pub struct PilotResult {
     pub retry_count: u32,
     /// Base64-encoded PNG screenshots taken during the run (e.g. on escalation).
     pub screenshots: Vec<String>,
+    /// Session state at the end of the run (for multi-page carry-over).
+    pub session_snapshot: Option<crate::session::SessionState>,
 }
 
 /// Capture a full-page screenshot as a base64-encoded PNG string.
@@ -195,6 +201,9 @@ pub async fn run_pilot(
     if !playbooks.is_empty() {
         tracing::info!(count = playbooks.len(), "loaded playbooks");
     }
+
+    // Session state: clone the Arc so we can lock it during the loop.
+    let session = config.session.clone();
 
     let mut history: Vec<Step> = Vec::new();
     let mut acted_on: Vec<u32> = Vec::new();
@@ -258,6 +267,10 @@ pub async fn run_pilot(
                 duration: step_start.elapsed(),
             };
             history.push(step);
+            let session_snapshot = match &session {
+                Some(s) => Some(s.lock().await.clone()),
+                None => None,
+            };
             return Ok(PilotResult {
                 success: false,
                 steps: history,
@@ -269,6 +282,7 @@ pub async fn run_pilot(
                 llm_hits,
                 retry_count: total_retries,
                 screenshots,
+                session_snapshot,
             });
         }
 
@@ -290,6 +304,10 @@ pub async fn run_pilot(
                 duration: step_start.elapsed(),
             };
             history.push(step);
+            let session_snapshot = match &session {
+                Some(s) => Some(s.lock().await.clone()),
+                None => None,
+            };
             return Ok(PilotResult {
                 success: false,
                 steps: history,
@@ -301,6 +319,7 @@ pub async fn run_pilot(
                 llm_hits,
                 retry_count: total_retries,
                 screenshots,
+                session_snapshot,
             });
         }
 
@@ -354,6 +373,10 @@ pub async fn run_pilot(
         if matches!(&action, Action::Done { .. } | Action::Escalate { .. }) {
             let success = matches!(&action, Action::Done { .. });
             history.push(step);
+            let session_snapshot = match &session {
+                Some(s) => Some(s.lock().await.clone()),
+                None => None,
+            };
             return Ok(PilotResult {
                 success,
                 steps: history,
@@ -365,6 +388,7 @@ pub async fn run_pilot(
                 llm_hits,
                 retry_count: total_retries,
                 screenshots,
+                session_snapshot,
             });
         }
 
@@ -384,6 +408,70 @@ pub async fn run_pilot(
             );
         }
 
+        // 5. Session tracking: extract cookies and record navigation.
+        if let Some(ref session_arc) = session {
+            let mut sess = session_arc.lock().await;
+
+            // Set origin URL on first step.
+            if sess.origin_url.is_none() {
+                sess.origin_url = Some(step.observation.url.clone());
+            }
+
+            // Extract cookies from the browser and merge into session.
+            match crate::session::extract_cookies_cdp(page).await {
+                Ok(new_cookies) => {
+                    for cookie in new_cookies {
+                        sess.add_cookie(cookie);
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "cookie extraction skipped");
+                }
+            }
+
+            // Build action description for the navigation entry.
+            let action_desc = match &action {
+                Action::Click { reasoning, .. } => format!("click: {reasoning}"),
+                Action::Type { reasoning, .. } => format!("type: {reasoning}"),
+                Action::Select { reasoning, .. } => format!("select: {reasoning}"),
+                Action::Scroll { reasoning, .. } => format!("scroll: {reasoning}"),
+                Action::Wait { reasoning } => format!("wait: {reasoning}"),
+                _ => String::new(),
+            };
+
+            let form_submitted = matches!(&action, Action::Click { .. })
+                && step
+                    .observation
+                    .elements
+                    .iter()
+                    .any(|e| e.kind == crate::semantic::ElementKind::Button);
+
+            let auth_related = step.observation.page_hint.to_lowercase().contains("login")
+                || step.observation.page_hint.to_lowercase().contains("auth")
+                || step.observation.url.to_lowercase().contains("oauth");
+
+            sess.record_navigation(
+                step.observation.url.clone(),
+                step.observation.title.clone(),
+                if action_desc.is_empty() {
+                    vec![]
+                } else {
+                    vec![action_desc]
+                },
+                form_submitted,
+                auth_related,
+            );
+
+            // Auth state transitions.
+            if auth_related && sess.auth_state == crate::session::AuthState::None {
+                sess.auth_state = crate::session::AuthState::InProgress;
+            }
+            if sess.has_auth_cookies() && sess.auth_state == crate::session::AuthState::InProgress {
+                sess.auth_state = crate::session::AuthState::Authenticated;
+                tracing::info!("session: auth state -> Authenticated");
+            }
+        }
+
         history.push(step);
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -396,6 +484,10 @@ pub async fn run_pilot(
     let final_action = Action::Escalate {
         reason: format!("max steps ({}) reached", config.max_steps),
     };
+    let session_snapshot = match &session {
+        Some(s) => Some(s.lock().await.clone()),
+        None => None,
+    };
     Ok(PilotResult {
         success: false,
         steps: history,
@@ -407,6 +499,7 @@ pub async fn run_pilot(
         llm_hits,
         retry_count: total_retries,
         screenshots,
+        session_snapshot,
     })
 }
 

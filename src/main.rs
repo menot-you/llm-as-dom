@@ -121,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None
             },
             max_retries_per_step: 2,
+            session: None,
         };
 
         let result = pilot::run_pilot(&page, backend_impl.as_ref(), &config).await?;
