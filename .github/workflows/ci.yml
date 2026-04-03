@@ -49,8 +49,8 @@ jobs:
       - name: Build lad
         run: cargo build --release --bin lad
 
-      - name: Build lad-mcp
-        run: cargo build --release --bin lad-mcp
+      - name: Build llm-as-dom-mcp
+        run: cargo build --release --bin llm-as-dom-mcp
 
       - name: Upload binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -58,7 +58,7 @@ jobs:
           name: binaries-linux-x86_64
           path: |
             target/release/lad
-            target/release/lad-mcp
+            target/release/llm-as-dom-mcp
 
   # ── Fixture Tests ──────────────────────────────────────────────────
   fixture-tests:
@@ -161,7 +161,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/lad dist/lad-${{ matrix.artifact }} || true
-          cp target/${{ matrix.target }}/release/lad-mcp dist/lad-mcp-${{ matrix.artifact }} || true
+          cp target/${{ matrix.target }}/release/llm-as-dom-mcp dist/llm-as-dom-mcp-${{ matrix.artifact }} || true
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
