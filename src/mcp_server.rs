@@ -200,6 +200,7 @@ impl LadServer {
             use_heuristics: true,
             playbook_dir: None,
             max_retries_per_step: 2,
+            session: None,
         };
 
         tracing::info!("running pilot");
