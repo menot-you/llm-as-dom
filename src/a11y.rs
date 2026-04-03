@@ -411,6 +411,12 @@ const CHALLENGE_TEXTS: &[&str] = &[
     "hcaptcha",
     "recaptcha",
     "challenge-platform",
+    // Turnstile-specific
+    "cf-turnstile",
+    "turnstile",
+    "confirme que é humano",
+    "confirm you are human",
+    "verify you are not a robot",
 ];
 
 /// URL path/query patterns that indicate a challenge or verification gate.
@@ -493,6 +499,47 @@ pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
     None
 }
 
+/// Classification of detected bot-challenge type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChallengeKind {
+    /// Cloudflare Turnstile — may auto-resolve without interaction.
+    CloudflareTurnstile,
+    /// Interactive CAPTCHA (hCaptcha, reCAPTCHA) — requires human.
+    Captcha,
+    /// WAF/IP block — human cannot resolve.
+    WafBlock,
+    /// Login/auth wall — needs credentials, not a captcha.
+    AuthWall,
+}
+
+/// Classify a blocked-reason string into a [`ChallengeKind`].
+///
+/// Used by the pilot to decide whether to auto-wait (Turnstile),
+/// pause for human interaction (Captcha), or escalate immediately
+/// (WafBlock/AuthWall).
+pub fn classify_challenge(reason: &str) -> ChallengeKind {
+    let lower = reason.to_lowercase();
+    if lower.contains("turnstile")
+        || lower.contains("just a moment")
+        || lower.contains("checking your browser")
+    {
+        ChallengeKind::CloudflareTurnstile
+    } else if lower.contains("hcaptcha") || lower.contains("recaptcha") || lower.contains("captcha")
+    {
+        ChallengeKind::Captcha
+    } else if lower.contains("access denied")
+        || lower.contains("forbidden")
+        || lower.contains("403")
+    {
+        ChallengeKind::WafBlock
+    } else if lower.contains("unauthorized") || lower.contains("login") {
+        ChallengeKind::AuthWall
+    } else {
+        // Default to interactive captcha (safe fallback).
+        ChallengeKind::Captcha
+    }
+}
+
 // ── SPA wait strategy ──────────────────────────────────────────────
 
 /// Default SPA wait timeout in seconds.
@@ -544,4 +591,97 @@ pub async fn wait_for_content(page: &Page, timeout_secs: u64) -> Result<(), crat
         "wait_for_content timeout reached"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_turnstile_from_title() {
+        assert_eq!(
+            classify_challenge("title matches challenge keyword: \"just a moment\""),
+            ChallengeKind::CloudflareTurnstile,
+        );
+    }
+
+    #[test]
+    fn classify_turnstile_from_text() {
+        assert_eq!(
+            classify_challenge("page text matches challenge keyword: \"cf-turnstile\""),
+            ChallengeKind::CloudflareTurnstile,
+        );
+    }
+
+    #[test]
+    fn classify_turnstile_checking_browser() {
+        assert_eq!(
+            classify_challenge("page text matches challenge keyword: \"checking your browser\""),
+            ChallengeKind::CloudflareTurnstile,
+        );
+    }
+
+    #[test]
+    fn classify_hcaptcha() {
+        assert_eq!(
+            classify_challenge("page text matches challenge keyword: \"hcaptcha\""),
+            ChallengeKind::Captcha,
+        );
+    }
+
+    #[test]
+    fn classify_recaptcha() {
+        assert_eq!(
+            classify_challenge("page text matches challenge keyword: \"recaptcha\""),
+            ChallengeKind::Captcha,
+        );
+    }
+
+    #[test]
+    fn classify_generic_captcha() {
+        assert_eq!(
+            classify_challenge("page text matches challenge keyword: \"captcha\""),
+            ChallengeKind::Captcha,
+        );
+    }
+
+    #[test]
+    fn classify_waf_forbidden() {
+        assert_eq!(
+            classify_challenge("title matches error page keyword: \"forbidden\""),
+            ChallengeKind::WafBlock,
+        );
+    }
+
+    #[test]
+    fn classify_waf_access_denied() {
+        assert_eq!(
+            classify_challenge("title matches challenge keyword: \"access denied\""),
+            ChallengeKind::WafBlock,
+        );
+    }
+
+    #[test]
+    fn classify_auth_wall_unauthorized() {
+        assert_eq!(
+            classify_challenge("title matches error page keyword: \"unauthorized\""),
+            ChallengeKind::AuthWall,
+        );
+    }
+
+    #[test]
+    fn classify_auth_wall_login() {
+        assert_eq!(
+            classify_challenge("page requires login"),
+            ChallengeKind::AuthWall,
+        );
+    }
+
+    #[test]
+    fn classify_unknown_defaults_to_captcha() {
+        assert_eq!(
+            classify_challenge("something unknown happened"),
+            ChallengeKind::Captcha,
+        );
+    }
 }

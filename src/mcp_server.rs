@@ -115,6 +115,8 @@ struct LadServer {
     llm_model: String,
     /// Session state carried across tool calls within this MCP session.
     session: Arc<Mutex<McpSessionState>>,
+    /// Whether interactive mode is enabled (captcha pause for human).
+    interactive: bool,
 }
 
 impl LadServer {
@@ -131,6 +133,9 @@ impl LadServer {
             ),
             llm_model: read_env_with_fallback("LAD_LLM_MODEL", "LAD_MODEL", "qwen2.5:7b"),
             session: Arc::new(Mutex::new(McpSessionState::default())),
+            interactive: std::env::var("LAD_INTERACTIVE")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
         }
     }
 
@@ -141,14 +146,31 @@ impl LadServer {
             return Ok(Arc::clone(b));
         }
 
-        tracing::info!("launching headless browser");
+        let mode = if self.interactive {
+            "interactive (--app)"
+        } else {
+            "headless"
+        };
+        tracing::info!(mode, "launching browser");
         let tmp = std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()));
-        let config = chromiumoxide::BrowserConfig::builder()
-            .arg("--headless=new")
+        let mut builder = chromiumoxide::BrowserConfig::builder();
+        if self.interactive {
+            builder = builder
+                .arg("--app=about:blank")
+                .arg("--disable-extensions")
+                .arg("--disable-default-apps")
+                .arg("--disable-component-extensions-with-background-pages")
+                .arg("--disable-translate")
+                .arg("--no-first-run")
+                .arg("--no-default-browser-check")
+                .arg("--window-size=1024,768");
+        } else {
+            builder = builder.arg("--headless=new").arg("--window-size=1280,800");
+        }
+        let config = builder
             .arg("--disable-gpu")
             .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
-            .arg("--window-size=1280,800")
             .arg(format!("--user-data-dir={}", tmp.display()))
             .build()
             .map_err(Error::BrowserStr)?;
@@ -263,6 +285,7 @@ impl LadServer {
             playbook_dir: None,
             max_retries_per_step: 2,
             session: None,
+            interactive: self.interactive,
         };
 
         tracing::info!("running pilot");
