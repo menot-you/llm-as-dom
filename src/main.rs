@@ -55,6 +55,10 @@ struct Cli {
     /// Directory containing `.json` playbook files for Tier 0 replay.
     #[arg(long, default_value = ".lad/playbooks")]
     playbook_dir: String,
+
+    /// Chrome profile path for cookie reuse. Use "default" for the default profile.
+    #[arg(long, alias = "chrome-profile")]
+    profile: Option<String>,
 }
 
 #[tokio::main]
@@ -98,6 +102,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     page.wait_for_navigation().await?;
     a11y::wait_for_content(&page, cli.wait_timeout).await?;
     tracing::info!("page loaded");
+
+    // Inject Chrome profile cookies if --profile is set
+    if let Some(ref profile_name) = cli.profile {
+        if let Some(profile_path) = llm_as_dom::profile::resolve_profile_path(profile_name) {
+            match llm_as_dom::profile::extract_cookies_from_profile(&profile_path) {
+                Ok(cookies) => {
+                    tracing::info!(count = cookies.len(), "injecting Chrome profile cookies");
+                    for cookie in &cookies {
+                        let _ = llm_as_dom::session::inject_cookies_cdp(
+                            &page,
+                            std::slice::from_ref(cookie),
+                        )
+                        .await;
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to load Chrome profile cookies"),
+            }
+        } else {
+            tracing::warn!(profile = %profile_name, "Chrome profile not found");
+        }
+    }
 
     if cli.extract_only || goal.is_empty() {
         let view = a11y::extract_semantic_view(&page).await?;
