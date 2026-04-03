@@ -1497,16 +1497,11 @@ fn multistep_form_waits_when_unfilled() {
     let r = heuristics::try_resolve(&view, "fill wizard form", &[0]);
     // The multi-step heuristic should not fire; other heuristics might match
     // but the key assertion is that "Continue" button is NOT the result
-    if let Some(action) = &r.action {
-        match action {
-            Action::Click { element, .. } => {
-                assert_ne!(
-                    *element, 2,
-                    "should NOT click Continue with unfilled fields"
-                );
-            }
-            _ => {} // Other actions are fine
-        }
+    if let Some(Action::Click { element, .. }) = &r.action {
+        assert_ne!(
+            *element, 2,
+            "should NOT click Continue with unfilled fields"
+        );
     }
 }
 
