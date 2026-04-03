@@ -12,6 +12,7 @@ pub mod locate;
 pub mod oauth;
 pub mod pilot;
 pub mod playbook;
+pub mod profile;
 pub mod semantic;
 pub mod session;
 
