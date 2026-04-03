@@ -3,15 +3,23 @@
 //! Strategies are tried in priority order. Falls back to LLM only when
 //! confidence is below the threshold.
 
+/// E-commerce flow detection (add-to-cart, checkout, payment buttons).
+pub mod ecommerce;
 mod form;
 /// Tier 1: `@lad/hints` — explicit developer annotations.
 pub mod hints;
 /// Login-specific heuristics (credential parsing, form fill, submit, done).
 pub mod login;
+/// MFA/2FA detection and escalation.
+pub mod mfa;
+/// Multi-step wizard form navigation.
+pub mod multistep;
 mod navigation;
 /// OAuth flow heuristics (OAuth buttons, consent approval).
 pub mod oauth;
 mod search;
+/// Inline validation error detection.
+pub mod validation;
 
 use crate::pilot::Action;
 use crate::semantic::SemanticView;
@@ -32,12 +40,17 @@ pub struct HeuristicResult {
 /// Try to resolve the next action using rules only (no LLM).
 ///
 /// Strategies are tried in order of specificity:
-/// 1. Login form fill (credential parsing)
-/// 2. Search input detection
-/// 3. Navigation target matching ("click X", "go to X")
-/// 4. Generic form fill (key=value parsing)
-/// 5. Submit button click
-/// 6. Goal completion detection
+///
+/// - S1: Login form fill (credential parsing)
+/// - S2: Search input detection
+/// - S3: Navigation target matching ("click X", "go to X")
+/// - S4: Generic form fill (key=value parsing)
+/// - S4b: E-commerce actions (add-to-cart / checkout)
+/// - S5: Submit button click
+/// - S5b: Multi-step form navigation (next / continue)
+/// - S6: Goal completion detection
+/// - S6b: MFA/2FA detection (escalate)
+/// - S6c: Validation error detection (escalate)
 ///
 /// Returns `None` action if confidence is too low -- caller should use LLM.
 pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> HeuristicResult {
@@ -85,6 +98,13 @@ pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Heurist
         return result;
     }
 
+    // Strategy 4.5: E-commerce actions (add-to-cart, checkout)
+    if let Some(result) = ecommerce::try_ecommerce_action(view, goal, acted_on)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
     // Strategy 5: Button click (after fields filled)
     if let Some(result) = login::try_button_click(view, &goal_lower, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
@@ -92,8 +112,29 @@ pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Heurist
         return result;
     }
 
+    // Strategy 5.5: Multi-step form navigation (next/continue)
+    if let Some(result) = multistep::try_next_step(view, goal, acted_on)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
     // Strategy 6: Goal completion detection
     if let Some(result) = login::try_detect_done(view, &goal_lower)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
+    // Strategy 6.5: MFA/2FA detection (escalate)
+    if let Some(result) = mfa::try_detect_mfa(view, goal, acted_on)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
+    // Strategy 6.6: Validation error detection (escalate)
+    if let Some(result) = validation::try_detect_validation(view, goal, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;
