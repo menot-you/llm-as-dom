@@ -193,6 +193,7 @@ mod tests {
                     hint: None,
                 },
             ],
+            forms: vec![],
             visible_text: "Welcome! Please log in.".into(),
             state: PageState::Ready,
             element_cap: None,
