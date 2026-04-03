@@ -20,21 +20,26 @@ pub struct ZaiBackend {
 impl ZaiBackend {
     /// Create a new Z.AI backend.
     ///
-    /// Reads `Z_AI_API_KEY` from environment if `api_key` is empty.
+    /// Reads `LAD_LLM_API_KEY` (or deprecated `Z_AI_API_KEY`) from environment
+    /// if `api_key` is empty. Base URL falls back from `LAD_LLM_URL` to
+    /// `Z_AI_BASE_URL` to the default Z.AI endpoint.
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
-        let key = {
+        let cred = {
             let k = api_key.into();
             if k.is_empty() {
-                std::env::var("Z_AI_API_KEY").unwrap_or_default()
+                std::env::var("LAD_LLM_API_KEY")
+                    .or_else(|_| std::env::var("Z_AI_API_KEY"))
+                    .unwrap_or_default()
             } else {
                 k
             }
         };
         Self {
             client: reqwest::Client::new(),
-            api_key: key,
+            api_key: cred,
             model: model.into(),
-            base_url: std::env::var("Z_AI_BASE_URL")
+            base_url: std::env::var("LAD_LLM_URL")
+                .or_else(|_| std::env::var("Z_AI_BASE_URL"))
                 .unwrap_or_else(|_| "https://api.z.ai/api/anthropic".into()),
         }
     }
