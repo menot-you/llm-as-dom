@@ -18,6 +18,7 @@ fn mock_view(elements: Vec<Element>, page_hint: &str) -> SemanticView {
         title: "Test Page".into(),
         page_hint: page_hint.into(),
         elements,
+        forms: vec![],
         visible_text: String::new(),
         state: PageState::Ready,
         element_cap: None,
@@ -530,6 +531,7 @@ fn test_detect_cloudflare_challenge() {
         title: "Just a moment...".into(),
         page_hint: "content page".into(),
         elements: vec![],
+        forms: vec![],
         visible_text: "Checking your browser before accessing".into(),
         state: PageState::Ready,
         element_cap: None,
@@ -572,6 +574,7 @@ fn test_detect_captcha_in_text() {
         title: "Example".into(),
         page_hint: "content page".into(),
         elements: vec![],
+        forms: vec![],
         visible_text: "Please complete the CAPTCHA to continue".into(),
         state: PageState::Ready,
         element_cap: None,
@@ -591,6 +594,7 @@ fn test_detect_challenge_url_with_few_elements() {
         title: "Example".into(),
         page_hint: "content page".into(),
         elements: vec![button_element(0, "Verify", None)],
+        forms: vec![],
         visible_text: String::new(),
         state: PageState::Ready,
         element_cap: None,
@@ -617,6 +621,7 @@ fn test_detect_many_elements_not_blocked() {
             input_element(1, "Email", "email", Some("email"), Some(0)),
             button_element(2, "Submit", Some(0)),
         ],
+        forms: vec![],
         visible_text: "Fill out the form".into(),
         state: PageState::Ready,
         element_cap: None,
@@ -707,6 +712,7 @@ fn hinted_login_view() -> SemanticView {
                 }),
             },
         ],
+        forms: vec![],
         visible_text: "Sign In".into(),
         state: PageState::Ready,
         element_cap: None,
@@ -841,5 +847,212 @@ fn test_no_hints_fallback() {
     assert!(
         heur_r.action.is_some(),
         "heuristics should resolve when hints don't"
+    );
+}
+
+// ── Fix 3: Reddit challenge URL detection ───────────────────────────
+
+/// Reddit's `?js_challenge=1&token=...` URL should be detected as blocked.
+#[test]
+fn test_detect_reddit_challenge_url() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://www.reddit.com/login?js_challenge=1&token=abc123".into(),
+        title: "Reddit - Login".into(),
+        page_hint: "login page".into(),
+        elements: vec![
+            input_element(0, "Username", "text", Some("username"), Some(0)),
+            input_element(1, "Password", "password", Some("password"), Some(0)),
+            button_element(2, "Log In", Some(0)),
+        ],
+        forms: vec![],
+        visible_text: String::new(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "Reddit challenge URL should be detected as blocked"
+    );
+    let reason = result.unwrap();
+    assert!(
+        reason.contains("challenge"),
+        "reason should mention 'challenge', got: {reason}"
+    );
+}
+
+/// URL with `verify` query param should be detected.
+#[test]
+fn test_detect_verify_url() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/verify?token=xyz".into(),
+        title: "Verify Your Identity".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: String::new(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "URL with 'verify' should be detected as blocked"
+    );
+}
+
+/// URL with `security_check` should be detected.
+#[test]
+fn test_detect_security_check_url() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/security_check?ref=login".into(),
+        title: "Security Check".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: String::new(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "URL with 'security_check' should be detected as blocked"
+    );
+}
+
+// ── Fix 4: GitHub 404 / error page detection ────────────────────────
+
+/// GitHub's "Page not found" title should be detected.
+#[test]
+fn test_detect_github_404() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://github.com/org/private-repo".into(),
+        title: "Page not found · GitHub".into(),
+        page_hint: "content page".into(),
+        elements: (0..10)
+            .map(|i| link_element(i, &format!("Link {i}"), "/somewhere"))
+            .collect(),
+        forms: vec![],
+        visible_text: "This is not the web page you are looking for.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "GitHub 404 page should be detected as error page"
+    );
+    let reason = result.unwrap();
+    assert!(
+        reason.contains("page not found")
+            || reason.contains("404")
+            || reason.contains("not found"),
+        "reason should mention the error, got: {reason}"
+    );
+}
+
+/// Generic "404" in title should be detected.
+#[test]
+fn test_detect_generic_404_title() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/missing-page".into(),
+        title: "404 - Not Found".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: "The page you requested could not be found.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(result.is_some(), "Generic 404 title should be detected");
+}
+
+/// "Access Denied" title should be detected (already in CHALLENGE_TITLES).
+#[test]
+fn test_detect_access_denied_title() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/admin".into(),
+        title: "Access Denied".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: "You don't have permission to access this resource.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "Access Denied title should be detected"
+    );
+}
+
+/// "Forbidden" title should be detected.
+#[test]
+fn test_detect_forbidden_title() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/restricted".into(),
+        title: "403 Forbidden".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: String::new(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_some(),
+        "Forbidden title should be detected"
+    );
+}
+
+/// Normal page with "not" in title should NOT trigger false positive.
+#[test]
+fn test_no_false_positive_not_in_title() {
+    use llm_as_dom::a11y::detect_bot_challenge;
+
+    let view = SemanticView {
+        url: "https://example.com/notes".into(),
+        title: "My Notification Settings".into(),
+        page_hint: "form page".into(),
+        elements: vec![
+            input_element(0, "Email", "email", Some("email"), None),
+            button_element(1, "Save", None),
+            button_element(2, "Cancel", None),
+        ],
+        forms: vec![],
+        visible_text: "Configure your notification preferences.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+    let result = detect_bot_challenge(&view);
+    assert!(
+        result.is_none(),
+        "normal page with 'not' in title should not trigger false positive"
     );
 }
