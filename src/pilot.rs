@@ -40,6 +40,8 @@ pub enum Action {
         result: serde_json::Value,
         reasoning: String,
     },
+    /// Navigate to a different URL (multi-page flow support).
+    Navigate { url: String, reasoning: String },
     /// Cannot proceed -- escalate to the caller.
     Escalate { reason: String },
 }
@@ -232,6 +234,8 @@ pub async fn run_pilot(
         // 1b. Stale-state detection: if the URL and element count are
         // unchanged for 2+ consecutive observations after an action,
         // the page is stuck (e.g. button re-click doing nothing).
+        // NOTE: This naturally handles OAuth/redirect flows because a URL
+        // change resets the streak — even if element count stays the same.
         let current_element_count = view.elements.len();
         let current_url = &view.url;
         if prev_url.as_deref() == Some(current_url.as_str())
@@ -321,6 +325,16 @@ pub async fn run_pilot(
                 screenshots,
                 session_snapshot,
             });
+        }
+
+        // 1d. Enrich view with session context for multi-page LLM awareness.
+        let mut view = view;
+        if let Some(ref session_arc) = session {
+            let sess = session_arc.lock().await;
+            let ctx = crate::semantic::format_session_context(&sess);
+            if !ctx.is_empty() {
+                view.session_context = Some(ctx);
+            }
         }
 
         // 2. Decide (playbook -> hints -> heuristics -> LLM fallback with retry)
@@ -436,6 +450,9 @@ pub async fn run_pilot(
                 Action::Select { reasoning, .. } => format!("select: {reasoning}"),
                 Action::Scroll { reasoning, .. } => format!("scroll: {reasoning}"),
                 Action::Wait { reasoning } => format!("wait: {reasoning}"),
+                Action::Navigate { url, reasoning } => {
+                    format!("navigate to {url}: {reasoning}")
+                }
                 _ => String::new(),
             };
 
@@ -731,6 +748,10 @@ async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(
         }
         Action::Wait { .. } => {
             tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        Action::Navigate { url, .. } => {
+            page.goto(url).await?;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
         Action::Done { .. } | Action::Escalate { .. } => {}
     }
