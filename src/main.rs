@@ -28,6 +28,11 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     visible: bool,
 
+    /// Interactive mode: opens a visible Chrome --app window for human
+    /// interaction (captcha solving). Implies --visible.
+    #[arg(long, default_value_t = false)]
+    interactive: bool,
+
     /// LLM backend: "ollama" or "zai" (auto-detected when LAD_LLM_API_KEY is set).
     #[arg(long, default_value = "auto")]
     backend: String,
@@ -77,19 +82,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .unwrap_or_else(|| cli.goal_positional.join(" "));
 
-    tracing::info!(url = %cli.url, visible = cli.visible, "launching browser");
+    let visible = cli.visible || cli.interactive;
+    tracing::info!(url = %cli.url, visible, interactive = cli.interactive, "launching browser");
 
     let tmp = std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()));
     let mut builder = chromiumoxide::BrowserConfig::builder();
-    if !cli.visible {
+    if cli.interactive {
+        // App mode: minimal Chrome window (no address bar, no tabs).
+        builder = builder
+            .arg("--app=about:blank")
+            .arg("--disable-extensions")
+            .arg("--disable-default-apps")
+            .arg("--disable-component-extensions-with-background-pages")
+            .arg("--disable-translate")
+            .arg("--no-first-run")
+            .arg("--no-default-browser-check")
+            .arg("--window-size=1024,768");
+    } else if !visible {
         builder = builder.arg("--headless=new");
     }
     builder = builder
         .arg("--disable-gpu")
         .arg("--no-sandbox")
         .arg("--disable-dev-shm-usage")
-        .arg("--window-size=1280,800")
         .arg(format!("--user-data-dir={}", tmp.display()));
+    if !cli.interactive {
+        builder = builder.arg("--window-size=1280,800");
+    }
 
     let config = builder.build().map_err(Error::BrowserStr)?;
     let (browser, mut handler) = chromiumoxide::Browser::launch(config)
@@ -174,6 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             max_retries_per_step: 2,
             session: None,
+            interactive: cli.interactive,
         };
 
         let result = pilot::run_pilot(&page, backend_impl.as_ref(), &config).await?;
