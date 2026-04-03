@@ -83,6 +83,7 @@ fn login_view() -> SemanticView {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
@@ -119,6 +120,7 @@ fn large_view() -> SemanticView {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     }
 }
 
