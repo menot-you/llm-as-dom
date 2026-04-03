@@ -17,6 +17,9 @@ pub struct SemanticView {
     pub page_hint: String,
     /// Interactive elements on the page.
     pub elements: Vec<Element>,
+    /// Metadata for each `<form>` on the page (matches `Element::form_index`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forms: Vec<FormMeta>,
     /// Concatenated visible headings/paragraphs (max ~500 chars).
     pub visible_text: String,
     /// Current page lifecycle state.
@@ -78,6 +81,27 @@ pub struct ElementHint {
     pub hint_type: String,
     /// Hint value: `"email"`, `"login"`, `"submit"`, etc.
     pub value: String,
+}
+
+/// Metadata about a `<form>` element on the page.
+///
+/// Provides context for the `form_index` field on [`Element`] so callers
+/// know *which* form an element belongs to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FormMeta {
+    /// Sequential index matching `Element::form_index`.
+    pub index: u32,
+    /// `action` attribute (e.g. `"/api/login"`), or `null`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// HTTP method (`"GET"`, `"POST"`, etc.).
+    pub method: String,
+    /// `id` attribute, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// `name` attribute, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Semantic classification of an interactive element.
