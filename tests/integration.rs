@@ -1258,3 +1258,350 @@ fn test_default_config_enables_both() {
     assert!(config.use_heuristics, "heuristics should be on by default");
     assert!(config.playbook_dir.is_none(), "no playbook dir by default");
 }
+
+// ── Wave 4: Hard scenario heuristic tests ──────────────────────────
+
+// ── Multi-step form tests ──────────────────────────────────────────
+
+#[test]
+fn multistep_form_advances_when_fields_filled() {
+    let view = mock_view(
+        vec![
+            input_element(0, "First Name", "text", Some("first"), None),
+            input_element(1, "Last Name", "text", Some("last"), None),
+            button_element(2, "Next Step", None),
+        ],
+        "form page",
+    );
+
+    // After filling both fields, next step should be clicked
+    let r = heuristics::try_resolve(&view, "fill wizard form", &[0, 1]);
+    assert!(r.action.is_some(), "should resolve multi-step advance");
+    match r.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 2, "should click Next Step button");
+        }
+        other => panic!("expected Click on Next Step, got {other:?}"),
+    }
+}
+
+#[test]
+fn multistep_form_waits_when_unfilled() {
+    let view = mock_view(
+        vec![
+            input_element(0, "Email", "email", Some("email"), None),
+            input_element(1, "Phone", "tel", Some("phone"), None),
+            button_element(2, "Continue", None),
+        ],
+        "form page",
+    );
+
+    // Only one field filled — should NOT advance
+    let r = heuristics::try_resolve(&view, "fill wizard form", &[0]);
+    // The multi-step heuristic should not fire; other heuristics might match
+    // but the key assertion is that "Continue" button is NOT the result
+    if let Some(action) = &r.action {
+        match action {
+            Action::Click { element, .. } => {
+                assert_ne!(
+                    *element, 2,
+                    "should NOT click Continue with unfilled fields"
+                );
+            }
+            _ => {} // Other actions are fine
+        }
+    }
+}
+
+// ── MFA detection tests ────────────────────────────────────────────
+
+#[test]
+fn mfa_page_escalates() {
+    let view = SemanticView {
+        url: "https://example.com/verify".into(),
+        title: "Verify Your Identity".into(),
+        page_hint: "content page".into(),
+        elements: vec![input_element(
+            0,
+            "Verification Code",
+            "text",
+            Some("code"),
+            None,
+        )],
+        forms: vec![],
+        visible_text: "Enter the verification code sent to your phone".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    // Use a generic goal so login/search/nav heuristics don't fire first
+    let r = heuristics::try_resolve(&view, "complete verification", &[]);
+    assert!(r.action.is_some(), "should resolve MFA detection");
+    match r.action.unwrap() {
+        Action::Escalate { reason } => {
+            assert!(
+                reason.contains("MFA") || reason.contains("2FA"),
+                "escalation should mention MFA/2FA, got: {reason}"
+            );
+        }
+        other => panic!("expected Escalate for MFA, got {other:?}"),
+    }
+}
+
+#[test]
+fn non_mfa_page_does_not_escalate() {
+    let view = SemanticView {
+        url: "https://example.com/dashboard".into(),
+        title: "Dashboard".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: "Welcome to your dashboard. Your recent activity:".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    let r = heuristics::try_resolve(&view, "view dashboard", &[]);
+    // Should not produce an MFA escalation
+    if let Some(Action::Escalate { reason }) = &r.action {
+        assert!(
+            !reason.contains("MFA") && !reason.contains("2FA"),
+            "normal page should not trigger MFA escalation"
+        );
+    }
+}
+
+// ── E-commerce tests ───────────────────────────────────────────────
+
+#[test]
+fn ecommerce_add_to_cart() {
+    let view = mock_view(
+        vec![
+            button_element(0, "Add to Cart", None),
+            button_element(1, "Wishlist", None),
+        ],
+        "content page",
+    );
+
+    let r = heuristics::try_resolve(&view, "add item to cart", &[]);
+    assert!(r.action.is_some(), "should resolve add-to-cart");
+    assert!(r.confidence >= 0.6);
+    match r.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 0, "should click Add to Cart");
+        }
+        other => panic!("expected Click, got {other:?}"),
+    }
+}
+
+#[test]
+fn ecommerce_checkout_flow() {
+    let view = mock_view(
+        vec![
+            link_element(0, "Proceed to Checkout", "/checkout"),
+            button_element(1, "Continue Shopping", None),
+        ],
+        "content page",
+    );
+
+    let r = heuristics::try_resolve(&view, "checkout and pay", &[]);
+    assert!(r.action.is_some(), "should resolve checkout");
+    match r.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 0, "should click Proceed to Checkout");
+        }
+        other => panic!("expected Click on checkout link, got {other:?}"),
+    }
+}
+
+#[test]
+fn ecommerce_buy_now() {
+    let view = mock_view(
+        vec![
+            button_element(0, "Buy Now", None),
+            button_element(1, "Details", None),
+        ],
+        "content page",
+    );
+
+    let r = heuristics::try_resolve(&view, "buy this product", &[]);
+    assert!(r.action.is_some(), "should detect Buy Now");
+    match r.action.unwrap() {
+        Action::Click { element, .. } => assert_eq!(element, 0),
+        other => panic!("expected Click on Buy Now, got {other:?}"),
+    }
+}
+
+// ── Validation error detection tests ───────────────────────────────
+
+#[test]
+fn validation_error_escalates() {
+    let view = SemanticView {
+        url: "https://example.com/register".into(),
+        title: "Register".into(),
+        page_hint: "form page".into(),
+        elements: vec![
+            input_element(0, "Email", "email", Some("email"), Some(0)),
+            button_element(1, "Submit", Some(0)),
+        ],
+        forms: vec![],
+        visible_text: "Email is required. Password must be at least 8 characters.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
+    assert!(r.action.is_some(), "should detect validation errors");
+    assert!(matches!(r.action.unwrap(), Action::Escalate { .. }));
+}
+
+#[test]
+fn clean_form_no_validation_escalation() {
+    let view = SemanticView {
+        url: "https://example.com/register".into(),
+        title: "Register".into(),
+        page_hint: "form page".into(),
+        elements: vec![
+            input_element(0, "Email", "email", Some("email"), Some(0)),
+            button_element(1, "Submit", Some(0)),
+        ],
+        forms: vec![],
+        visible_text: "Create your account to get started.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
+    // Should not escalate on a clean form
+    if let Some(Action::Escalate { reason }) = &r.action {
+        assert!(
+            !reason.contains("validation"),
+            "clean form should not trigger validation escalation"
+        );
+    }
+}
+
+// ── Heuristic wiring order tests ───────────────────────────────────
+
+#[test]
+fn ecommerce_before_generic_button() {
+    // E-commerce should fire at strategy 4.5, before generic button click at 5
+    let view = mock_view(
+        vec![
+            button_element(0, "Add to Cart", None),
+            button_element(1, "Submit", None),
+        ],
+        "content page",
+    );
+
+    let r = heuristics::try_resolve(&view, "add product to cart", &[]);
+    assert!(r.action.is_some());
+    match r.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 0, "should pick Add to Cart, not Submit");
+        }
+        other => panic!("expected Click, got {other:?}"),
+    }
+}
+
+#[test]
+fn multistep_after_button_click() {
+    // Multi-step fires at 5.5, after button click at 5.
+    // When all fields are filled and a "Continue" button exists alongside
+    // a login button, login button should take precedence.
+    let view = mock_view(
+        vec![
+            input_element(0, "Username", "text", Some("user"), Some(0)),
+            input_element(1, "Password", "password", Some("pass"), Some(0)),
+            button_element(2, "Login", Some(0)),
+            button_element(3, "Continue", None),
+        ],
+        "login page",
+    );
+
+    let r = heuristics::try_resolve(&view, "login as admin password admin123", &[0, 1]);
+    assert!(r.action.is_some());
+    match r.action.unwrap() {
+        Action::Click { element, .. } => {
+            assert_eq!(element, 2, "Login button should fire before Continue");
+        }
+        other => panic!("expected Click on Login, got {other:?}"),
+    }
+}
+
+// ── Direct heuristic module tests (via pub API) ────────────────────
+
+#[test]
+fn mfa_module_direct_detection() {
+    use llm_as_dom::heuristics::mfa;
+
+    let view = SemanticView {
+        url: "https://example.com/2fa".into(),
+        title: "Two-Factor Auth".into(),
+        page_hint: "content page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: "Enter your two-factor authentication code".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    let result = mfa::try_detect_mfa(&view, "login", &[]);
+    assert!(result.is_some(), "direct MFA detection should work");
+    assert!(result.unwrap().confidence >= 0.9);
+}
+
+#[test]
+fn validation_module_direct_check() {
+    use llm_as_dom::heuristics::validation;
+
+    let view = SemanticView {
+        url: "https://example.com/form".into(),
+        title: "Form".into(),
+        page_hint: "form page".into(),
+        elements: vec![],
+        forms: vec![],
+        visible_text: "This field is required. Username already taken.".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    assert!(validation::has_validation_errors(&view));
+    let result = validation::try_detect_validation(&view, "register", &[]);
+    assert!(result.is_some());
+}
+
+#[test]
+fn ecommerce_module_direct_checkout() {
+    use llm_as_dom::heuristics::ecommerce;
+
+    let view = mock_view(vec![button_element(0, "Place Order", None)], "content page");
+
+    let result = ecommerce::try_ecommerce_action(&view, "checkout now", &[]);
+    assert!(result.is_some());
+    match result.unwrap().action.unwrap() {
+        Action::Click { element, .. } => assert_eq!(element, 0),
+        other => panic!("expected Click, got {other:?}"),
+    }
+}
+
+#[test]
+fn multistep_module_direct_advance() {
+    use llm_as_dom::heuristics::multistep;
+
+    let view = mock_view(vec![button_element(0, "Proceed", None)], "form page");
+
+    // No unfilled inputs, button matches "proceed"
+    let result = multistep::try_next_step(&view, "complete wizard", &[]);
+    assert!(result.is_some());
+    match result.unwrap().action.unwrap() {
+        Action::Click { element, .. } => assert_eq!(element, 0),
+        other => panic!("expected Click, got {other:?}"),
+    }
+}
