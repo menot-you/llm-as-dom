@@ -31,6 +31,9 @@ pub struct SemanticView {
     /// Human-readable reason when the page is blocked (CAPTCHA, WAF, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocked_reason: Option<String>,
+    /// Session context for multi-page flows (set by pilot when session is active).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_context: Option<String>,
 }
 
 /// A single interactive element extracted from the DOM.
@@ -186,6 +189,18 @@ impl SemanticView {
         if !self.visible_text.is_empty() {
             let _ = write!(out, "\nVISIBLE TEXT: {}\n", self.visible_text);
         }
+        if let Some(ref ctx) = self.session_context {
+            out.push('\n');
+            out.push_str(ctx);
+        }
+        out
+    }
+
+    /// Format with session context for multi-page awareness.
+    pub fn to_prompt_with_session(&self, session: &crate::session::SessionState) -> String {
+        let mut out = self.to_prompt();
+        out.push('\n');
+        out.push_str(&format_session_context(session));
         out
     }
 
@@ -193,4 +208,37 @@ impl SemanticView {
     pub fn estimated_tokens(&self) -> usize {
         self.to_prompt().len() / 4
     }
+}
+
+/// Build a compact session context string for LLM prompt injection.
+///
+/// Includes recent navigation history (last 3 pages) and auth state.
+pub fn format_session_context(session: &crate::session::SessionState) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    if !session.navigation_history.is_empty() {
+        out.push_str("SESSION CONTEXT:\n");
+        for entry in session.navigation_history.iter().rev().take(3) {
+            let _ = writeln!(out, "  - visited: {} ({})", entry.url, entry.title);
+            for action in &entry.actions_taken {
+                let _ = writeln!(out, "    action: {}", action);
+            }
+        }
+    }
+
+    match session.auth_state {
+        crate::session::AuthState::InProgress => out.push_str("AUTH: in progress\n"),
+        crate::session::AuthState::Authenticated => {
+            out.push_str("AUTH: authenticated\n");
+        }
+        crate::session::AuthState::Failed => out.push_str("AUTH: failed\n"),
+        _ => {}
+    }
+
+    if session.has_auth_cookies() {
+        out.push_str("AUTH COOKIES: present\n");
+    }
+
+    out
 }

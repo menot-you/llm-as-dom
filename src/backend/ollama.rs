@@ -490,6 +490,7 @@ mod tests {
             state: crate::semantic::PageState::Ready,
             element_cap: None,
             blocked_reason: None,
+            session_context: None,
         };
         let prompt = build_prompt(&view, "click login", &[]);
         assert!(prompt.contains("[USER_CONTENT]"));
