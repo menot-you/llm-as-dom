@@ -1,6 +1,6 @@
 //! CLI binary for the LLM-as-DOM browser pilot.
 //!
-//! Usage: `lad --url <URL> [--goal <GOAL>] [--visible] [--extract-only]`
+//! Usage: `lad --url <URL> [--goal <GOAL> | "goal words..."] [--visible] [--extract-only]`
 
 use futures::StreamExt;
 use llm_as_dom::{Error, a11y, backend, pilot};
@@ -16,24 +16,29 @@ struct Cli {
     url: String,
 
     /// Goal for the pilot (natural language).
-    #[arg(short, long, default_value = "")]
-    goal: String,
+    /// Can be passed as --goal "..." or as a trailing positional argument.
+    #[arg(short, long)]
+    goal: Option<String>,
+
+    /// Trailing positional arguments (goal words when --goal is not used).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+    goal_positional: Vec<String>,
 
     /// Show browser window (default: headless).
     #[arg(long, default_value_t = false)]
     visible: bool,
 
-    /// LLM backend: "ollama" or "zai".
-    #[arg(long, default_value = "ollama")]
+    /// LLM backend: "ollama" or "zai" (auto-detected when LAD_LLM_API_KEY is set).
+    #[arg(long, default_value = "auto")]
     backend: String,
 
-    /// Ollama base URL (only for --backend ollama).
-    #[arg(long, default_value = "http://localhost:11434")]
-    ollama_url: String,
+    /// LLM base URL (Ollama, Z.AI, or any compatible API).
+    #[arg(long, default_value = "http://localhost:11434", alias = "ollama-url")]
+    llm_url: String,
 
     /// LLM model name.
-    #[arg(long, default_value = "qwen2.5:7b")]
-    model: String,
+    #[arg(long, default_value = "qwen2.5:7b", alias = "model")]
+    llm_model: String,
 
     /// Max pilot steps before giving up.
     #[arg(long, default_value_t = 10)]
@@ -63,6 +68,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let cli = Cli::parse();
+    let goal = cli
+        .goal
+        .clone()
+        .unwrap_or_else(|| cli.goal_positional.join(" "));
 
     tracing::info!(url = %cli.url, visible = cli.visible, "launching browser");
 
@@ -90,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     a11y::wait_for_content(&page, cli.wait_timeout).await?;
     tracing::info!("page loaded");
 
-    if cli.extract_only || cli.goal.is_empty() {
+    if cli.extract_only || goal.is_empty() {
         let view = a11y::extract_semantic_view(&page).await?;
         println!(
             "\n=== SemanticView ({} elements, ~{} tokens) ===\n",
@@ -101,17 +110,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n=== JSON ===\n");
         println!("{}", serde_json::to_string_pretty(&view)?);
     } else {
+        let llm_cred = std::env::var("LAD_LLM_API_KEY")
+            .or_else(|_| std::env::var("Z_AI_API_KEY"))
+            .unwrap_or_default();
         let backend_impl: Box<dyn pilot::PilotBackend> = match cli.backend.as_str() {
-            "zai" => Box::new(backend::zai::ZaiBackend::new("", &cli.model)),
-            _ => Box::new(backend::ollama::OllamaBackend::new(
-                &cli.ollama_url,
-                &cli.model,
+            "zai" => Box::new(backend::zai::ZaiBackend::new("", &cli.llm_model)),
+            "ollama" => Box::new(backend::ollama::OllamaBackend::new(
+                &cli.llm_url,
+                &cli.llm_model,
             )),
+            _ => {
+                // auto-detect
+                if !llm_cred.is_empty()
+                    || cli.llm_url.contains("z.ai")
+                    || cli.llm_url.contains("anthropic")
+                    || cli.llm_url.contains("openai")
+                {
+                    Box::new(backend::zai::ZaiBackend::new(&llm_cred, &cli.llm_model))
+                } else {
+                    Box::new(backend::ollama::OllamaBackend::new(
+                        &cli.llm_url,
+                        &cli.llm_model,
+                    ))
+                }
+            }
         };
 
         let playbook_path = std::path::PathBuf::from(&cli.playbook_dir);
         let config = pilot::PilotConfig {
-            goal: cli.goal.clone(),
+            goal: goal.clone(),
             max_steps: cli.max_steps,
             use_hints: true,
             use_heuristics: true,
@@ -153,4 +180,106 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     handle.abort();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn cli_goal_flag() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com", "--goal", "do X"]).unwrap();
+        assert_eq!(cli.goal.as_deref(), Some("do X"));
+        assert!(cli.goal_positional.is_empty());
+    }
+
+    #[test]
+    fn cli_goal_positional() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com", "do", "X"]).unwrap();
+        assert!(cli.goal.is_none());
+        assert_eq!(cli.goal_positional, vec!["do", "X"]);
+    }
+
+    #[test]
+    fn cli_goal_flag_takes_priority() {
+        let cli = Cli::try_parse_from([
+            "lad",
+            "--url",
+            "https://x.com",
+            "--goal",
+            "from flag",
+            "extra",
+        ])
+        .unwrap();
+        assert_eq!(cli.goal.as_deref(), Some("from flag"));
+    }
+
+    #[test]
+    fn cli_goal_resolution_from_flag() {
+        let cli =
+            Cli::try_parse_from(["lad", "--url", "https://x.com", "--goal", "flagged"]).unwrap();
+        let resolved = cli.goal.unwrap_or_else(|| cli.goal_positional.join(" "));
+        assert_eq!(resolved, "flagged");
+    }
+
+    #[test]
+    fn cli_goal_resolution_from_positional() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com", "hello", "world"]).unwrap();
+        let resolved = cli.goal.unwrap_or_else(|| cli.goal_positional.join(" "));
+        assert_eq!(resolved, "hello world");
+    }
+
+    #[test]
+    fn cli_no_goal_resolves_empty() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com"]).unwrap();
+        let resolved = cli.goal.unwrap_or_else(|| cli.goal_positional.join(" "));
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn cli_llm_url_new_flag() {
+        let cli = Cli::try_parse_from([
+            "lad",
+            "--url",
+            "https://x.com",
+            "--llm-url",
+            "http://custom:1234",
+        ])
+        .unwrap();
+        assert_eq!(cli.llm_url, "http://custom:1234");
+    }
+
+    #[test]
+    fn cli_ollama_url_alias_still_works() {
+        let cli = Cli::try_parse_from([
+            "lad",
+            "--url",
+            "https://x.com",
+            "--ollama-url",
+            "http://legacy:1234",
+        ])
+        .unwrap();
+        assert_eq!(cli.llm_url, "http://legacy:1234");
+    }
+
+    #[test]
+    fn cli_llm_model_new_flag() {
+        let cli =
+            Cli::try_parse_from(["lad", "--url", "https://x.com", "--llm-model", "gpt-4"]).unwrap();
+        assert_eq!(cli.llm_model, "gpt-4");
+    }
+
+    #[test]
+    fn cli_model_alias_still_works() {
+        let cli =
+            Cli::try_parse_from(["lad", "--url", "https://x.com", "--model", "llama3"]).unwrap();
+        assert_eq!(cli.llm_model, "llama3");
+    }
+
+    #[test]
+    fn cli_backend_defaults_to_auto() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com"]).unwrap();
+        assert_eq!(cli.backend, "auto");
+    }
 }
