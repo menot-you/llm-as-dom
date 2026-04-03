@@ -204,7 +204,17 @@ const SUCCESS_KEYWORDS: &[&str] = &[
 ];
 
 /// Keywords in visible text that indicate a failed action.
-const ERROR_KEYWORDS: &[&str] = &["invalid", "incorrect", "wrong password", "failed", "error"];
+const ERROR_KEYWORDS: &[&str] = &[
+    "invalid",
+    "incorrect",
+    "wrong password",
+    "failed",
+    "error",
+    "bad login",
+    "denied",
+    "unauthorized",
+    "try again",
+];
 
 /// Detect if the goal has been achieved.
 ///
