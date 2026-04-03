@@ -272,6 +272,7 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
         state: PageState::Ready,
         element_cap: extraction.element_cap,
         blocked_reason: None,
+        session_context: None,
     };
 
     // Detect bot-challenge / CAPTCHA pages after extraction.
