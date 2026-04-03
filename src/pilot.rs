@@ -114,6 +114,12 @@ pub struct PilotConfig {
     /// Session state for multi-page tracking. When `Some`, cookies and navigation
     /// history are persisted across steps and can be carried between pilot runs.
     pub session: Option<std::sync::Arc<tokio::sync::Mutex<crate::session::SessionState>>>,
+    /// Whether to pause for human intervention on captchas (default: false).
+    ///
+    /// When `true` and a captcha/challenge is detected, the pilot waits for
+    /// the user to resolve it in the browser window instead of escalating
+    /// immediately.
+    pub interactive: bool,
 }
 
 impl Default for PilotConfig {
@@ -126,6 +132,7 @@ impl Default for PilotConfig {
             playbook_dir: None,
             max_retries_per_step: 2,
             session: None,
+            interactive: false,
         }
     }
 }
@@ -294,41 +301,137 @@ pub async fn run_pilot(
             });
         }
 
-        // 1c. If the page is blocked (CAPTCHA / WAF), escalate immediately.
+        // 1c. If the page is blocked (CAPTCHA / WAF), handle based on challenge kind.
         if let PageState::Blocked(ref reason) = view.state {
-            tracing::warn!(step = step_idx, reason = %reason, "page blocked — escalating");
-            if let Some(b64) = take_screenshot(page).await {
-                screenshots.push(b64);
+            let kind = crate::a11y::classify_challenge(reason);
+
+            match kind {
+                crate::a11y::ChallengeKind::CloudflareTurnstile => {
+                    // Turnstile may auto-resolve. Wait up to 5s first.
+                    tracing::info!(
+                        step = step_idx,
+                        "Turnstile detected — waiting for auto-resolve"
+                    );
+                    if wait_for_captcha_resolution(page, Duration::from_secs(5))
+                        .await
+                        .is_ok()
+                    {
+                        tracing::info!(step = step_idx, "Turnstile auto-resolved");
+                        continue;
+                    }
+                    // Didn't auto-resolve — fall through to interactive or escalate.
+                }
+                crate::a11y::ChallengeKind::AuthWall => {
+                    // Auth wall — let the pilot loop continue; heuristics may handle it.
+                    tracing::info!(
+                        step = step_idx,
+                        "auth wall detected — continuing pilot loop"
+                    );
+                }
+                crate::a11y::ChallengeKind::WafBlock => {
+                    // WAF block — can't resolve, escalate immediately.
+                    tracing::warn!(step = step_idx, reason = %reason, "WAF block — escalating");
+                    if let Some(b64) = take_screenshot(page).await {
+                        screenshots.push(b64);
+                    }
+                    let final_action = Action::Escalate {
+                        reason: format!("page blocked (WAF): {reason}"),
+                    };
+                    let step = Step {
+                        index: step_idx,
+                        observation: view,
+                        action: final_action.clone(),
+                        source: DecisionSource::Heuristic,
+                        confidence: 1.0,
+                        duration: step_start.elapsed(),
+                    };
+                    history.push(step);
+                    let session_snapshot = match &session {
+                        Some(s) => Some(s.lock().await.clone()),
+                        None => None,
+                    };
+                    return Ok(PilotResult {
+                        success: false,
+                        steps: history,
+                        final_action,
+                        total_duration: run_start.elapsed(),
+                        playbook_hits,
+                        hints_hits,
+                        heuristic_hits,
+                        llm_hits,
+                        retry_count: total_retries,
+                        screenshots,
+                        session_snapshot,
+                    });
+                }
+                crate::a11y::ChallengeKind::Captcha => {
+                    // Will be handled below by interactive or escalate.
+                }
             }
-            let final_action = Action::Escalate {
-                reason: format!("page blocked: {reason}"),
-            };
-            let step = Step {
-                index: step_idx,
-                observation: view,
-                action: final_action.clone(),
-                source: DecisionSource::Heuristic,
-                confidence: 1.0,
-                duration: step_start.elapsed(),
-            };
-            history.push(step);
-            let session_snapshot = match &session {
-                Some(s) => Some(s.lock().await.clone()),
-                None => None,
-            };
-            return Ok(PilotResult {
-                success: false,
-                steps: history,
-                final_action,
-                total_duration: run_start.elapsed(),
-                playbook_hits,
-                hints_hits,
-                heuristic_hits,
-                llm_hits,
-                retry_count: total_retries,
-                screenshots,
-                session_snapshot,
-            });
+
+            // Interactive mode: pause for human on captcha/turnstile challenges.
+            if config.interactive
+                && matches!(
+                    kind,
+                    crate::a11y::ChallengeKind::Captcha
+                        | crate::a11y::ChallengeKind::CloudflareTurnstile
+                )
+            {
+                tracing::warn!(step = step_idx, reason = %reason, "captcha detected — waiting for human");
+                eprintln!();
+                eprintln!("  CAPTCHA DETECTED: {reason}");
+                eprintln!("  Resolve it in the browser window...");
+                eprintln!();
+
+                match wait_for_captcha_resolution(page, Duration::from_secs(120)).await {
+                    Ok(()) => {
+                        tracing::info!(step = step_idx, "captcha resolved — continuing");
+                        eprintln!("  Captcha resolved! Continuing...");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::warn!(step = step_idx, "captcha timeout — escalating");
+                        // Fall through to escalate below.
+                    }
+                }
+            }
+
+            // Non-interactive or timed-out: escalate (unless AuthWall which continues).
+            if !matches!(kind, crate::a11y::ChallengeKind::AuthWall) {
+                tracing::warn!(step = step_idx, reason = %reason, "page blocked — escalating");
+                if let Some(b64) = take_screenshot(page).await {
+                    screenshots.push(b64);
+                }
+                let final_action = Action::Escalate {
+                    reason: format!("page blocked: {reason}"),
+                };
+                let step = Step {
+                    index: step_idx,
+                    observation: view,
+                    action: final_action.clone(),
+                    source: DecisionSource::Heuristic,
+                    confidence: 1.0,
+                    duration: step_start.elapsed(),
+                };
+                history.push(step);
+                let session_snapshot = match &session {
+                    Some(s) => Some(s.lock().await.clone()),
+                    None => None,
+                };
+                return Ok(PilotResult {
+                    success: false,
+                    steps: history,
+                    final_action,
+                    total_duration: run_start.elapsed(),
+                    playbook_hits,
+                    hints_hits,
+                    heuristic_hits,
+                    llm_hits,
+                    retry_count: total_retries,
+                    screenshots,
+                    session_snapshot,
+                });
+            }
         }
 
         // 1d. Enrich view with session context for multi-page LLM awareness.
@@ -656,6 +759,31 @@ async fn execute_action_with_retry(
     }
 }
 
+/// Wait for a captcha/challenge page to be resolved by the user.
+///
+/// Polls every 500ms, re-extracts the DOM, and checks if the page state
+/// is no longer `Blocked`. Returns `Ok(())` when resolved, or
+/// `Err(Error::Timeout)` if the timeout elapses.
+async fn wait_for_captcha_resolution(
+    page: &chromiumoxide::Page,
+    timeout: Duration,
+) -> Result<(), crate::Error> {
+    let start = Instant::now();
+    let poll_interval = Duration::from_millis(500);
+
+    while start.elapsed() < timeout {
+        tokio::time::sleep(poll_interval).await;
+
+        if let Ok(view) = crate::a11y::extract_semantic_view(page).await
+            && !matches!(view.state, PageState::Blocked(_))
+        {
+            return Ok(());
+        }
+    }
+
+    Err(crate::Error::Timeout)
+}
+
 /// Escape a string for safe embedding inside a JavaScript single-quoted
 /// string literal.
 ///
@@ -764,7 +892,14 @@ async fn execute_action(page: &chromiumoxide::Page, action: &Action) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    use super::PilotConfig;
     use super::js_escape;
+
+    #[test]
+    fn pilot_config_interactive_default() {
+        let config = PilotConfig::default();
+        assert!(!config.interactive);
+    }
 
     #[test]
     fn escapes_backslash() {
