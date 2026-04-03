@@ -1529,7 +1529,7 @@ fn mfa_page_escalates() {
         visible_text: "Enter the verification code sent to your phone".into(),
         state: PageState::Ready,
         element_cap: None,
-        blocked_reason: None,
+        blocked_reason: None, session_context: None,
     };
 
     // Use a generic goal so login/search/nav heuristics don't fire first
@@ -1558,6 +1558,7 @@ fn non_mfa_page_does_not_escalate() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     let r = heuristics::try_resolve(&view, "view dashboard", &[]);
@@ -1648,6 +1649,7 @@ fn validation_error_escalates() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
@@ -1670,6 +1672,7 @@ fn clean_form_no_validation_escalation() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
@@ -1746,6 +1749,7 @@ fn mfa_module_direct_detection() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     let result = mfa::try_detect_mfa(&view, "login", &[]);
@@ -1767,6 +1771,7 @@ fn validation_module_direct_check() {
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
+        session_context: None,
     };
 
     assert!(validation::has_validation_errors(&view));
