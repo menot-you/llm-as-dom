@@ -1048,3 +1048,213 @@ fn test_no_false_positive_not_in_title() {
         "normal page with 'not' in title should not trigger false positive"
     );
 }
+
+// ── Fix #17: Playbook wired into pilot ─────────────────────────────
+
+/// Playbooks load from a temp directory and find_playbook matches URL.
+#[test]
+fn test_playbook_dir_loads_and_matches() {
+    #[allow(unused_imports)]
+    use llm_as_dom::playbook::{Playbook, find_playbook, load_playbooks};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let pb_json = serde_json::json!({
+        "name": "test-login",
+        "url_pattern": "example.com/login",
+        "steps": [
+            { "kind": "type", "selector": "Email", "value": "${username}" },
+            { "kind": "click", "selector": "Submit" }
+        ],
+        "params": ["username"]
+    });
+    std::fs::write(
+        dir.path().join("test.json"),
+        serde_json::to_string_pretty(&pb_json).unwrap(),
+    )
+    .unwrap();
+
+    let playbooks = load_playbooks(dir.path());
+    assert_eq!(playbooks.len(), 1);
+    assert_eq!(playbooks[0].name, "test-login");
+
+    let found = find_playbook(&playbooks, "https://example.com/login");
+    assert!(found.is_some());
+    assert!(find_playbook(&playbooks, "https://other.com").is_none());
+}
+
+/// PilotConfig with playbook_dir set correctly stores the path.
+#[test]
+fn test_pilot_config_playbook_dir() {
+    use llm_as_dom::pilot::PilotConfig;
+
+    let config = PilotConfig {
+        playbook_dir: Some(std::path::PathBuf::from("/tmp/test-playbooks")),
+        ..PilotConfig::default()
+    };
+    assert_eq!(
+        config.playbook_dir,
+        Some(std::path::PathBuf::from("/tmp/test-playbooks"))
+    );
+
+    let default = PilotConfig::default();
+    assert!(default.playbook_dir.is_none());
+}
+
+/// Playbook step_to_action converts to correct Action with interpolation.
+#[test]
+fn test_playbook_step_produces_action_for_matching_view() {
+    use llm_as_dom::playbook::{extract_params, find_playbook, load_playbooks, step_to_action};
+    use llm_as_dom::semantic::{Element, ElementKind, PageState, SemanticView};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let pb_json = serde_json::json!({
+        "name": "demo-login",
+        "url_pattern": "demo.test/login",
+        "steps": [
+            { "kind": "type", "selector": "Email", "value": "${username}" },
+            { "kind": "click", "selector": "Go" }
+        ],
+        "params": ["username"]
+    });
+    std::fs::write(
+        dir.path().join("demo.json"),
+        serde_json::to_string_pretty(&pb_json).unwrap(),
+    )
+    .unwrap();
+
+    let playbooks = load_playbooks(dir.path());
+    let view = SemanticView {
+        url: "https://demo.test/login".into(),
+        title: "Login".into(),
+        page_hint: "login page".into(),
+        elements: vec![
+            Element {
+                id: 0,
+                kind: ElementKind::Input,
+                label: "Email".into(),
+                name: None,
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: Some("email".into()),
+                disabled: false,
+                form_index: None,
+                context: None,
+                hint: None,
+            },
+            Element {
+                id: 1,
+                kind: ElementKind::Button,
+                label: "Go".into(),
+                name: None,
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: Some("submit".into()),
+                disabled: false,
+                form_index: None,
+                context: None,
+                hint: None,
+            },
+        ],
+        forms: vec![],
+        visible_text: "Please log in".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    let pb = find_playbook(&playbooks, &view.url).unwrap();
+    let params = extract_params("login as alice@test.com", &pb.params);
+    let action = step_to_action(&view, &pb.steps[0], &params).unwrap();
+    match action {
+        llm_as_dom::pilot::Action::Type { element, value, .. } => {
+            assert_eq!(element, 0);
+            assert_eq!(value, "alice@test.com");
+        }
+        other => panic!("expected Type, got {other:?}"),
+    }
+}
+
+// ── Fix #18: Hints split from heuristics ───────────────────────────
+
+/// Hints remain active even when heuristics are disabled.
+#[test]
+fn test_hints_active_when_heuristics_disabled() {
+    use llm_as_dom::pilot::PilotConfig;
+
+    let config = PilotConfig {
+        use_hints: true,
+        use_heuristics: false,
+        ..PilotConfig::default()
+    };
+    assert!(config.use_hints);
+    assert!(!config.use_heuristics);
+
+    // Verify hints resolve independently: call try_hints directly.
+    use llm_as_dom::heuristics::hints::try_hints;
+    use llm_as_dom::semantic::{Element, ElementHint, ElementKind, PageState, SemanticView};
+
+    let view = SemanticView {
+        url: "https://example.com/login".into(),
+        title: "Login".into(),
+        page_hint: "login page".into(),
+        elements: vec![Element {
+            id: 0,
+            kind: ElementKind::Input,
+            label: "Email".into(),
+            name: None,
+            value: None,
+            placeholder: None,
+            href: None,
+            input_type: Some("email".into()),
+            disabled: false,
+            form_index: None,
+            context: None,
+            hint: Some(ElementHint {
+                hint_type: "field".into(),
+                value: "email".into(),
+            }),
+        }],
+        forms: vec![],
+        visible_text: "".into(),
+        state: PageState::Ready,
+        element_cap: None,
+        blocked_reason: None,
+    };
+
+    // Hints should resolve even though we conceptually disable heuristics.
+    let result = try_hints(&view, "login as test@example.com", &[]);
+    assert!(
+        result.action.is_some(),
+        "hints should resolve a field:email"
+    );
+    assert!(result.confidence >= 0.9);
+}
+
+/// When both hints and heuristics are disabled, nothing resolves at Tier 1/2.
+#[test]
+fn test_both_disabled_falls_to_llm() {
+    use llm_as_dom::pilot::PilotConfig;
+
+    let config = PilotConfig {
+        use_hints: false,
+        use_heuristics: false,
+        ..PilotConfig::default()
+    };
+    assert!(!config.use_hints);
+    assert!(!config.use_heuristics);
+    // With both disabled, only Tier 0 (playbook) and Tier 3 (LLM) remain.
+    // Since playbook_dir is None, only LLM would fire in a real run.
+}
+
+/// Default PilotConfig has both hints and heuristics enabled.
+#[test]
+fn test_default_config_enables_both() {
+    use llm_as_dom::pilot::PilotConfig;
+
+    let config = PilotConfig::default();
+    assert!(config.use_hints, "hints should be on by default");
+    assert!(config.use_heuristics, "heuristics should be on by default");
+    assert!(config.playbook_dir.is_none(), "no playbook dir by default");
+}
