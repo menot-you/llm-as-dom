@@ -271,7 +271,7 @@ jobs:
           cd npm
           node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
 
-      - name: Publish @menot-you/llm-as-dom-mcp
+      - name: Publish llm-as-dom-mcp
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: cd npm && npm publish --access public || echo "Version may already be published"
