@@ -9,6 +9,8 @@ pub mod hints;
 /// Login-specific heuristics (credential parsing, form fill, submit, done).
 pub mod login;
 mod navigation;
+/// OAuth flow heuristics (OAuth buttons, consent approval).
+pub mod oauth;
 mod search;
 
 use crate::pilot::Action;
@@ -43,6 +45,20 @@ pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Heurist
 
     // Strategy 1: Login form fill by goal parsing
     if let Some(result) = login::try_form_fill(view, &goal_lower, acted_on)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
+    // Strategy 1.5: OAuth button click (when no password field or no credentials)
+    if let Some(result) = oauth::try_oauth_button(view, &goal_lower, acted_on)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
+    // Strategy 1.6: OAuth consent approval
+    if let Some(result) = oauth::try_consent_approval(view, &goal_lower, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;
