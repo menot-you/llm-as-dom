@@ -66,6 +66,7 @@ mod tests {
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
+            session_context: None,
         }
     }
 
