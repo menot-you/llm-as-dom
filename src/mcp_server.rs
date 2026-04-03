@@ -1,4 +1,4 @@
-//! `lad-mcp`: MCP server exposing the browser pilot as semantic tools.
+//! `llm-as-dom-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
 //! Provides six tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`, `lad_session`.
 
@@ -109,10 +109,10 @@ struct LadServer {
     browser: Arc<Mutex<Option<Arc<chromiumoxide::Browser>>>>,
     /// Handle to the CDP event-loop task.
     handler_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    /// Ollama API base URL.
-    ollama_url: String,
-    /// Model name to use for LLM decisions.
-    model: String,
+    /// LLM API base URL (Ollama, Z.AI, or any compatible endpoint).
+    llm_url: String,
+    /// LLM model name.
+    llm_model: String,
     /// Session state carried across tool calls within this MCP session.
     session: Arc<Mutex<McpSessionState>>,
 }
@@ -124,9 +124,12 @@ impl LadServer {
             tool_router: Self::tool_router(),
             browser: Arc::new(Mutex::new(None)),
             handler_handle: Arc::new(Mutex::new(None)),
-            ollama_url: std::env::var("LAD_OLLAMA_URL")
-                .unwrap_or_else(|_| "http://localhost:11434".into()),
-            model: std::env::var("LAD_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into()),
+            llm_url: read_env_with_fallback(
+                "LAD_LLM_URL",
+                "LAD_OLLAMA_URL",
+                "http://localhost:11434",
+            ),
+            llm_model: read_env_with_fallback("LAD_LLM_MODEL", "LAD_MODEL", "qwen2.5:7b"),
             session: Arc::new(Mutex::new(McpSessionState::default())),
         }
     }
@@ -180,6 +183,37 @@ impl LadServer {
         let view = a11y::extract_semantic_view(&page).await.map_err(mcp_err)?;
         Ok((page, view))
     }
+
+    /// Auto-detect which LLM backend to use based on env/URL.
+    fn create_backend(url: &str, model: &str) -> Box<dyn pilot::PilotBackend> {
+        let llm_cred = read_env_with_fallback("LAD_LLM_API_KEY", "Z_AI_API_KEY", "");
+        if !llm_cred.is_empty()
+            || url.contains("z.ai")
+            || url.contains("anthropic")
+            || url.contains("openai")
+        {
+            Box::new(backend::zai::ZaiBackend::new(&llm_cred, model))
+        } else {
+            Box::new(backend::ollama::OllamaBackend::new(url, model))
+        }
+    }
+}
+
+/// Read an environment variable with fallback to a deprecated name.
+fn read_env_with_fallback(new_name: &str, old_name: &str, default: &str) -> String {
+    if let Ok(val) = std::env::var(new_name) {
+        return val;
+    }
+    if let Ok(val) = std::env::var(old_name) {
+        tracing::warn!(
+            old = old_name,
+            new = new_name,
+            "deprecated env var — please use {} instead",
+            new_name
+        );
+        return val;
+    }
+    default.to_string()
 }
 
 /// Convert any `Display` error into an MCP internal-error response.
@@ -220,7 +254,7 @@ impl LadServer {
             .map_err(mcp_err)?;
         tracing::info!("page ready, initialising pilot");
 
-        let backend = backend::ollama::OllamaBackend::new(&self.ollama_url, &self.model);
+        let backend = Self::create_backend(&self.llm_url, &self.llm_model);
         let config = pilot::PilotConfig {
             goal: p.goal.clone(),
             max_steps: p.max_steps,
@@ -232,7 +266,7 @@ impl LadServer {
         };
 
         tracing::info!("running pilot");
-        let result = pilot::run_pilot(&page, &backend, &config)
+        let result = pilot::run_pilot(&page, backend.as_ref(), &config)
             .await
             .map_err(mcp_err)?;
         tracing::info!(
@@ -577,7 +611,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compact()
         .init();
 
-    tracing::info!("lad-mcp starting (stdio)");
+    tracing::info!("llm-as-dom-mcp starting (stdio)");
 
     let server = LadServer::new();
     let transport = rmcp::transport::io::stdio();
