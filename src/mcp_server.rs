@@ -111,12 +111,14 @@ impl LadServer {
         }
 
         tracing::info!("launching headless browser");
+        let tmp = std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()));
         let config = chromiumoxide::BrowserConfig::builder()
             .arg("--headless=new")
             .arg("--disable-gpu")
             .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
             .arg("--window-size=1280,800")
+            .arg(format!("--user-data-dir={}", tmp.display()))
             .build()
             .map_err(Error::BrowserStr)?;
 
@@ -179,12 +181,16 @@ impl LadServer {
         let p = params.0;
         tracing::info!(url = %p.url, goal = %p.goal, "lad_browse");
 
+        tracing::info!(url = %p.url, "launching page");
         let browser = self.ensure_browser().await.map_err(mcp_err)?;
         let page = browser.new_page(&p.url).await.map_err(mcp_err)?;
+        tracing::info!("waiting for navigation");
         page.wait_for_navigation().await.map_err(mcp_err)?;
+        tracing::info!("waiting for content to stabilise");
         a11y::wait_for_content(&page, a11y::DEFAULT_WAIT_TIMEOUT)
             .await
             .map_err(mcp_err)?;
+        tracing::info!("page ready, initialising pilot");
 
         let backend = backend::ollama::OllamaBackend::new(&self.ollama_url, &self.model);
         let config = pilot::PilotConfig {
@@ -194,9 +200,20 @@ impl LadServer {
             max_retries_per_step: 2,
         };
 
+        tracing::info!("running pilot");
         let result = pilot::run_pilot(&page, &backend, &config)
             .await
             .map_err(mcp_err)?;
+        tracing::info!(
+            success = result.success,
+            steps = result.steps.len(),
+            duration_secs = result.total_duration.as_secs_f64(),
+            "pilot complete"
+        );
+
+        // Always capture a final screenshot for visual verification.
+        tracing::info!("capturing final screenshot");
+        let final_screenshot = pilot::take_screenshot(&page).await;
 
         let output = serde_json::json!({
             "success": result.success,
@@ -217,8 +234,13 @@ impl LadServer {
 
         let mut content_blocks: Vec<Content> = vec![Content::text(to_pretty_json(&output))];
 
-        // Append any screenshots as image content blocks.
+        // Append in-flight screenshots (e.g. from escalation retries).
         for b64_png in &result.screenshots {
+            content_blocks.push(Content::image(b64_png, "image/png"));
+        }
+
+        // Append final screenshot (success or fail).
+        if let Some(b64_png) = &final_screenshot {
             content_blocks.push(Content::image(b64_png, "image/png"));
         }
 
@@ -247,6 +269,7 @@ impl LadServer {
             "elements_count": view.elements.len(),
             "estimated_tokens": view.estimated_tokens(),
             "elements": view.elements,
+            "forms": view.forms,
             "visible_text": view.visible_text,
             "query": p.what,
         });
