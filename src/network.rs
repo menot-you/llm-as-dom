@@ -313,18 +313,13 @@ pub fn classify_url(url: &str, method: &str) -> RequestKind {
     RequestKind::Other
 }
 
-/// Enable network tracking on a CDP page.
+/// Enable network tracking on a page handle.
 ///
 /// Must be called before any network events will fire.
-pub async fn enable_network_tracking(page: &chromiumoxide::Page) -> Result<(), crate::Error> {
-    use chromiumoxide::cdp::browser_protocol::network::EnableParams;
-
-    page.execute(EnableParams::default()).await.map_err(|e| {
-        crate::Error::ActionFailed(format!("failed to enable network tracking: {e}"))
-    })?;
-
-    tracing::debug!("network tracking enabled");
-    Ok(())
+pub async fn enable_network_tracking(
+    page: &dyn crate::engine::PageHandle,
+) -> Result<(), crate::Error> {
+    page.enable_network_monitoring().await.map(|_| ())
 }
 
 #[cfg(test)]

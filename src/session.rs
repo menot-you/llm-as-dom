@@ -270,112 +270,24 @@ fn path_matches(cookie_path: &str, request_path: &str) -> bool {
 // CDP cookie integration
 // ---------------------------------------------------------------------------
 
-/// Extract cookies from the browser via JavaScript `document.cookie`.
+/// Extract cookies from the browser via the page handle's cookie API.
 ///
-/// This captures non-httpOnly cookies. For full cookie access including
-/// httpOnly cookies, use CDP `Network.getCookies` directly.
+/// This captures non-httpOnly cookies via JavaScript `document.cookie`.
 pub async fn extract_cookies_cdp(
-    page: &chromiumoxide::Page,
+    page: &dyn crate::engine::PageHandle,
 ) -> Result<Vec<CookieEntry>, crate::Error> {
-    let js = r#"
-        (() => {
-            const url = window.location.href;
-            const hostname = window.location.hostname;
-            const pathname = window.location.pathname;
-            return JSON.stringify({
-                url: url,
-                hostname: hostname,
-                pathname: pathname,
-                cookies: document.cookie.split(';').map(c => {
-                    const [name, ...rest] = c.trim().split('=');
-                    return { name: name || '', value: rest.join('=') || '' };
-                }).filter(c => c.name.length > 0)
-            });
-        })()
-    "#;
-
-    let result: String = page
-        .evaluate(js)
-        .await?
-        .into_value()
-        .map_err(|e| crate::Error::ActionFailed(e.to_string()))?;
-    let parsed: serde_json::Value =
-        serde_json::from_str(&result).map_err(|e| crate::Error::ActionFailed(e.to_string()))?;
-
-    let hostname = parsed["hostname"].as_str().unwrap_or_default();
-    let pathname = parsed["pathname"].as_str().unwrap_or("/");
-
-    let cookies: Vec<CookieEntry> = parsed["cookies"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|c| {
-                    let name = c["name"].as_str()?.to_string();
-                    let value = c["value"].as_str().unwrap_or_default().to_string();
-                    Some(CookieEntry {
-                        name,
-                        value,
-                        domain: hostname.to_string(),
-                        path: pathname.to_string(),
-                        expires: 0.0,     // JS document.cookie doesn't expose expiry
-                        secure: false,    // not available via document.cookie
-                        http_only: false, // by definition (JS can read it)
-                        same_site: None,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    tracing::debug!(count = cookies.len(), "extracted cookies via JS");
-    Ok(cookies)
+    page.cookies().await
 }
 
-/// Inject cookies into the browser via `document.cookie` assignment.
+/// Inject cookies into the browser via the page handle's cookie API.
 ///
 /// Note: httpOnly cookies cannot be set via JavaScript. This covers the
 /// common case of setting session/auth cookies for testing.
 pub async fn inject_cookies_cdp(
-    page: &chromiumoxide::Page,
+    page: &dyn crate::engine::PageHandle,
     cookies: &[CookieEntry],
 ) -> Result<(), crate::Error> {
-    for cookie in cookies {
-        let mut parts = vec![format!(
-            "{}={}",
-            crate::pilot::js_escape(&cookie.name),
-            crate::pilot::js_escape(&cookie.value)
-        )];
-
-        if !cookie.domain.is_empty() {
-            parts.push(format!("domain={}", cookie.domain));
-        }
-        if !cookie.path.is_empty() {
-            parts.push(format!("path={}", cookie.path));
-        }
-        if cookie.expires > 0.0 {
-            // Convert Unix timestamp to UTC date string
-            parts.push(format!(
-                "expires={}",
-                cookie.expires // browser handles numeric expires via max-age fallback
-            ));
-        }
-        if cookie.secure {
-            parts.push("secure".to_string());
-        }
-        if let Some(ref ss) = cookie.same_site {
-            parts.push(format!("samesite={ss}"));
-        }
-
-        let cookie_str = parts.join("; ");
-        let js = format!(
-            "document.cookie = '{}'",
-            crate::pilot::js_escape(&cookie_str)
-        );
-        page.evaluate(js).await?;
-    }
-
-    tracing::debug!(count = cookies.len(), "injected cookies via JS");
-    Ok(())
+    page.set_cookies(cookies).await
 }
 
 // ---------------------------------------------------------------------------
