@@ -6,13 +6,16 @@
 pub mod a11y;
 pub mod audit;
 pub mod backend;
+pub mod crypto;
 pub mod error;
 pub mod heuristics;
 pub mod locate;
+pub mod network;
 pub mod oauth;
 pub mod pilot;
 pub mod playbook;
 pub mod profile;
+pub mod selector;
 pub mod semantic;
 pub mod session;
 
