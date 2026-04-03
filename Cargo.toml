@@ -54,6 +54,12 @@ base64 = "0.22"
 # SQLite (Chrome cookie extraction)
 rusqlite = { version = "0.33", features = ["bundled"] }
 
+# Cookie decryption (Chrome Safe Storage)
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+pbkdf2 = { version = "0.12", features = ["hmac"] }
+sha1 = { version = "0.10", default-features = false }
+
 # Misc
 async-trait = "0.1"
 thiserror = "2"
