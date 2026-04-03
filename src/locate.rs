@@ -62,15 +62,23 @@ pub struct LocateResult {
 /// 3. `data-lad` attribute (lad hints)
 /// 4. DOM path as fallback
 pub fn build_locate_js(selector: &str) -> String {
-    // Escape the selector for embedding in JS
-    let escaped = selector.replace('\\', "\\\\").replace('\'', "\\'");
+    // Escape the selector for safe embedding in a JS single-quoted string.
+    // Uses the battle-tested js_escape() from pilot.rs (handles quotes,
+    // backslashes, template literals, null bytes, script breakout, etc.).
+    let escaped = crate::pilot::js_escape(selector);
 
     format!(
         r#"(() => {{
     const selector = '{escaped}';
 
-    // Try CSS selector first, then text content match
-    let el = document.querySelector(selector);
+    // Try CSS selector first, wrapped in try-catch to safely reject
+    // malformed/adversarial selectors instead of executing arbitrary JS.
+    let el = null;
+    try {{
+        el = document.querySelector(selector);
+    }} catch (e) {{
+        return {{ error: 'invalid selector: ' + e.message }};
+    }}
     if (!el) {{
         // Try finding by text content
         const allEls = document.querySelectorAll('*');
@@ -367,6 +375,75 @@ mod tests {
 
         let err = parse_locate_result(raw).unwrap_err();
         assert!(err.contains("not found"), "should return error message");
+    }
+
+    #[test]
+    fn build_locate_js_escapes_injection_attempt() {
+        // Adversarial selector: tries to break out of the string and execute JS
+        let js = build_locate_js(r#""); alert("xss"#);
+        // The escaped version must NOT contain unescaped quotes that break out
+        assert!(
+            !js.contains(r#""); alert("xss"#),
+            "adversarial selector must be escaped, not passed raw"
+        );
+        // The quotes should be escaped
+        assert!(
+            js.contains(r#"\"); alert(\"xss"#),
+            "double quotes should be escaped with backslash"
+        );
+    }
+
+    #[test]
+    fn build_locate_js_escapes_backtick_injection() {
+        // Template literal injection attempt
+        let js = build_locate_js("${document.cookie}");
+        assert!(
+            js.contains("\\${document.cookie}"),
+            "dollar-brace should be escaped"
+        );
+    }
+
+    #[test]
+    fn build_locate_js_escapes_script_breakout() {
+        let js = build_locate_js("</script><script>alert(1)</script>");
+        assert!(
+            !js.contains("</script>"),
+            "script close tag must be escaped"
+        );
+    }
+
+    #[test]
+    fn build_locate_js_escapes_newline_injection() {
+        // Newlines in selector could break out of a string literal
+        let js = build_locate_js("div\nalert(1)");
+        assert!(
+            !js.contains('\n') || !js.contains("alert(1)\n"),
+            "newline in selector must be escaped to \\n"
+        );
+        assert!(js.contains("div\\nalert(1)"));
+    }
+
+    #[test]
+    fn build_locate_js_escapes_null_byte() {
+        let js = build_locate_js("div\0.class");
+        assert!(js.contains("div\\0.class"), "null byte must be escaped");
+    }
+
+    #[test]
+    fn build_locate_js_try_catch_wraps_queryselector() {
+        let js = build_locate_js("div");
+        assert!(
+            js.contains("try {") || js.contains("try{"),
+            "querySelector must be wrapped in try-catch"
+        );
+        assert!(
+            js.contains("catch"),
+            "querySelector must be wrapped in try-catch"
+        );
+        assert!(
+            js.contains("invalid selector"),
+            "catch block should return an error object"
+        );
     }
 
     #[test]
