@@ -6,7 +6,7 @@
 use chromiumoxide::Page;
 use serde::Deserialize;
 
-use crate::semantic::{Element, ElementHint, ElementKind, PageState, SemanticView};
+use crate::semantic::{Element, ElementHint, ElementKind, FormMeta, PageState, SemanticView};
 
 /// Extract page structure via JS and compress to a [`SemanticView`].
 ///
@@ -87,7 +87,11 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                 const placeholder = el.getAttribute('placeholder');
                 const textContent = el.textContent?.trim()?.substring(0, 80);
                 const elTitle = el.getAttribute('title');
-                const label = ariaLabel || labelText || placeholder || textContent || elTitle || '';
+                const href = el.getAttribute('href') || '';
+                let label = (ariaLabel || labelText || placeholder || textContent || elTitle || '').replace(/\s+/g, ' ').trim();
+                if (!label && kind === 'link' && href) {
+                    label = href.split('/').filter(Boolean).pop() || '';
+                }
 
                 const closestForm = el.closest('form');
                 const formIndex = closestForm ? (formMap.get(closestForm) ?? null) : null;
@@ -100,7 +104,6 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                 if (kind === 'button') score += 4;
                 if (tag === 'input' && el.type === 'submit') score += 2;
                 if (ariaLabel) score += 2;
-                const href = el.getAttribute('href') || '';
                 if (kind === 'link') {
                     if (href === '#' || href.startsWith('#')) score -= 2;
                     const lcHref = href.toLowerCase();
@@ -180,8 +183,28 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
                     visibleText += text.substring(0, 100);
                 }
             }
+            // Fallback: collect substantial text from td, span, a when headings/paragraphs yielded little
+            if (visibleText.length < 100) {
+                const extraNodes = document.querySelectorAll('td, span, a');
+                for (const node of extraNodes) {
+                    const text = node.textContent?.trim();
+                    if (text && text.length > 20 && visibleText.length < 500) {
+                        if (visibleText) visibleText += ' ';
+                        visibleText += text.substring(0, 100);
+                    }
+                }
+            }
 
-            return { elements, visibleText, formCount: allForms.length, elementCap };
+            // ── Form metadata ───────────────────────────────────────────
+            const forms = Array.from(allForms).map((f, i) => ({
+                index: i,
+                action: f.getAttribute('action') || null,
+                method: (f.getAttribute('method') || 'GET').toUpperCase(),
+                id: f.id || null,
+                name: f.getAttribute('name') || null,
+            }));
+
+            return { elements, visibleText, formCount: allForms.length, elementCap, forms };
         })()
     "#;
 
@@ -227,11 +250,24 @@ pub async fn extract_semantic_view(page: &Page) -> Result<SemanticView, crate::E
 
     let page_hint = classify_page(&title, &url, &elements);
 
+    let forms: Vec<FormMeta> = extraction
+        .forms
+        .into_iter()
+        .map(|f| FormMeta {
+            index: f.index,
+            action: f.action,
+            method: f.method,
+            id: f.id,
+            name: f.name,
+        })
+        .collect();
+
     let mut view = SemanticView {
         url,
         title,
         page_hint,
         elements,
+        forms,
         visible_text: extraction.visible_text,
         state: PageState::Ready,
         element_cap: extraction.element_cap,
@@ -259,6 +295,19 @@ struct JsExtraction {
     /// `"50/316"` when elements were capped, `null` otherwise.
     #[serde(rename = "elementCap")]
     element_cap: Option<String>,
+    /// Form metadata collected from each `<form>` on the page.
+    #[serde(default)]
+    forms: Vec<JsFormMeta>,
+}
+
+/// Form metadata as returned by the JS extractor.
+#[derive(Deserialize)]
+struct JsFormMeta {
+    index: u32,
+    action: Option<String>,
+    method: String,
+    id: Option<String>,
+    name: Option<String>,
 }
 
 /// A single element as returned by the JS extractor.
@@ -363,28 +412,57 @@ const CHALLENGE_TEXTS: &[&str] = &[
     "challenge-platform",
 ];
 
-/// Detect whether a [`SemanticView`] looks like a bot-challenge or CAPTCHA page.
+/// URL path/query patterns that indicate a challenge or verification gate.
+const CHALLENGE_URL_PATTERNS: &[&str] = &["challenge", "captcha", "verify", "security_check"];
+
+/// Title patterns that indicate an error page (404, auth wall, etc.).
+const ERROR_PAGE_TITLES: &[&str] = &[
+    "page not found",
+    "404",
+    "not found",
+    "forbidden",
+    "unauthorized",
+];
+
+/// Detect whether a [`SemanticView`] looks like a bot-challenge, CAPTCHA page,
+/// or error/auth-wall page.
 ///
-/// Returns `Some(reason)` when a challenge is detected, `None` otherwise.
+/// Returns `Some(reason)` when a challenge or error is detected, `None` otherwise.
 pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
     let lower_title = view.title.to_lowercase();
     let lower_text = view.visible_text.to_lowercase();
+    let lower_url = view.url.to_lowercase();
 
-    // 1. Title match
+    // 1. Title match (challenge pages)
     for kw in CHALLENGE_TITLES {
         if lower_title.contains(kw) {
             return Some(format!("title matches challenge keyword: \"{kw}\""));
         }
     }
 
-    // 2. Visible text match
+    // 2. Error page detection (404, auth wall, access denied)
+    for kw in ERROR_PAGE_TITLES {
+        if lower_title.contains(kw) {
+            return Some(format!("title matches error page keyword: \"{kw}\""));
+        }
+    }
+
+    // 3. Visible text match
     for kw in CHALLENGE_TEXTS {
         if lower_text.contains(kw) {
             return Some(format!("page text matches challenge keyword: \"{kw}\""));
         }
     }
 
-    // 3. Very few interactive elements + challenge-like URL or title
+    // 4. URL pattern match (challenge/captcha/verify gates like Reddit's
+    //    `?js_challenge=1&token=...`)
+    for pattern in CHALLENGE_URL_PATTERNS {
+        if lower_url.contains(pattern) {
+            return Some(format!("URL contains challenge pattern: \"{pattern}\""));
+        }
+    }
+
+    // 5. Very few interactive elements + challenge-like URL or title
     let interactive_count = view
         .elements
         .iter()
@@ -400,7 +478,6 @@ pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
         .count();
 
     if interactive_count < 3 {
-        let lower_url = view.url.to_lowercase();
         let has_challenge_signal = lower_url.contains("challenge")
             || lower_url.contains("captcha")
             || lower_url.contains("cdn-cgi")

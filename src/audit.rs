@@ -17,7 +17,7 @@ pub enum Severity {
     Info,
 }
 
-/// A single audit finding.
+/// A single audit finding (may represent multiple identical occurrences).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditIssue {
     /// Category: `"a11y"`, `"forms"`, or `"links"`.
@@ -30,6 +30,15 @@ pub struct AuditIssue {
     pub message: String,
     /// Suggested fix.
     pub suggestion: String,
+    /// Number of identical occurrences (grouped by category + message).
+    /// `1` for unique issues, `>1` for deduplicated groups.
+    #[serde(skip_serializing_if = "is_one")]
+    pub count: u32,
+}
+
+/// Returns `true` when count is 1, used for serde skip.
+fn is_one(val: &u32) -> bool {
+    *val == 1
 }
 
 /// Summary counts by severity.
@@ -98,11 +107,34 @@ pub fn build_audit_js(categories: &[String]) -> String {
 }
 
 /// Parse raw JS audit output into structured `AuditResult`.
+///
+/// Deduplicates issues: identical `(category, message)` pairs are grouped
+/// into a single `AuditIssue` with a `count` field. The summary counts
+/// reflect the **deduplicated** issue count (not raw occurrences).
 pub fn parse_audit_result(url: &str, raw: Vec<RawAuditIssue>) -> AuditResult {
+    use std::collections::HashMap;
+
+    // Group by (category, message) to deduplicate.
+    let mut groups: HashMap<(String, String), (RawAuditIssue, u32)> = HashMap::new();
+    // Preserve insertion order via a separate key list.
+    let mut order: Vec<(String, String)> = Vec::new();
+
+    for r in raw {
+        let key = (r.category.clone(), r.message.clone());
+        match groups.get_mut(&key) {
+            Some((_first, count)) => *count += 1,
+            None => {
+                order.push(key.clone());
+                groups.insert(key, (r, 1));
+            }
+        }
+    }
+
     let mut summary = AuditSummary::default();
-    let issues: Vec<AuditIssue> = raw
+    let issues: Vec<AuditIssue> = order
         .into_iter()
-        .map(|r| {
+        .filter_map(|key| groups.remove(&key))
+        .map(|(r, count)| {
             let severity = match r.severity.as_str() {
                 "critical" => {
                     summary.critical += 1;
@@ -123,6 +155,7 @@ pub fn parse_audit_result(url: &str, raw: Vec<RawAuditIssue>) -> AuditResult {
                 element: r.element,
                 message: r.message,
                 suggestion: r.suggestion,
+                count,
             }
         })
         .collect();
@@ -388,6 +421,8 @@ mod tests {
         assert_eq!(result.summary.critical, 1);
         assert_eq!(result.summary.warning, 1);
         assert_eq!(result.summary.info, 1);
+        // Each unique issue has count=1.
+        assert!(result.issues.iter().all(|i| i.count == 1));
     }
 
     #[test]
@@ -397,6 +432,101 @@ mod tests {
         assert_eq!(result.summary.critical, 0);
         assert_eq!(result.summary.warning, 0);
         assert_eq!(result.summary.info, 0);
+    }
+
+    #[test]
+    fn dedup_identical_issues() {
+        // Simulate 25 identical href=# warnings (like chaos.html).
+        let raw: Vec<RawAuditIssue> = (0..25)
+            .map(|i| RawAuditIssue {
+                category: "links".into(),
+                severity: "warning".into(),
+                element: format!("a.link-{i}"),
+                message: r##"Link with non-navigational href ("#")"##.into(),
+                suggestion: "Use a <button> instead, or provide a real URL".into(),
+            })
+            .collect();
+
+        let result = parse_audit_result("https://chaos.html", raw);
+        // 25 identical issues should collapse into 1 entry.
+        assert_eq!(result.issues.len(), 1, "should deduplicate to 1 issue");
+        assert_eq!(result.issues[0].count, 25);
+        assert_eq!(result.issues[0].category, "links");
+        // Summary counts deduplicated issues, not raw.
+        assert_eq!(result.summary.warning, 1);
+    }
+
+    #[test]
+    fn dedup_mixed_issues() {
+        let raw = vec![
+            RawAuditIssue {
+                category: "links".into(),
+                severity: "warning".into(),
+                element: "a.nav-1".into(),
+                message: "missing noopener".into(),
+                suggestion: "add rel".into(),
+            },
+            RawAuditIssue {
+                category: "links".into(),
+                severity: "warning".into(),
+                element: "a.nav-2".into(),
+                message: "missing noopener".into(),
+                suggestion: "add rel".into(),
+            },
+            RawAuditIssue {
+                category: "a11y".into(),
+                severity: "critical".into(),
+                element: "img#hero".into(),
+                message: "Missing alt".into(),
+                suggestion: "Add alt".into(),
+            },
+        ];
+
+        let result = parse_audit_result("https://example.com", raw);
+        assert_eq!(result.issues.len(), 2, "2 unique (cat, msg) pairs");
+        // First group: noopener (count=2)
+        assert_eq!(result.issues[0].count, 2);
+        assert_eq!(result.issues[0].message, "missing noopener");
+        // Second group: alt (count=1)
+        assert_eq!(result.issues[1].count, 1);
+        assert_eq!(result.issues[1].message, "Missing alt");
+        // Summary: 1 warning + 1 critical (deduplicated)
+        assert_eq!(result.summary.warning, 1);
+        assert_eq!(result.summary.critical, 1);
+    }
+
+    #[test]
+    fn dedup_count_omitted_in_json_when_one() {
+        let issue = AuditIssue {
+            category: "a11y".into(),
+            severity: Severity::Warning,
+            element: "img".into(),
+            message: "test".into(),
+            suggestion: "fix".into(),
+            count: 1,
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(
+            !json.contains("count"),
+            "count=1 should be omitted from JSON"
+        );
+    }
+
+    #[test]
+    fn dedup_count_present_in_json_when_many() {
+        let issue = AuditIssue {
+            category: "links".into(),
+            severity: Severity::Warning,
+            element: "a".into(),
+            message: "test".into(),
+            suggestion: "fix".into(),
+            count: 25,
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(
+            json.contains(r#""count":25"#),
+            "count>1 should appear in JSON"
+        );
     }
 
     #[test]
