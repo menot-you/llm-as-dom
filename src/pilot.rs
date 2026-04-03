@@ -217,6 +217,7 @@ pub async fn run_pilot(
     let mut screenshots: Vec<String> = Vec::new();
     let mut prev_url: Option<String> = None;
     let mut prev_element_count: Option<usize> = None;
+    let mut prev_acted_count: Option<usize> = None;
     let mut stale_streak: u32 = 0;
 
     for step_idx in 0..config.max_steps {
@@ -231,15 +232,17 @@ pub async fn run_pilot(
             "observed"
         );
 
-        // 1b. Stale-state detection: if the URL and element count are
-        // unchanged for 2+ consecutive observations after an action,
-        // the page is stuck (e.g. button re-click doing nothing).
-        // NOTE: This naturally handles OAuth/redirect flows because a URL
-        // change resets the streak — even if element count stays the same.
+        // 1b. Stale-state detection: if the URL, element count, AND acted-on
+        // set are unchanged for 3+ consecutive observations, the page is stuck.
+        // NOTE: Type/Select actions change values but not element count, so we
+        // also track `acted_on.len()` to avoid false stale detection during
+        // form-fill sequences. OAuth/redirect flows reset via URL change.
         let current_element_count = view.elements.len();
         let current_url = &view.url;
+        let current_acted = acted_on.len();
         if prev_url.as_deref() == Some(current_url.as_str())
             && prev_element_count == Some(current_element_count)
+            && prev_acted_count == Some(current_acted)
             && step_idx > 0
         {
             stale_streak += 1;
@@ -248,8 +251,9 @@ pub async fn run_pilot(
         }
         prev_url = Some(current_url.clone());
         prev_element_count = Some(current_element_count);
+        prev_acted_count = Some(current_acted);
 
-        if stale_streak >= 2 {
+        if stale_streak >= 3 {
             tracing::warn!(
                 step = step_idx,
                 stale_streak,
