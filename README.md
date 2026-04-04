@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/example-org/llm-as-dom/actions)
 [![Crates.io](https://img.shields.io/crates/v/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
 
@@ -296,4 +296,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep-dive.
 
 ## License
 
-MIT — use it however you want.
+AGPL-3.0-or-later — see [LICENSE](LICENSE).
