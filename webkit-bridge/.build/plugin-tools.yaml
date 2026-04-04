@@ -1,0 +1,81 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "lad-webkit-bridge-arm64-apple-macosx-debug.exe": ["<lad-webkit-bridge-arm64-apple-macosx-debug.exe>"]
+  "lad-webkit-bridge-arm64-apple-macosx-debug.module": ["<lad-webkit-bridge-arm64-apple-macosx-debug.module>"]
+  "main": ["<lad-webkit-bridge-arm64-apple-macosx-debug.exe>","<lad-webkit-bridge-arm64-apple-macosx-debug.module>"]
+  "test": ["<lad-webkit-bridge-arm64-apple-macosx-debug.exe>","<lad-webkit-bridge-arm64-apple-macosx-debug.module>"]
+default: "main"
+nodes:
+  "/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/Sources/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge":
+    is-mutated: true
+commands:
+  "/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge-entitlement.plist"]
+    description: "Write auxiliary file /Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge-entitlement.plist"
+
+  "/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/main.swift.o"]
+    outputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge.product/Objects.LinkFileList"
+
+  "/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/Sources/main.swift"]
+    outputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/sources"]
+    description: "Write auxiliary file /Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/sources"
+
+  "/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<lad-webkit-bridge-arm64-apple-macosx-debug.exe>":
+    tool: phony
+    inputs: ["<lad-webkit-bridge-arm64-apple-macosx-debug.exe-CodeSigning>"]
+    outputs: ["<lad-webkit-bridge-arm64-apple-macosx-debug.exe>"]
+
+  "<lad-webkit-bridge-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/main.swift.o","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftmodule"]
+    outputs: ["<lad-webkit-bridge-arm64-apple-macosx-debug.module>"]
+
+  "C.lad-webkit-bridge-arm64-apple-macosx-debug.exe":
+    tool: shell
+    inputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/main.swift.o","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge.product/Objects.LinkFileList"]
+    outputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/lad-webkit-bridge"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug","-o","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge","-module-name","lad_webkit_bridge","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_lad_webkit_bridge_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx12.0","-Xlinker","-add_ast_path","-Xlinker","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.lad-webkit-bridge-arm64-apple-macosx-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge-entitlement.plist"]
+    outputs: ["<lad-webkit-bridge-arm64-apple-macosx-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/lad-webkit-bridge"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge-entitlement.plist","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge"]
+
+  "C.lad-webkit-bridge-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/Sources/main.swift","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/sources"]
+    outputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/main.swift.o","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftmodule"]
+    description: "Compiling Swift Module 'lad_webkit_bridge' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","lad_webkit_bridge","-emit-dependencies","-emit-module","-emit-module-path","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftmodule","-output-file-map","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/output-file-map.json","-incremental","-c","@/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/lad_webkit_bridge.build/sources","-I","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx12.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","lad_webkit_bridge_main","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","webkit_bridge"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/Sources/","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/Package.swift","/Users/tiago/Developer/menot-you/llm-as-dom/webkit-bridge/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
