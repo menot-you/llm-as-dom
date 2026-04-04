@@ -4,7 +4,7 @@
 //! Run with:
 //!   LAD_WEBKIT_BRIDGE=./webkit-bridge/.build/debug/lad-webkit-bridge cargo test -- --ignored
 
-use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
+use llm_as_dom::engine::{BrowserEngine, EngineConfig};
 
 /// Helper to create a WebKit engine for tests.
 async fn create_webkit_engine() -> Box<dyn BrowserEngine> {
