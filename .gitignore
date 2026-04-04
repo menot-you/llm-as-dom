@@ -1,1 +1,4 @@
 /target
+.mcp.json
+.DS_Store
+webkit-bridge/.build/
