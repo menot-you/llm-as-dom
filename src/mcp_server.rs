@@ -3,6 +3,7 @@
 //! Provides six tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`, `lad_session`.
 
 use llm_as_dom::engine::chromium::ChromiumEngine;
+use llm_as_dom::engine::webkit::WebKitEngine;
 use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
 use llm_as_dom::{a11y, audit, backend, locate, pilot, semantic};
 
@@ -163,8 +164,12 @@ impl LadServer {
             },
         };
 
-        let engine = ChromiumEngine::launch(config).await?;
-        let e: Arc<dyn BrowserEngine> = Arc::new(engine);
+        let engine_name = std::env::var("LAD_ENGINE").unwrap_or_default();
+        let e: Arc<dyn BrowserEngine> = if engine_name == "webkit" {
+            Arc::new(WebKitEngine::launch(config).await?)
+        } else {
+            Arc::new(ChromiumEngine::launch(config).await?)
+        };
         *engine_lock = Some(Arc::clone(&e));
         Ok(e)
     }
