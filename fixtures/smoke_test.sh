@@ -126,20 +126,23 @@ echo "Server PID: ${SERVER_PID}"
 echo ""
 
 # ── Fixture assertions ──────────────────────────────────────────────
-# Format: check_fixture <name> <min_elements> <keywords...>
+# Format: check_fixture <path> <min_elements> <keywords...>
 
-check_fixture login       3  "login"  "password"
-check_fixture search      2  "search"
-check_fixture register    3  "input"
-check_fixture todo        1  "input"
-check_fixture dashboard   2  "link"
-check_fixture slow        0  "SemanticView"
-check_fixture modal       2  "button"
-check_fixture spa         1  "link"
-check_fixture multistep   2  "input"
-check_fixture chaos      10  "button"
-check_fixture broken      1  "input"
-check_fixture iframe_mess 4  "input"
+# Pages — real-world scenarios
+check_fixture pages/login       3  "login"  "password"
+check_fixture pages/search      2  "search"
+check_fixture pages/register    3  "input"
+check_fixture pages/todo        1  "input"
+check_fixture pages/dashboard   2  "link"
+check_fixture pages/modal       2  "button"
+check_fixture pages/spa         1  "link"
+check_fixture pages/multistep   2  "input"
+
+# Edge cases — tricky patterns
+check_fixture edge-cases/slow        0  "SemanticView"
+check_fixture edge-cases/chaos      10  "button"
+check_fixture edge-cases/broken      1  "input"
+check_fixture edge-cases/iframe_mess 4  "input"
 
 # ── Report ──────────────────────────────────────────────────────────
 
