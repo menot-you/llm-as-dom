@@ -7,9 +7,10 @@
 **Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
 
 [![CI](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/example-org/llm-as-dom/actions)
+[![Crates.io](https://img.shields.io/crates/v/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-[Quick Start](#quick-start) · [How It Works](#how-it-works) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
 
 ![lad demo](assets/demo.gif)
 
@@ -71,15 +72,87 @@ Your App (localhost)          lad                         Claude
      │                          │   (~300 tokens)           │
 ```
 
-### Three Decision Tiers
+### Five Decision Tiers
 
-| Tier | Speed | Cost | When |
-|------|-------|------|------|
-| **Heuristics** | **310ns** | **Free** | Login, search, form fill — 90% of dev testing |
-| **Cheap LLM** | 0.4s | Free (Ollama) | Ambiguous elements, unknown pages |
-| **Escalate** | — | — | Screenshot sent to orchestrator |
+| Tier | Strategy | Speed | Cost | When |
+|------|----------|-------|------|------|
+| **0** | Playbook replay | **instant** | **Free** | Trained flows (login, checkout) |
+| **1** | @lad/hints | **instant** | **Free** | `data-lad` developer annotations |
+| **2** | Heuristics | **310ns** | **Free** | Login, search, form fill — 90% of actions |
+| **3** | Cheap LLM | 0.4s | Free (Ollama) | Ambiguous elements, unknown pages |
+| **4** | Escalate | — | — | Screenshot sent to orchestrator |
 
 Most dev testing **never hits the LLM**. Heuristics parse your goal, match form fields by name/type/label, find submit buttons, and detect success — all in nanoseconds.
+
+## Multi-Engine
+
+lad is **browser-agnostic**. The pilot, heuristics, and LLM reasoning never touch browser APIs directly — they operate on a compressed `SemanticView`. The actual browser is a pluggable adapter.
+
+### Supported Engines
+
+| Engine | Flag | Runtime | Platforms |
+|--------|------|---------|-----------|
+| **Chromium** | `--engine chromium` (default) | Chrome/Chromium install | Linux, macOS, Windows |
+| **WebKit** | `--engine webkit` | Native WKWebView | macOS (zero install) |
+
+```bash
+# Chromium (default)
+lad --url "https://example.com" --extract-only
+
+# WebKit (macOS — no Chrome needed)
+lad --url "https://example.com" --engine webkit --extract-only
+```
+
+### Why Multi-Engine Matters
+
+1. **Real rendering differences** — Safari handles flexbox, `<dialog>`, scroll, clipboard API differently. Testing only in Chromium misses ~20% of the web.
+2. **Zero install on macOS** — WebKit comes with the OS. No 500MB Chrome download.
+3. **System proxy** — WKWebView respects macOS proxy/VPN settings automatically.
+4. **Your protocol** — the WebKit adapter uses a simple stdin/stdout JSON protocol. Adding new engines (Firefox, Electron) means writing a ~300 line bridge app.
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────┐
+│                 lad (Rust)                     │
+│                                                │
+│  SemanticView ← a11y.rs (JS injection)        │
+│       │                                        │
+│  pilot.rs → heuristics → LLM → action         │
+│       │                                        │
+│  BrowserEngine trait ── PageHandle trait        │
+│       │                        │               │
+│  ┌────┴────┐            ┌─────┴─────┐         │
+│  │Chromium │            │  WebKit   │         │
+│  │Adapter  │            │  Adapter  │         │
+│  └────┬────┘            └─────┬─────┘         │
+└───────┼───────────────────────┼────────────────┘
+        │ CDP (WebSocket)       │ stdin/stdout JSON
+        ▼                       ▼
+   ┌─────────┐          ┌──────────────┐
+   │ Chrome  │          │ Swift macOS  │
+   │ process │          │ WKWebView    │
+   └─────────┘          └──────────────┘
+```
+
+The `PageHandle` trait has 9 methods. That's the entire browser API surface:
+
+```rust
+#[async_trait]
+pub trait PageHandle: Send + Sync {
+    async fn eval_js(&self, script: &str) -> Result<Value>;
+    async fn navigate(&self, url: &str) -> Result<()>;
+    async fn wait_for_navigation(&self) -> Result<()>;
+    async fn url(&self) -> Result<String>;
+    async fn title(&self) -> Result<String>;
+    async fn screenshot_png(&self) -> Result<Vec<u8>>;
+    async fn cookies(&self) -> Result<Vec<CookieEntry>>;
+    async fn set_cookies(&self, cookies: &[CookieEntry]) -> Result<()>;
+    async fn enable_network_monitoring(&self) -> Result<bool>;
+}
+```
+
+Everything in `a11y.rs` (DOM extraction), `pilot.rs` (decision loop), and all 11 heuristic modules operates on `SemanticView` — they have no idea which engine is running.
 
 ## Use Cases
 
@@ -108,6 +181,14 @@ lad --url "http://localhost:3000/collections/all" --extract-only
   run: lad --url "http://localhost:3000/login" --goal "login as ci@test.com with password ci_pass" --max-steps 5
 ```
 
+### Cross-Engine Testing
+```bash
+# Same test, both engines — catch rendering differences
+lad --url "https://myapp.com/login" --engine chromium --extract-only > chromium.json
+lad --url "https://myapp.com/login" --engine webkit   --extract-only > webkit.json
+diff chromium.json webkit.json
+```
+
 ### Staging E2E
 ```bash
 lad --url "https://staging.myapp.com/login" \
@@ -128,6 +209,9 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 | `lad_browse` | Navigate + accomplish a goal autonomously |
 | `lad_extract` | Extract structured page info (never raw HTML) |
 | `lad_assert` | Verify assertions ("has login form", "title contains Dashboard") |
+| `lad_locate` | Map a DOM element back to its source file |
+| `lad_audit` | Audit page quality: a11y, forms, links |
+| `lad_session` | Inspect/reset session state (auth, cookies, history) |
 
 <details>
 <summary>Claude Desktop config</summary>
@@ -139,12 +223,15 @@ llm-as-dom-mcp  # starts MCP server (stdio)
       "command": "llm-as-dom-mcp",
       "env": {
         "LAD_LLM_URL": "http://localhost:11434",
-        "LAD_LLM_MODEL": "qwen2.5:7b"
+        "LAD_LLM_MODEL": "qwen2.5:7b",
+        "LAD_ENGINE": "chromium"
       }
     }
   }
 }
 ```
+
+Set `LAD_ENGINE=webkit` for WebKit on macOS.
 </details>
 
 ## Benchmarks
@@ -173,29 +260,31 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 | qwen2.5-7b (Ollama) | 0.4s | Free |
 | glm-4.7 (Z.AI cloud) | 1.7s | ~$0.001 |
 
-### Real-World Results (live MCP battle test)
+### Cross-Engine Parity
 
-Tested via actual MCP tool calls from Claude Code against real sites:
+Same page, same extraction — both engines produce identical `SemanticView`:
 
-| Site | Elements | Tokens | Compression | Status |
-|------|----------|--------|-------------|--------|
-| Localhost login | 5 | 106 | 75x | ✓ |
-| HN front page | 50 | 724 | 69x | ✓ |
-| GitHub trending | 28 | 534 | 66x | ✓ |
+| Metric | Chromium | WebKit |
+|--------|----------|--------|
+| GitHub login elements | 9 | 12 (+ cookie banner) |
+| Page hint | "login page" | "login page" |
+| Core form fields | username, password, submit | username, password, submit |
+| HN front page elements | 50/163 | 50/163 |
 
-Full results: [docs/BATTLE_TEST_RESULTS.md](docs/BATTLE_TEST_RESULTS.md)
+The 3 extra WebKit elements are footer links that GitHub serves differently to Safari — exactly the kind of difference multi-engine testing catches.
 
 ## Test Suite
 
-- **101 tests** (unit + chaos + integration)
-- **66 HTML fixtures** (12 standard + 54 adversarial)
+- **341 tests** (unit + chaos + integration + protocol)
+- **11 heuristic modules** (login, form, search, navigation, OAuth, MFA, ecommerce, validation, multistep, hints)
 - **8 micro-benchmarks** (criterion)
-- **5 CI jobs** — all green
+- **~11,000 lines of Rust** + 300 lines of Swift
 
 ## Requirements
 
-- Chrome/Chromium (system install)
-- Ollama with `qwen2.5:7b` — optional, only for LLM fallback
+- **Chromium engine**: Chrome/Chromium (system install)
+- **WebKit engine**: macOS 12+ (nothing to install — WebKit is built-in)
+- **LLM fallback** (optional): Ollama with `qwen2.5:7b`
 
 ```bash
 cargo install llm-as-dom  # installs both lad and llm-as-dom-mcp
