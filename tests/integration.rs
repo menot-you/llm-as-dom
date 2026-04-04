@@ -1771,6 +1771,80 @@ fn ecommerce_module_direct_checkout() {
     }
 }
 
+// ── Selector wiring tests ───────────────────────────────────────────
+
+#[test]
+fn selector_click_button_by_kind_label() {
+    use llm_as_dom::selector::{self, Selector};
+
+    let view = mock_view(
+        vec![
+            button_element(0, "Cancel", None),
+            button_element(1, "Login", None),
+            button_element(2, "Sign Up", None),
+        ],
+        "login page",
+    );
+
+    let selector = Selector::parse("button:Login");
+    let m = selector::find_best(&view, &selector).unwrap();
+    assert_eq!(m.element_id, 1, "should match Login button");
+}
+
+#[test]
+fn selector_find_by_attribute() {
+    use llm_as_dom::selector::{self, Selector};
+
+    let view = mock_view(
+        vec![
+            input_element(0, "Email", "email", Some("email"), None),
+            input_element(1, "Password", "password", Some("pw"), None),
+        ],
+        "login page",
+    );
+
+    let selector = Selector::parse("[name=email]");
+    let m = selector::find_best(&view, &selector).unwrap();
+    assert_eq!(m.element_id, 0, "should match email input by name attr");
+}
+
+#[test]
+fn selector_natural_language_login_button() {
+    use llm_as_dom::selector::{self, Selector};
+
+    let view = mock_view(
+        vec![
+            link_element(0, "Home", "/"),
+            button_element(1, "Login", None),
+            button_element(2, "Sign Up", None),
+        ],
+        "login page",
+    );
+
+    let selector = Selector::parse("the login button");
+    let m = selector::find_best(&view, &selector).unwrap();
+    assert_eq!(m.element_id, 1, "should match Login via natural language");
+}
+
+#[test]
+fn selector_skips_disabled_elements() {
+    use llm_as_dom::selector::{self, Selector};
+
+    let view = mock_view(
+        vec![Element {
+            disabled: true,
+            ..button_element(0, "Submit", None)
+        }],
+        "form page",
+    );
+
+    let selector = Selector::parse("button:Submit");
+    assert!(
+        selector::find_best(&view, &selector).is_none(),
+        "should skip disabled elements"
+    );
+}
+
 #[test]
 fn multistep_module_direct_advance() {
     use llm_as_dom::heuristics::multistep;

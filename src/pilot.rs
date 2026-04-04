@@ -620,6 +620,143 @@ pub async fn run_pilot(
     })
 }
 
+/// Try to extract a CSS-like selector or natural-language element reference
+/// from the goal and match it against the semantic view.
+///
+/// Recognises patterns such as:
+/// - `"click the login button"` (natural language)
+/// - `"click button:Login"` (kind:label)
+/// - `"type hello into [name=email]"` (attribute selector)
+/// - `"click #3"` (element ID)
+fn try_selector_from_goal(
+    view: &crate::semantic::SemanticView,
+    goal: &str,
+    acted_on: &[u32],
+) -> Option<Action> {
+    let selector_text = extract_selector_text(goal)?;
+    let selector = crate::selector::Selector::parse(&selector_text);
+    let matches = crate::selector::find_matches(view, &selector);
+
+    let best = matches.iter().find(|m| !acted_on.contains(&m.element_id))?;
+
+    let goal_lower = goal.to_lowercase();
+    let is_type_action = goal_lower.contains("type ")
+        || goal_lower.contains("enter ")
+        || goal_lower.contains("fill ");
+
+    if is_type_action {
+        let value = extract_type_value(goal);
+        if !value.is_empty() {
+            return Some(Action::Type {
+                element: best.element_id,
+                value,
+                reasoning: format!("selector: {} ({})", best.reason, selector_text),
+            });
+        }
+    }
+
+    Some(Action::Click {
+        element: best.element_id,
+        reasoning: format!("selector: {} ({})", best.reason, selector_text),
+    })
+}
+
+/// Extract a selector pattern from a goal string.
+///
+/// Looks for CSS-like selectors (`[attr=val]`, `#id`, `kind:label`) after
+/// action verbs, or falls back to the target after `click`/`go to` verbs
+/// as a natural-language selector.
+fn extract_selector_text(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase();
+
+    // Attribute selector anywhere: [name=email]
+    if let Some(start) = goal.find('[')
+        && let Some(end) = goal[start..].find(']')
+    {
+        return Some(goal[start..start + end + 1].to_string());
+    }
+
+    // kind:label pattern anywhere: button:Login, input:email
+    for word in goal.split_whitespace() {
+        if word.contains(':') && !word.starts_with("http") {
+            let parts: Vec<&str> = word.splitn(2, ':').collect();
+            let kind_candidates = [
+                "button", "btn", "input", "field", "link", "select", "textarea", "checkbox",
+                "radio",
+            ];
+            if kind_candidates
+                .iter()
+                .any(|k| parts[0].eq_ignore_ascii_case(k))
+            {
+                return Some(word.to_string());
+            }
+        }
+    }
+
+    // #id pattern
+    for word in goal.split_whitespace() {
+        if word.starts_with('#') && word.len() > 1 {
+            return Some(word.to_string());
+        }
+    }
+
+    // Natural language after action verb: "click the login button"
+    let prefixes = ["click ", "go to ", "navigate to ", "open ", "press "];
+    for prefix in &prefixes {
+        if let Some(pos) = lower.find(prefix) {
+            let rest = goal[pos + prefix.len()..].trim();
+            if !rest.is_empty() {
+                return Some(rest.to_string());
+            }
+        }
+    }
+
+    // "type X into Y" / "enter X into Y" / "fill Y with X"
+    if let Some(pos) = lower.find(" into ") {
+        let rest = goal[pos + " into ".len()..].trim();
+        if !rest.is_empty() {
+            return Some(rest.to_string());
+        }
+    }
+
+    None
+}
+
+/// Extract the value to type from a goal string.
+///
+/// Supports patterns like:
+/// - `type "hello" into [name=q]` → `hello`
+/// - `type hello into .search` → `hello`
+/// - `enter foo into bar` → `foo`
+fn extract_type_value(goal: &str) -> String {
+    let lower = goal.to_lowercase();
+
+    // "type X into Y" pattern
+    for verb in &["type ", "enter ", "fill "] {
+        if let Some(verb_pos) = lower.find(verb) {
+            let after_verb = &goal[verb_pos + verb.len()..];
+
+            // Quoted value: type "hello world" into ...
+            if after_verb.starts_with('"') || after_verb.starts_with('\'') {
+                let quote = after_verb.chars().next().unwrap();
+                if let Some(end) = after_verb[1..].find(quote) {
+                    return after_verb[1..1 + end].to_string();
+                }
+            }
+
+            // Unquoted: type hello into ...
+            if let Some(into_pos) = after_verb.to_lowercase().find(" into ") {
+                let val = after_verb[..into_pos].trim();
+                if !val.is_empty() {
+                    return val.to_string();
+                }
+            }
+        }
+    }
+
+    String::new()
+}
+
 /// Decide the next action, retrying the LLM on parse failure with a fresh DOM.
 ///
 /// When all retries are exhausted, captures a screenshot and embeds it as
@@ -687,6 +824,12 @@ async fn decide_with_retry(
             );
             return Ok((action, DecisionSource::Heuristic, h.confidence));
         }
+    }
+
+    // Tier 2.5: Semantic selector (CSS-like / natural-language patterns in goal).
+    if use_heuristics && let Some(action) = try_selector_from_goal(view, goal, acted_on) {
+        tracing::info!(source = "selector", "selector matched from goal");
+        return Ok((action, DecisionSource::Heuristic, 0.75));
     }
 
     // Tier 3: LLM fallback with one retry on parse failure.
