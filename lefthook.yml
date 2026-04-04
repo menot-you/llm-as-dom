@@ -1,0 +1,23 @@
+# lefthook — zero tolerance git hooks
+# Install: brew install lefthook && lefthook install
+# Docs: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    rust-fmt:
+      glob: "**/*.rs"
+      run: cargo fmt --check
+      fail_text: "Rust formatting failed. Run: cargo fmt"
+
+    rust-clippy:
+      glob: "**/*.rs"
+      run: cargo clippy --all-targets -- -D warnings
+      fail_text: "Clippy warnings found. Fix all warnings before committing."
+
+pre-push:
+  parallel: false
+  commands:
+    act-ci:
+      run: act push -W .github/workflows/ci.yml
+      fail_text: "Local CI simulation failed via ACT. Please fix before pushing."
