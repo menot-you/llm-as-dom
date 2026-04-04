@@ -50,7 +50,7 @@ pub(super) struct CookieWire {
 }
 
 /// Response or event received from the Swift bridge via stdout.
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub(super) struct Response {
     /// Present on correlated responses, absent on push events.
     #[serde(default)]

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -18,17 +18,24 @@ struct BridgeConnection {
     writer: Mutex<ChildStdin>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Response>>>,
     next_id: AtomicU64,
+    /// Set to `false` when the reader loop detects bridge exit (EOF/error).
+    alive: Arc<AtomicBool>,
 }
 
 impl BridgeConnection {
     /// Send a request and wait for the correlated response.
     async fn request(&self, mut req: Request) -> Result<Response, crate::Error> {
+        // Fail fast if bridge is dead.
+        if !self.alive.load(Ordering::Relaxed) {
+            return Err(crate::Error::Browser("webkit bridge is not running".into()));
+        }
+
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         req.id = id;
 
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
 
+        // Write FIRST — only insert into pending map after successful write.
         let json = serde_json::to_string(&req)
             .map_err(|e| crate::Error::Backend(format!("serialize request: {e}")))?;
 
@@ -47,6 +54,9 @@ impl BridgeConnection {
                 .await
                 .map_err(|e| crate::Error::Browser(format!("flush: {e}")))?;
         }
+
+        // Insert AFTER successful write — no orphan entries on write failure.
+        self.pending.lock().await.insert(id, tx);
 
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
             Ok(Ok(resp)) => {
@@ -72,8 +82,8 @@ impl BridgeConnection {
 /// WebKit browser engine via macOS sidecar.
 pub struct WebKitEngine {
     conn: Arc<BridgeConnection>,
-    _reader_task: tokio::task::JoinHandle<()>,
-    _child: Arc<Mutex<Child>>,
+    reader_task: tokio::task::JoinHandle<()>,
+    child: Mutex<Child>,
 }
 
 impl WebKitEngine {
@@ -108,26 +118,51 @@ impl WebKitEngine {
             .take()
             .ok_or_else(|| crate::Error::Browser("no stdout on webkit bridge".into()))?;
 
+        let alive = Arc::new(AtomicBool::new(true));
+
         let conn = Arc::new(BridgeConnection {
             writer: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            alive: Arc::clone(&alive),
         });
 
-        let reader_task = tokio::spawn(Self::read_loop(stdout, Arc::clone(&conn)));
+        // Ready handshake: reader task signals when it sees {"event":"ready"}.
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+        let ready_tx = Arc::new(tokio::sync::Mutex::new(Some(ready_tx)));
 
-        // Give the bridge time to emit "ready"
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let reader_task = tokio::spawn(Self::read_loop(
+            stdout,
+            Arc::clone(&conn),
+            Arc::clone(&alive),
+            ready_tx,
+        ));
+
+        // Wait for the bridge to emit "ready" — 5s timeout.
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx).await {
+            Ok(Ok(())) => tracing::info!("webkit bridge ready"),
+            _ => {
+                let _ = child.kill().await;
+                return Err(crate::Error::Browser(
+                    "webkit bridge failed to start within 5 seconds".into(),
+                ));
+            }
+        }
 
         Ok(Self {
             conn,
-            _reader_task: reader_task,
-            _child: Arc::new(Mutex::new(child)),
+            reader_task,
+            child: Mutex::new(child),
         })
     }
 
     /// Background task: read stdout lines, dispatch responses / log events.
-    async fn read_loop(stdout: tokio::process::ChildStdout, conn: Arc<BridgeConnection>) {
+    async fn read_loop(
+        stdout: tokio::process::ChildStdout,
+        conn: Arc<BridgeConnection>,
+        alive: Arc<AtomicBool>,
+        ready_tx: Arc<tokio::sync::Mutex<Option<oneshot::Sender<()>>>>,
+    ) {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
 
@@ -141,7 +176,9 @@ impl WebKitEngine {
                         continue;
                     }
                     match serde_json::from_str::<Response>(trimmed) {
-                        Ok(resp) => Self::dispatch(resp, &conn).await,
+                        Ok(resp) => {
+                            Self::dispatch(resp, &conn, &ready_tx).await;
+                        }
                         Err(e) => {
                             tracing::warn!(
                                 error = %e,
@@ -157,10 +194,28 @@ impl WebKitEngine {
                 }
             }
         }
+
+        // Bridge exited — mark dead and drain all pending requests.
+        alive.store(false, Ordering::Relaxed);
+        tracing::error!("webkit bridge process exited");
+
+        let mut pending = conn.pending.lock().await;
+        for (_, sender) in pending.drain() {
+            let error_resp = Response {
+                ok: Some(false),
+                error: Some("webkit bridge process exited".into()),
+                ..Default::default()
+            };
+            let _ = sender.send(error_resp);
+        }
     }
 
     /// Route a parsed response to its pending sender or log as event.
-    async fn dispatch(resp: Response, conn: &BridgeConnection) {
+    async fn dispatch(
+        resp: Response,
+        conn: &BridgeConnection,
+        ready_tx: &Arc<tokio::sync::Mutex<Option<oneshot::Sender<()>>>>,
+    ) {
         if let Some(id) = resp.id {
             let mut map = conn.pending.lock().await;
             if let Some(sender) = map.remove(&id) {
@@ -170,9 +225,12 @@ impl WebKitEngine {
             match evt.as_str() {
                 "ready" => {
                     if let Some(version) = resp.value.as_ref().and_then(|v| v.as_str()) {
-                        tracing::info!(version, "webkit bridge ready");
+                        tracing::info!(version, "webkit bridge ready (event)");
                     } else {
-                        tracing::info!("webkit bridge ready");
+                        tracing::info!("webkit bridge ready (event)");
+                    }
+                    if let Some(tx) = ready_tx.lock().await.take() {
+                        let _ = tx.send(());
                     }
                 }
                 "console" => {
@@ -192,6 +250,19 @@ impl WebKitEngine {
                 other => tracing::debug!(event = other, "webkit event"),
             }
         }
+    }
+}
+
+/// Clean up the Swift sidecar on drop: abort reader, kill child process.
+impl Drop for WebKitEngine {
+    fn drop(&mut self) {
+        // 1. Abort the reader task (stops reading stdout).
+        self.reader_task.abort();
+
+        // 2. Kill the child process. Mutex::get_mut works because &mut self
+        //    guarantees exclusive access — no async lock needed.
+        let child = self.child.get_mut();
+        let _ = child.start_kill();
     }
 }
 
