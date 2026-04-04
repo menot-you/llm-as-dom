@@ -194,11 +194,19 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Build WebKit bridge (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          cd webkit-bridge
+          swift build -c release
+          cp .build/release/lad-webkit-bridge ../target/${{ matrix.target }}/release/ || true
+
       - name: Package
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/lad dist/lad-${{ matrix.artifact }} || true
           cp target/${{ matrix.target }}/release/llm-as-dom-mcp dist/llm-as-dom-mcp-${{ matrix.artifact }} || true
+          cp target/${{ matrix.target }}/release/lad-webkit-bridge dist/lad-webkit-bridge-${{ matrix.artifact }} 2>/dev/null || true
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
