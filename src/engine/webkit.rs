@@ -168,7 +168,13 @@ impl WebKitEngine {
             }
         } else if let Some(ref evt) = resp.event {
             match evt.as_str() {
-                "ready" => tracing::info!("webkit bridge ready"),
+                "ready" => {
+                    if let Some(version) = resp.value.as_ref().and_then(|v| v.as_str()) {
+                        tracing::info!(version, "webkit bridge ready");
+                    } else {
+                        tracing::info!("webkit bridge ready");
+                    }
+                }
                 "console" => {
                     let level = resp.level.as_deref().unwrap_or("log");
                     let msg = resp.message.as_deref().unwrap_or("");
