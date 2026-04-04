@@ -86,7 +86,7 @@ final class ConsoleHandler: NSObject, WKScriptMessageHandler {
 final class NavDelegate: NSObject, WKNavigationDelegate {
     let writer: StdoutWriter
     /// Pending wait_for_navigation completions keyed by request id.
-    var pendingWaits: [(UInt64)] = []
+    var pendingWaits: Set<UInt64> = []
     let lock = NSLock()
 
     init(writer: StdoutWriter) {
@@ -95,7 +95,7 @@ final class NavDelegate: NSObject, WKNavigationDelegate {
 
     func addPendingWait(_ id: UInt64) {
         lock.lock()
-        pendingWaits.append(id)
+        pendingWaits.insert(id)
         lock.unlock()
     }
 
@@ -166,11 +166,27 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
             self?.readLoop()
         }
 
-        writer.event("ready")
+        writer.event("ready", extra: ["version": "0.1.0"])
     }
 
     private func setupWebView() {
         let config = WKWebViewConfiguration()
+
+        // Session isolation: use ephemeral or custom data store
+        if let dataDir = ProcessInfo.processInfo.environment["LAD_WEBKIT_DATA_DIR"],
+           !dataDir.isEmpty {
+            // Custom persistent store for explicit session reuse
+            if #available(macOS 14.0, *) {
+                config.websiteDataStore = WKWebsiteDataStore(forIdentifier: UUID(uuidString: dataDir) ?? UUID())
+            } else {
+                // Fallback: non-persistent for older macOS
+                config.websiteDataStore = .nonPersistent()
+            }
+        } else {
+            // Default: non-persistent (ephemeral, no cookie leak between sessions)
+            config.websiteDataStore = .nonPersistent()
+        }
+
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         // Console capture injection.
@@ -234,20 +250,22 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
 
     private func readLoop() {
         while let line = readLine() {
-            guard !line.isEmpty,
-                  let data = line.data(using: .utf8) else { continue }
+            autoreleasepool {
+                guard !line.isEmpty,
+                      let data = line.data(using: .utf8) else { return }
 
-            let cmd: Command
-            do {
-                cmd = try JSONDecoder().decode(Command.self, from: data)
-            } catch {
-                // Can't respond without an id.
-                writer.event("error", extra: ["message": "invalid JSON: \(error.localizedDescription)"])
-                continue
-            }
+                let cmd: Command
+                do {
+                    cmd = try JSONDecoder().decode(Command.self, from: data)
+                } catch {
+                    // Can't respond without an id.
+                    writer.event("error", extra: ["message": "invalid JSON: \(error.localizedDescription)"])
+                    return  // return from autoreleasepool closure, not readLoop
+                }
 
-            DispatchQueue.main.async { [weak self] in
-                self?.dispatch(cmd)
+                DispatchQueue.main.async { [weak self] in
+                    self?.dispatch(cmd)
+                }
             }
         }
         // stdin closed — exit gracefully.
@@ -295,8 +313,7 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
                     guard let self = self else { return }
                     self.navDelegate.lock.lock()
-                    if let idx = self.navDelegate.pendingWaits.firstIndex(of: cmd.id) {
-                        self.navDelegate.pendingWaits.remove(at: idx)
+                    if self.navDelegate.pendingWaits.remove(cmd.id) != nil {
                         self.navDelegate.lock.unlock()
                         self.writer.respondError(cmd.id, "navigation timeout")
                     } else {
@@ -377,6 +394,9 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
                 if cd.secure == true {
                     props[.secure] = "TRUE"
                 }
+                if cd.httpOnly == true {
+                    props[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
+                }
                 if let sameSite = cd.sameSite {
                     props[.init("SameSite")] = sameSite
                 }
@@ -409,6 +429,12 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
             return NSNull()
         case is NSNull:
             return NSNull()
+        case let date as Date:
+            // JS Date() → Unix timestamp (seconds)
+            return date.timeIntervalSince1970
+        case let data as Data:
+            // Binary data → base64 string
+            return data.base64EncodedString()
         case let str as String:
             return str
         case let num as NSNumber:
@@ -422,7 +448,8 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
         case let dict as [String: Any]:
             return dict.mapValues { serializeJSResult($0) }
         default:
-            return String(describing: result!)
+            // Unknown type → null (safe fallback, no crash)
+            return NSNull()
         }
     }
 }
