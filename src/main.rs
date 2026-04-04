@@ -3,6 +3,7 @@
 //! Usage: `lad --url <URL> [--goal <GOAL> | "goal words..."] [--visible] [--extract-only]`
 
 use llm_as_dom::engine::chromium::ChromiumEngine;
+use llm_as_dom::engine::webkit::WebKitEngine;
 use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
 use llm_as_dom::{a11y, backend, pilot};
 
@@ -65,6 +66,10 @@ struct Cli {
     /// Chrome profile path for cookie reuse. Use "default" for the default profile.
     #[arg(long, alias = "chrome-profile")]
     profile: Option<String>,
+
+    /// Browser engine: "chromium" (default) or "webkit".
+    #[arg(long, default_value = "chromium")]
+    engine: String,
 }
 
 #[tokio::main]
@@ -97,7 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
 
-    let engine = ChromiumEngine::launch(engine_config).await?;
+    let engine: Box<dyn BrowserEngine> = match cli.engine.as_str() {
+        "webkit" => Box::new(WebKitEngine::launch(engine_config).await?),
+        _ => Box::new(ChromiumEngine::launch(engine_config).await?),
+    };
     let page: Box<dyn PageHandle> = engine.new_page(&cli.url).await?;
     page.wait_for_navigation().await?;
     a11y::wait_for_content(page.as_ref(), cli.wait_timeout).await?;

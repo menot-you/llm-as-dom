@@ -4,6 +4,8 @@
 //! specific browser engine (Chromium, WebKit, etc.).
 
 pub mod chromium;
+pub mod webkit;
+pub(crate) mod webkit_proto;
 
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
