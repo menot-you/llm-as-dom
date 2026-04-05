@@ -1,6 +1,7 @@
 //! `llm-as-dom-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
-//! Provides six tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`, `lad_audit`, `lad_session`.
+//! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
+//! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`.
 
 use llm_as_dom::engine::chromium::ChromiumEngine;
 use llm_as_dom::engine::webkit::WebKitEngine;
@@ -99,6 +100,47 @@ struct WatchParams {
     script: Option<String>,
 }
 
+/// Parameters for the `lad_snapshot` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SnapshotParams {
+    /// URL to navigate to.
+    url: String,
+}
+
+/// Parameters for the `lad_click` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ClickParams {
+    /// Element ID from snapshot.
+    element: u32,
+}
+
+/// Parameters for the `lad_type` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TypeParams {
+    /// Element ID from snapshot.
+    element: u32,
+    /// Text to type into the element.
+    text: String,
+}
+
+/// Parameters for the `lad_select` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SelectParams {
+    /// Element ID from snapshot.
+    element: u32,
+    /// Value to select.
+    value: String,
+}
+
+// ── Active page (persistent across snapshot -> click/type/select) ─
+
+/// A page kept alive between `lad_snapshot` and subsequent interaction tools.
+struct ActivePage {
+    page: Box<dyn PageHandle>,
+    url: String,
+    view: semantic::SemanticView,
+}
+
 // ── Session state (lightweight, server-side) ──────────────────────
 
 /// Lightweight session state tracked across MCP tool calls.
@@ -135,6 +177,8 @@ struct LadServer {
     session: Arc<Mutex<McpSessionState>>,
     /// Whether interactive mode is enabled (captcha pause for human).
     interactive: bool,
+    /// Persistent page from `lad_snapshot`, reused by click/type/select.
+    active_page: Arc<Mutex<Option<ActivePage>>>,
 }
 
 impl LadServer {
@@ -153,6 +197,7 @@ impl LadServer {
             interactive: std::env::var("LAD_INTERACTIVE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            active_page: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -210,6 +255,58 @@ impl LadServer {
             .await
             .map_err(mcp_err)?;
         Ok((page, view))
+    }
+
+    /// Navigate to a URL (or reuse the active page if same origin), returning
+    /// a fresh semantic view. Stores the result in `active_page`.
+    async fn navigate_or_reuse(
+        &self,
+        url: &str,
+    ) -> Result<semantic::SemanticView, rmcp::ErrorData> {
+        let mut active = self.active_page.lock().await;
+
+        // Reuse existing page if same origin
+        if let Some(ap) = active.as_ref()
+            && same_origin(&ap.url, url)
+        {
+            if ap.url != url {
+                ap.page.navigate(url).await.map_err(mcp_err)?;
+                ap.page.wait_for_navigation().await.map_err(mcp_err)?;
+                a11y::wait_for_content(ap.page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
+                    .await
+                    .map_err(mcp_err)?;
+            }
+            let view = a11y::extract_semantic_view(ap.page.as_ref())
+                .await
+                .map_err(mcp_err)?;
+            let mut ap_owned = active.take().unwrap();
+            ap_owned.url = url.to_string();
+            ap_owned.view = view.clone();
+            *active = Some(ap_owned);
+            return Ok(view);
+        }
+
+        // Different origin or no active page — create fresh
+        drop(active);
+        let (page, view) = self.navigate_and_extract(url).await?;
+        let mut active = self.active_page.lock().await;
+        *active = Some(ActivePage {
+            page,
+            url: url.to_string(),
+            view: view.clone(),
+        });
+        Ok(view)
+    }
+
+    /// Re-extract semantic view from the active page and update stored state.
+    async fn refresh_active_view(&self) -> Result<semantic::SemanticView, rmcp::ErrorData> {
+        let mut active = self.active_page.lock().await;
+        let ap = active.as_mut().ok_or_else(no_active_page)?;
+        let view = a11y::extract_semantic_view(ap.page.as_ref())
+            .await
+            .map_err(mcp_err)?;
+        ap.view = view.clone();
+        Ok(view)
     }
 
     /// Inject cookies from the user's Chrome profile if `LAD_CHROME_PROFILE` is set.
@@ -290,6 +387,41 @@ fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
 /// Serialize a value to pretty JSON, returning a fallback on failure.
 fn to_pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
+}
+
+/// Extract origin (scheme + host + port) from a URL string.
+fn extract_origin(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .map(|r| ("https", r))
+        .or_else(|| url.strip_prefix("http://").map(|r| ("http", r)))?;
+    let (scheme, rest) = rest;
+    let authority = rest.split('/').next().unwrap_or(rest);
+    Some(format!("{scheme}://{authority}"))
+}
+
+/// Compare two URLs by origin (scheme + host + port).
+fn same_origin(a: &str, b: &str) -> bool {
+    match (extract_origin(a), extract_origin(b)) {
+        (Some(oa), Some(ob)) => oa == ob,
+        _ => false,
+    }
+}
+
+/// Build "no active page" error.
+fn no_active_page() -> rmcp::ErrorData {
+    rmcp::ErrorData::invalid_params("no active page — call lad_snapshot first".to_string(), None)
+}
+
+/// Check JS eval result for `{ error: "..." }` pattern and surface it.
+fn check_js_result(value: &serde_json::Value) -> Result<(), rmcp::ErrorData> {
+    if let Some(s) = value.as_str()
+        && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s)
+        && let Some(err) = parsed.get("error").and_then(|v| v.as_str())
+    {
+        return Err(rmcp::ErrorData::invalid_params(err.to_string(), None));
+    }
+    Ok(())
 }
 
 // ── Tool implementations ───────────────────────────────────────────
@@ -618,11 +750,6 @@ impl LadServer {
             ))]))
         } else if p.action == "stop" {
             if let Some(engine) = self.engine.lock().await.as_ref() {
-                // To stop monitoring, we just tell the bridge to stop it globally for the page
-                // But we don't hold a persistent `PageHandle` per se in the MCP server if we didn't store it.
-                // Re-creating or re-getting the last tracked page?
-                // For MVP, we'll navigate to blank or just ask the engine to stop monitoring the active view.
-                // We'll create a dummy page to send the command to the bridge.
                 let page = engine.new_page("about:blank").await.map_err(mcp_err)?;
                 page.stop_monitoring().await.map_err(mcp_err)?;
             }
@@ -635,6 +762,134 @@ impl LadServer {
                 None,
             ))
         }
+    }
+
+    // ── W1: lad_snapshot ──────────────────────────────────────────
+
+    /// Get a structured semantic snapshot of the current page.
+    /// Returns elements with IDs usable by lad_click/lad_type/lad_select.
+    #[tool(
+        description = "Get a structured semantic snapshot of the current page. Returns elements with IDs that can be used with lad_click/lad_type. Like Playwright's browser_snapshot but 10-60x fewer tokens."
+    )]
+    async fn lad_snapshot(
+        &self,
+        params: Parameters<SnapshotParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(url = %p.url, "lad_snapshot");
+
+        let view = self.navigate_or_reuse(&p.url).await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
+    // ── W2: lad_click / lad_type / lad_select ─────────────────────
+
+    /// Click an element by its ID from lad_snapshot.
+    #[tool(
+        description = "Click an element by its ID from lad_snapshot. Requires a prior lad_snapshot call."
+    )]
+    async fn lad_click(
+        &self,
+        params: Parameters<ClickParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(element = p.element, "lad_click");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let js = format!(
+                r#"(() => {{
+                    const el = document.querySelector('[data-lad-id="{}"]');
+                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                    el.click();
+                    return JSON.stringify({{ ok: true }});
+                }})()"#,
+                p.element, p.element
+            );
+            check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
+    /// Type text into an element by its ID from lad_snapshot.
+    #[tool(
+        description = "Type text into an element by its ID from lad_snapshot. Requires a prior lad_snapshot call."
+    )]
+    async fn lad_type(
+        &self,
+        params: Parameters<TypeParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(element = p.element, text = %p.text, "lad_type");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let escaped = p.text.replace('\\', "\\\\").replace('\'', "\\'");
+            let js = format!(
+                r#"(() => {{
+                    const el = document.querySelector('[data-lad-id="{}"]');
+                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                    el.focus();
+                    el.value = '{}';
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    return JSON.stringify({{ ok: true }});
+                }})()"#,
+                p.element, p.element, escaped
+            );
+            check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
+    /// Select an option in a `<select>` element by its ID from lad_snapshot.
+    #[tool(
+        description = "Select an option in a dropdown by element ID from lad_snapshot. Requires a prior lad_snapshot call."
+    )]
+    async fn lad_select(
+        &self,
+        params: Parameters<SelectParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(element = p.element, value = %p.value, "lad_select");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let escaped = p.value.replace('\\', "\\\\").replace('\'', "\\'");
+            let js = format!(
+                r#"(() => {{
+                    const el = document.querySelector('[data-lad-id="{}"]');
+                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                    if (el.tagName !== 'SELECT') return JSON.stringify({{ error: "element {} is not a <select>" }});
+                    el.value = '{}';
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    return JSON.stringify({{ ok: true }});
+                }})()"#,
+                p.element, p.element, p.element, escaped
+            );
+            check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
     }
 }
 
@@ -782,7 +1037,7 @@ fn fuzzy_label_match(element_label: &str, target: &str) -> bool {
 impl ServerHandler for LadServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset.")
+            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction.")
     }
 }
 
@@ -947,5 +1202,60 @@ mod tests {
             "has button submit"
         );
         assert_eq!(normalize_assertion("has input email"), "has input email");
+    }
+
+    // ── W1/W3 unit tests ─────────────────────────────────────────
+
+    #[test]
+    fn same_origin_matches() {
+        assert!(same_origin(
+            "https://example.com/foo",
+            "https://example.com/bar"
+        ));
+        assert!(same_origin(
+            "http://localhost:3000/a",
+            "http://localhost:3000/b"
+        ));
+    }
+
+    #[test]
+    fn same_origin_rejects_different() {
+        assert!(!same_origin(
+            "https://example.com/foo",
+            "https://other.com/foo"
+        ));
+        assert!(!same_origin(
+            "http://localhost:3000",
+            "https://localhost:3000"
+        ));
+        assert!(!same_origin(
+            "http://localhost:3000",
+            "http://localhost:4000"
+        ));
+    }
+
+    #[test]
+    fn extract_origin_works() {
+        assert_eq!(
+            extract_origin("https://example.com/path?q=1"),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            extract_origin("http://localhost:8080/foo"),
+            Some("http://localhost:8080".to_string())
+        );
+        assert_eq!(extract_origin("ftp://nope"), None);
+    }
+
+    #[test]
+    fn check_js_result_ok() {
+        let ok = serde_json::json!(r#"{"ok":true}"#);
+        assert!(check_js_result(&ok).is_ok());
+    }
+
+    #[test]
+    fn check_js_result_err() {
+        let err = serde_json::json!(r#"{"error":"element 5 not found"}"#);
+        assert!(check_js_result(&err).is_err());
     }
 }
