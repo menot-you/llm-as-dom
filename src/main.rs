@@ -141,7 +141,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .or_else(|_| std::env::var("Z_AI_API_KEY"))
             .unwrap_or_default();
         let backend_impl: Box<dyn pilot::PilotBackend> = match cli.backend.as_str() {
-            "zai" => Box::new(backend::zai::ZaiBackend::new("", &cli.llm_model, None)),
+            "anthropic" => Box::new(backend::anthropic::AnthropicBackend::new(
+                "",
+                &cli.llm_model,
+                None,
+            )),
+            "openai" => Box::new(backend::openai::OpenAiBackend::new(
+                "",
+                &cli.llm_model,
+                None,
+            )),
             "ollama" => Box::new(backend::generic::GenericLlmBackend::new(
                 &cli.llm_url,
                 &cli.llm_model,
@@ -149,12 +158,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )),
             _ => {
                 // auto-detect
-                if !llm_cred.is_empty()
-                    || cli.llm_url.contains("z.ai")
-                    || cli.llm_url.contains("anthropic")
-                    || cli.llm_url.contains("openai")
-                {
-                    Box::new(backend::zai::ZaiBackend::new(
+                if !llm_cred.is_empty() || cli.llm_url.contains("openai") {
+                    Box::new(backend::openai::OpenAiBackend::new(
+                        &llm_cred,
+                        &cli.llm_model,
+                        None,
+                    ))
+                } else if cli.llm_url.contains("z.ai") || cli.llm_url.contains("anthropic") {
+                    Box::new(backend::anthropic::AnthropicBackend::new(
                         &llm_cred,
                         &cli.llm_model,
                         None,
