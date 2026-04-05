@@ -31,6 +31,8 @@ struct BrowseParams {
     /// Max steps before giving up (default: 10).
     #[serde(default = "default_max_steps")]
     max_steps: u32,
+    /// Optional maximum length of the HTML/DOM text embedded into the prompt.
+    max_length: Option<usize>,
 }
 
 /// Default step limit for browsing goals.
@@ -45,6 +47,8 @@ struct ExtractParams {
     url: String,
     /// What to extract (e.g. "product prices", "form fields", "navigation links").
     what: String,
+    /// Optional maximum length of the HTML/DOM text embedded into the prompt.
+    max_length: Option<usize>,
 }
 
 /// Parameters for the `lad_assert` tool.
@@ -220,16 +224,28 @@ impl LadServer {
     }
 
     /// Auto-detect which LLM backend to use based on env/URL.
-    fn create_backend(url: &str, model: &str) -> Box<dyn pilot::PilotBackend> {
+    fn create_backend(
+        url: &str,
+        model: &str,
+        max_prompt_length: Option<usize>,
+    ) -> Box<dyn pilot::PilotBackend> {
         let llm_cred = read_env_with_fallback("LAD_LLM_API_KEY", "Z_AI_API_KEY", "");
         if !llm_cred.is_empty()
             || url.contains("z.ai")
             || url.contains("anthropic")
             || url.contains("openai")
         {
-            Box::new(backend::zai::ZaiBackend::new(&llm_cred, model))
+            Box::new(backend::zai::ZaiBackend::new(
+                &llm_cred,
+                model,
+                max_prompt_length,
+            ))
         } else {
-            Box::new(backend::ollama::OllamaBackend::new(url, model))
+            Box::new(backend::generic::GenericLlmBackend::new(
+                url,
+                model,
+                max_prompt_length,
+            ))
         }
     }
 }
@@ -292,7 +308,7 @@ impl LadServer {
         // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
         self.inject_profile_cookies(page.as_ref()).await;
 
-        let backend = Self::create_backend(&self.llm_url, &self.llm_model);
+        let backend = Self::create_backend(&self.llm_url, &self.llm_model, p.max_length);
         let config = pilot::PilotConfig {
             goal: p.goal.clone(),
             max_steps: p.max_steps,
@@ -387,6 +403,7 @@ impl LadServer {
         params: Parameters<ExtractParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
+        let _ = p.max_length;
         tracing::info!(url = %p.url, what = %p.what, "lad_extract");
 
         let (_page, view) = self.navigate_and_extract(&p.url).await?;

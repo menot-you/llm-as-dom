@@ -141,10 +141,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .or_else(|_| std::env::var("Z_AI_API_KEY"))
             .unwrap_or_default();
         let backend_impl: Box<dyn pilot::PilotBackend> = match cli.backend.as_str() {
-            "zai" => Box::new(backend::zai::ZaiBackend::new("", &cli.llm_model)),
-            "ollama" => Box::new(backend::ollama::OllamaBackend::new(
+            "zai" => Box::new(backend::zai::ZaiBackend::new("", &cli.llm_model, None)),
+            "ollama" => Box::new(backend::generic::GenericLlmBackend::new(
                 &cli.llm_url,
                 &cli.llm_model,
+                None,
             )),
             _ => {
                 // auto-detect
@@ -153,11 +154,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || cli.llm_url.contains("anthropic")
                     || cli.llm_url.contains("openai")
                 {
-                    Box::new(backend::zai::ZaiBackend::new(&llm_cred, &cli.llm_model))
+                    Box::new(backend::zai::ZaiBackend::new(
+                        &llm_cred,
+                        &cli.llm_model,
+                        None,
+                    ))
                 } else {
-                    Box::new(backend::ollama::OllamaBackend::new(
+                    Box::new(backend::generic::GenericLlmBackend::new(
                         &cli.llm_url,
                         &cli.llm_model,
+                        None,
                     ))
                 }
             }
