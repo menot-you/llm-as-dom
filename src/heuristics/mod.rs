@@ -18,7 +18,7 @@ mod navigation;
 /// OAuth flow heuristics (OAuth buttons, consent approval).
 pub mod oauth;
 mod search;
-/// Inline validation error detection.
+pub mod selector;
 pub mod validation;
 
 use crate::pilot::Action;
@@ -72,6 +72,13 @@ pub fn try_resolve(view: &SemanticView, goal: &str, acted_on: &[u32]) -> Heurist
 
     // Strategy 1.6: OAuth consent approval
     if let Some(result) = oauth::try_consent_approval(view, &goal_lower, acted_on)
+        && result.confidence >= CONFIDENCE_THRESHOLD
+    {
+        return result;
+    }
+
+    // Strategy 1.7: Semantic Selector (Tier 2.5)
+    if let Some(result) = selector::try_selector(view, goal, acted_on)
         && result.confidence >= CONFIDENCE_THRESHOLD
     {
         return result;

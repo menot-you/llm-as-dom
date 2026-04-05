@@ -433,8 +433,8 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
             // JS Date() → Unix timestamp (seconds)
             return date.timeIntervalSince1970
         case let data as Data:
-            // Binary data → base64 string
-            return data.base64EncodedString()
+            self.writer.event("console", extra: ["level": "warn", "message": "Ignored NSData in JS result (\(data.count) bytes)"])
+            return NSNull()
         case let str as String:
             return str
         case let num as NSNumber:

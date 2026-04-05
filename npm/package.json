@@ -1,6 +1,6 @@
 {
   "name": "llm-as-dom-mcp",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "AI browser pilot \u2014 test your app 60x cheaper. MCP server binary wrapper.",
   "license": "MIT",
   "repository": {
