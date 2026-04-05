@@ -229,13 +229,15 @@ impl LadServer {
         model: &str,
         max_prompt_length: Option<usize>,
     ) -> Box<dyn pilot::PilotBackend> {
-        let llm_cred = read_env_with_fallback("LAD_LLM_API_KEY", "Z_AI_API_KEY", "");
-        if !llm_cred.is_empty()
-            || url.contains("z.ai")
-            || url.contains("anthropic")
-            || url.contains("openai")
-        {
-            Box::new(backend::zai::ZaiBackend::new(
+        let llm_cred = read_env_with_fallback("LAD_LLM_API_KEY", "ANTHROPIC_API_KEY", "");
+        if !llm_cred.is_empty() || url.contains("openai") {
+            Box::new(backend::openai::OpenAiBackend::new(
+                &llm_cred,
+                model,
+                max_prompt_length,
+            ))
+        } else if url.contains("z.ai") || url.contains("anthropic") {
+            Box::new(backend::anthropic::AnthropicBackend::new(
                 &llm_cred,
                 model,
                 max_prompt_length,
