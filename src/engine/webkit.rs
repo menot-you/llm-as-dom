@@ -247,6 +247,22 @@ impl WebKitEngine {
                         .unwrap_or("?");
                     tracing::debug!(url, "webkit page loaded");
                 }
+                "monitor" => {
+                    if let Some(val) = &resp.value {
+                        tracing::info!(
+                            "monitor script emitted: {}",
+                            serde_json::to_string_pretty(val).unwrap_or_default()
+                        );
+                    } else if let Some(msg) = resp.message {
+                        tracing::info!("monitor notice: {}", msg);
+                    }
+                }
+                "network" => {
+                    let kind = resp.req_type.as_deref().unwrap_or("Network");
+                    let method = resp.method.as_deref().unwrap_or("GET");
+                    let url = resp.url.as_deref().unwrap_or("");
+                    tracing::info!(kind, method, url, "network activity");
+                }
                 other => tracing::debug!(event = other, "webkit event"),
             }
         }
@@ -380,6 +396,20 @@ impl PageHandle for WebKitPage {
     }
 
     async fn enable_network_monitoring(&self) -> Result<bool, crate::Error> {
-        Ok(false) // WebKit bridge doesn't support network monitoring yet
+        Ok(true) // We hooked URLProtocol in Swift sidecar
+    }
+
+    async fn start_monitoring(&self, interval_ms: u32, script: &str) -> Result<(), crate::Error> {
+        let mut req = Request::cmd("start_monitoring");
+        req.interval = Some(interval_ms);
+        req.script = Some(script.to_string());
+        self.conn.request(req).await?;
+        Ok(())
+    }
+
+    async fn stop_monitoring(&self) -> Result<(), crate::Error> {
+        let req = Request::cmd("stop_monitoring");
+        self.conn.request(req).await?;
+        Ok(())
     }
 }

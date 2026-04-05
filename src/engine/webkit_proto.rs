@@ -16,6 +16,8 @@ pub(super) struct Request {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cookies: Option<Vec<CookieWire>>,
 }
 
@@ -27,6 +29,7 @@ impl Request {
             cmd: cmd.into(),
             url: None,
             script: None,
+            interval: None,
             cookies: None,
         }
     }
@@ -72,6 +75,12 @@ pub(super) struct Response {
     pub level: Option<String>,
     #[serde(default)]
     pub message: Option<String>,
+    #[serde(default, rename = "type")]
+    pub req_type: Option<String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 // ── Cookie conversion helpers ────────────────────────────────────
@@ -143,6 +152,7 @@ mod tests {
             cmd: "navigate".into(),
             url: Some("https://example.com".into()),
             script: None,
+            interval: None,
             cookies: None,
         };
         let json: serde_json::Value = serde_json::to_value(&req).unwrap();
@@ -160,6 +170,7 @@ mod tests {
             cmd: "eval_js".into(),
             url: None,
             script: Some("document.title".into()),
+            interval: None,
             cookies: None,
         };
         let json: serde_json::Value = serde_json::to_value(&req).unwrap();

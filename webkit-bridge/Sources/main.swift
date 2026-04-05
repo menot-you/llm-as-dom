@@ -18,6 +18,7 @@ struct Command: Decodable {
     var visible: Bool?
     var width: Int?
     var height: Int?
+    var interval: Int?
 }
 
 struct CookieData: Codable {
@@ -150,6 +151,7 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
     var showWindow = false
     var windowWidth = 1280
     var windowHeight = 800
+    var monitoringTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Parse initial config from env or first stdin line will configure.
@@ -158,6 +160,15 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
            let wInt = Int(w) { windowWidth = wInt }
         if let h = ProcessInfo.processInfo.environment["LAD_WEBKIT_HEIGHT"],
            let hInt = Int(h) { windowHeight = hInt }
+
+        if let cls = NSClassFromString("WKBrowsingContextController") as? NSObject.Type {
+            let sel = NSSelectorFromString("registerSchemeForCustomProtocol:")
+            if cls.responds(to: sel) {
+                cls.perform(sel, with: "http")
+                cls.perform(sel, with: "https")
+            }
+        }
+        URLProtocol.registerClass(NetworkMonitorProtocol.self)
 
         setupWebView()
 
@@ -302,6 +313,27 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
                     self.writer.respond(cmd.id, ok: true, extra: ["value": value])
                 }
             }
+
+        case "start_monitoring":
+            guard let script = cmd.script else {
+                writer.respondError(cmd.id, "missing script")
+                return
+            }
+            let interval = cmd.interval ?? 1000
+            monitoringTimer?.invalidate()
+            monitoringTimer = Timer.scheduledTimer(withTimeInterval: Double(interval) / 1000.0, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                self.webView.evaluateJavaScript(script) { result, _ in
+                    let value = self.serializeJSResult(result)
+                    self.writer.event("monitor", extra: ["result": value])
+                }
+            }
+            writer.respond(cmd.id, ok: true)
+
+        case "stop_monitoring":
+            monitoringTimer?.invalidate()
+            monitoringTimer = nil
+            writer.respond(cmd.id, ok: true)
 
         case "wait_for_navigation":
             // If already loaded (no pending navigation), check loading state.
@@ -463,6 +495,82 @@ app.delegate = delegate
 // Headless: don't activate as foreground app unless visible.
 if ProcessInfo.processInfo.environment["LAD_WEBKIT_VISIBLE"] != "1" {
     app.setActivationPolicy(.accessory)
+}
+
+// MARK: - Network Monitor Protocol
+
+final class NetworkMonitorProtocol: URLProtocol {
+    private var dataTask: URLSessionDataTask?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        guard let scheme = request.url?.scheme, (scheme == "http" || scheme == "https") else { return false }
+        if URLProtocol.property(forKey: "NetworkMonitorHandled", in: request) != nil {
+            return false
+        }
+        return true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+
+    override func startLoading() {
+        guard let req = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else { return }
+        URLProtocol.setProperty(true, forKey: "NetworkMonitorHandled", in: req)
+
+        let method = request.httpMethod ?? "GET"
+        let urlStr = request.url?.absoluteString ?? ""
+
+        // Classify request
+        var type = "Asset"
+        if urlStr.contains("api") || urlStr.contains("graphql") || urlStr.contains(".json") {
+            type = "API"
+        } else if urlStr.contains("login") || urlStr.contains("oauth") || urlStr.contains("auth") {
+            type = "Auth"
+        } else if method != "GET" {
+            type = "Action"
+        } else if !urlStr.contains(".js") && !urlStr.contains(".css") && !urlStr.contains(".png") && !urlStr.contains(".svg") {
+            type = "Navigation"
+        }
+
+        DispatchQueue.main.async {
+            if let delegate = NSApp.delegate as? BridgeApp {
+                delegate.writer.event("network", extra: [
+                    "type": type,
+                    "method": method,
+                    "url": urlStr
+                ])
+            }
+        }
+
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        dataTask = session.dataTask(with: req as URLRequest)
+        dataTask?.resume()
+    }
+
+    override func stopLoading() {
+        dataTask?.cancel()
+        dataTask = nil
+    }
+}
+
+extension NetworkMonitorProtocol: URLSessionDataDelegate {
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        client?.urlProtocol(self, didLoad: data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error {
+            client?.urlProtocol(self, didFailWithError: error)
+        } else {
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
 }
 
 app.run()
