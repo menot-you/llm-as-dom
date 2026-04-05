@@ -13,6 +13,7 @@ pub mod heuristics;
 pub mod locate;
 pub mod network;
 pub mod oauth;
+pub mod observer;
 pub mod pilot;
 pub mod playbook;
 pub mod profile;
