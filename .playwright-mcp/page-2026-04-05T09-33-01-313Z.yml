@@ -1,0 +1,9 @@
+- generic [ref=e3]:
+  - combobox [ref=e7] [cursor=pointer]:
+    - generic: Golden Kitty
+    - img [ref=e8]
+  - link [ref=e12] [cursor=pointer]:
+    - /url: https://www.producthunt.com/golden-kitty-awards/hall-of-fame?year=2024#bootstrapped-small-teams-2
+    - img [ref=e14]:
+      - generic [ref=e17]: PRODUCT HUNT
+      - generic [ref=e18]: Golden Kitty Awards

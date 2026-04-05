@@ -198,3 +198,4 @@
 [   84719ms] [LOG] [Featurebase SDK] Config and input data are the same, no refetch needed. @ https://do.featurebase.app/js/sdk.js:240
 [   84839ms] [ERROR] Failed to load resource: the server responded with a status of 406 () @ https://vucvdpamtrjkzmubwlts.supabase.co/rest/v1/demo_bookmarks?select=*&demo_id=eq.1690&user_id=eq.user_369ednoys0d67VEjkZT5umDLeMq&limit=1:0
 [  110919ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ https://col.csbops.io/data/sandpack:0
+[  385025ms] [LOG] [Featurebase SDK] Config and input data are the same, no refetch needed. @ https://do.featurebase.app/js/sdk.js:240

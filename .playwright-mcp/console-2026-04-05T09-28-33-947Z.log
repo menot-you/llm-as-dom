@@ -15,3 +15,4 @@
 [    6870ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html:1189
 [    6870ms] [LOG] window.location.search  @ https://cdn.21st.dev/bundled/1690.html:1189
 [    6872ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
+[  158845ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
