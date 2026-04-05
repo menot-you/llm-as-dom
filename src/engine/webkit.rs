@@ -15,7 +15,7 @@ use super::{BrowserEngine, EngineConfig, PageHandle};
 
 /// Shared connection state for sending requests to the WebKit bridge.
 struct BridgeConnection {
-    writer: Mutex<ChildStdin>,
+    writer: Mutex<Option<ChildStdin>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Response>>>,
     next_id: AtomicU64,
     /// Set to `false` when the reader loop detects bridge exit (EOF/error).
@@ -40,19 +40,23 @@ impl BridgeConnection {
             .map_err(|e| crate::Error::Backend(format!("serialize request: {e}")))?;
 
         {
-            let mut writer = self.writer.lock().await;
-            writer
-                .write_all(json.as_bytes())
-                .await
-                .map_err(|e| crate::Error::Browser(format!("write to webkit bridge: {e}")))?;
-            writer
-                .write_all(b"\n")
-                .await
-                .map_err(|e| crate::Error::Browser(format!("write newline: {e}")))?;
-            writer
-                .flush()
-                .await
-                .map_err(|e| crate::Error::Browser(format!("flush: {e}")))?;
+            let mut writer_opt = self.writer.lock().await;
+            if let Some(writer) = writer_opt.as_mut() {
+                writer
+                    .write_all(json.as_bytes())
+                    .await
+                    .map_err(|e| crate::Error::Browser(format!("write to webkit bridge: {e}")))?;
+                writer
+                    .write_all(b"\n")
+                    .await
+                    .map_err(|e| crate::Error::Browser(format!("write newline: {e}")))?;
+                writer
+                    .flush()
+                    .await
+                    .map_err(|e| crate::Error::Browser(format!("flush: {e}")))?;
+            } else {
+                return Err(crate::Error::Browser("webkit bridge stdin closed".into()));
+            }
         }
 
         // Insert AFTER successful write — no orphan entries on write failure.
@@ -121,7 +125,7 @@ impl WebKitEngine {
         let alive = Arc::new(AtomicBool::new(true));
 
         let conn = Arc::new(BridgeConnection {
-            writer: Mutex::new(stdin),
+            writer: Mutex::new(Some(stdin)),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             alive: Arc::clone(&alive),
@@ -277,7 +281,16 @@ impl Drop for WebKitEngine {
 
         // 2. Extract child process and spawn a graceful shutdown wait task.
         if let Some(mut child) = self.child.take() {
+            let conn = Arc::clone(&self.conn);
             tokio::spawn(async move {
+                // Force close stdin so Swift sees EOF immediately
+                if let Ok(mut lock) = conn.writer.try_lock() {
+                    let _ = lock.take();
+                } else {
+                    let mut lock = conn.writer.lock().await;
+                    let _ = lock.take();
+                }
+
                 // Wait up to 3 seconds for clean exit (e.g. following EOF or 'close' command)
                 match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
                     Ok(Ok(status)) => {
