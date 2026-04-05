@@ -28,7 +28,7 @@ impl GenericLlmBackend {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             model: model.into(),
-            max_prompt_length: max_prompt_length.unwrap_or(10000),
+            max_prompt_length: max_prompt_length.unwrap_or(40000),
         }
     }
 }
@@ -245,7 +245,7 @@ pub fn build_prompt(view: &SemanticView, goal: &str, history: &[Step], max_len: 
     prompt.push('\n');
     prompt.push_str(r#"{"action":"wait","reasoning":"<why>"}"#);
     prompt.push('\n');
-    prompt.push_str(r#"{"action":"done","result":{"success":true},"reasoning":"<why>"}"#);
+    prompt.push_str(r#"{"action":"done","result":{"data": "..." },"reasoning":"<why>"}"#);
     prompt.push('\n');
     prompt.push_str(r#"{"action":"escalate","reason":"<why>"}"#);
 
