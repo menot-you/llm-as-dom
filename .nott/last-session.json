@@ -1,0 +1,6 @@
+{
+  "generated_at": "2026-04-04T09:34:38Z",
+  "branch": "main",
+  "files": ".gitignore,src/engine/webkit.rs src/engine/webkit_proto.rs,webkit-bridge/.build/.lock webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftdoc,webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftmodule webkit-bridge/.build/arm64-apple-macosx/debug/Modules/lad_webkit_bridge.swiftsourceinfo,webkit-bridge/.build/arm64-apple-macosx/debug/index/store/v5/units/main.swift.o-228CYRCJ6ND4O webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge,webkit-bridge/.build/arm64-apple-macosx/debug/lad-webkit-bridge.dSYM/Contents/Resources/DWARF/lad-webkit-bridge",
+  "cost_usd": 0
+}
