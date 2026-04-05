@@ -640,14 +640,17 @@ impl LadServer {
 
 /// Evaluate a single assertion against a semantic view.
 ///
-/// Supported patterns:
+/// Supported patterns (after normalization):
 /// - `has login form` / `has login`
 /// - `has password`
 /// - `title contains <text>`
 /// - `url contains <text>`
-/// - `has button <label>`
-/// - `has link <label>`
-/// - `has input <name>`
+/// - `has button <label>` (also matches `has <label> button`)
+/// - `has link <label>` (also matches `has <label> link`)
+/// - `has input <name>` (also matches `has <name> input`, plus input_type)
+/// - `has form` — any form on page
+/// - `has image` / `has img` — any img element in visible text
+/// - `page has section <title>` — section title in visible text
 /// - Fallback: all words present in combined page text.
 fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: &str) -> bool {
     let full_text = format!(
@@ -655,6 +658,10 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
         view.url, view.title, view.visible_text, prompt_text
     )
     .to_lowercase();
+
+    // Normalize word order: "has X input" → "has input X", etc.
+    let normalized = normalize_assertion(assertion);
+    let assertion = &normalized;
 
     if assertion.contains("has login form") || assertion.contains("has login") {
         return view.page_hint == "login page";
@@ -680,19 +687,20 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
     if let Some(rest) = assertion.strip_prefix("has button ") {
         let label = rest.trim().trim_matches('"').to_lowercase();
         return view.elements.iter().any(|e| {
-            e.kind == semantic::ElementKind::Button
-                && (e.label.to_lowercase().contains(&label)
-                    || e.value
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&label))
+            e.kind == semantic::ElementKind::Button && fuzzy_label_match(&e.label, &label)
+                || e.value
+                    .as_deref()
+                    .is_some_and(|v| fuzzy_label_match(v, &label))
         });
     }
     if let Some(rest) = assertion.strip_prefix("has link ") {
         let label = rest.trim().trim_matches('"').to_lowercase();
         return view.elements.iter().any(|e| {
-            e.kind == semantic::ElementKind::Link && e.label.to_lowercase().contains(&label)
+            e.kind == semantic::ElementKind::Link
+                && (fuzzy_label_match(&e.label, &label)
+                    || e.href
+                        .as_deref()
+                        .is_some_and(|h| h.to_lowercase().contains(&label)))
         });
     }
     if let Some(rest) = assertion.strip_prefix("has input ") {
@@ -702,16 +710,70 @@ fn check_assertion(assertion: &str, view: &semantic::SemanticView, prompt_text: 
                 && (e
                     .name
                     .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&name)
-                    || e.label.to_lowercase().contains(&name))
+                    .is_some_and(|n| n.to_lowercase().contains(&name))
+                    || e.label.to_lowercase().contains(&name)
+                    || e.input_type
+                        .as_deref()
+                        .is_some_and(|t| t.to_lowercase() == name)
+                    || e.placeholder
+                        .as_deref()
+                        .is_some_and(|p| p.to_lowercase().contains(&name)))
         });
+    }
+    if assertion == "has form" {
+        return !view.forms.is_empty() || view.elements.iter().any(|e| e.form_index.is_some());
+    }
+    if assertion == "has image" || assertion == "has img" {
+        return full_text.contains("img") || full_text.contains("image");
+    }
+    if let Some(rest) = assertion.strip_prefix("page has section ") {
+        let section = rest.trim().trim_matches('"').to_lowercase();
+        return view.visible_text.to_lowercase().contains(&section);
     }
 
     // Fallback: all words present in page
     let words: Vec<&str> = assertion.split_whitespace().collect();
     words.iter().all(|w| full_text.contains(w))
+}
+
+/// Normalize assertion word order so callers can write either
+/// `"has email input"` or `"has input email"` and get the same result.
+fn normalize_assertion(assertion: &str) -> String {
+    let a = assertion.trim().to_lowercase();
+    let words: Vec<&str> = a.split_whitespace().collect();
+
+    // Pattern: "has <qualifier> input|button|link" → "has input|button|link <qualifier>"
+    if words.len() >= 3 && words[0] == "has" {
+        let kind_keywords = ["input", "button", "link"];
+        if let Some(&last) = words.last()
+            && kind_keywords.contains(&last)
+            && !kind_keywords.contains(&words[1])
+        {
+            let qualifier: Vec<&str> = words[1..words.len() - 1].to_vec();
+            return format!("has {} {}", last, qualifier.join(" "));
+        }
+    }
+    a
+}
+
+/// Fuzzy label match: checks `contains` after stripping non-alphanumeric
+/// trailing characters (arrows, icons, extra whitespace).
+fn fuzzy_label_match(element_label: &str, target: &str) -> bool {
+    let el = element_label.to_lowercase();
+    let tgt = target.to_lowercase();
+    if el.contains(&tgt) {
+        return true;
+    }
+    // Strip non-alphanumeric chars and retry
+    let clean_el: String = el
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect();
+    let clean_tgt: String = tgt
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect();
+    clean_el.contains(&clean_tgt)
 }
 
 // ── ServerHandler ──────────────────────────────────────────────────
@@ -745,4 +807,145 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     service.waiting().await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_view() -> semantic::SemanticView {
+        semantic::SemanticView {
+            url: String::new(),
+            title: String::new(),
+            page_hint: String::new(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: String::new(),
+            state: semantic::PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        }
+    }
+
+    fn make_element(kind: semantic::ElementKind, label: &str) -> semantic::Element {
+        semantic::Element {
+            id: 1,
+            kind,
+            label: label.into(),
+            name: None,
+            value: None,
+            placeholder: None,
+            href: None,
+            input_type: None,
+            disabled: false,
+            form_index: None,
+            context: None,
+            hint: None,
+        }
+    }
+
+    #[test]
+    fn assert_has_email_input() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Input, "Email address");
+        el.input_type = Some("email".into());
+        view.elements.push(el);
+
+        assert!(check_assertion("has email input", &view, ""));
+        assert!(check_assertion("has input email", &view, ""));
+    }
+
+    #[test]
+    fn assert_has_button_reordered() {
+        let mut view = empty_view();
+        view.elements.push(make_element(
+            semantic::ElementKind::Button,
+            "Get Early Access",
+        ));
+
+        assert!(check_assertion("has button get early access", &view, ""));
+        assert!(check_assertion("has get early access button", &view, ""));
+    }
+
+    #[test]
+    fn assert_has_button_with_icon() {
+        let mut view = empty_view();
+        view.elements.push(make_element(
+            semantic::ElementKind::Button,
+            "Get Early Access \u{203a}",
+        ));
+
+        assert!(check_assertion("has button get early access", &view, ""));
+    }
+
+    #[test]
+    fn assert_has_github_link() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Link, "GitHub");
+        el.href = Some("https://github.com/menot-you".into());
+        view.elements.push(el);
+
+        assert!(check_assertion("has link github", &view, ""));
+        assert!(check_assertion("has github link", &view, ""));
+    }
+
+    #[test]
+    fn assert_has_link_by_href() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Link, "Star us");
+        el.href = Some("https://github.com/menot-you".into());
+        view.elements.push(el);
+
+        assert!(check_assertion("has link github", &view, ""));
+    }
+
+    #[test]
+    fn assert_has_form() {
+        let mut view = empty_view();
+        view.forms.push(semantic::FormMeta {
+            index: 0,
+            action: Some("/subscribe".into()),
+            method: "POST".into(),
+            id: None,
+            name: None,
+        });
+
+        assert!(check_assertion("has form", &view, ""));
+    }
+
+    #[test]
+    fn assert_input_matches_by_type() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Input, "");
+        el.input_type = Some("email".into());
+        view.elements.push(el);
+
+        assert!(check_assertion("has input email", &view, ""));
+    }
+
+    #[test]
+    fn assert_input_matches_by_placeholder() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Input, "");
+        el.placeholder = Some("Enter your email".into());
+        view.elements.push(el);
+
+        assert!(check_assertion("has input email", &view, ""));
+    }
+
+    #[test]
+    fn normalize_assertion_reorders_words() {
+        assert_eq!(normalize_assertion("has email input"), "has input email");
+        assert_eq!(
+            normalize_assertion("has get early access button"),
+            "has button get early access"
+        );
+        assert_eq!(normalize_assertion("has github link"), "has link github");
+        assert_eq!(
+            normalize_assertion("has button submit"),
+            "has button submit"
+        );
+        assert_eq!(normalize_assertion("has input email"), "has input email");
+    }
 }

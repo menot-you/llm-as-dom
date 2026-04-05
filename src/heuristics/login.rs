@@ -103,7 +103,7 @@ pub fn try_form_fill(
                         el.id
                     ),
                 }),
-                confidence: 0.70,
+                confidence: 0.45, // below threshold — defer to LLM for non-login goals
                 reason: "generic text field, guessing username".into(),
             });
         }
@@ -292,7 +292,11 @@ pub fn extract_credential(goal: &str, prefixes: &[&str]) -> Option<String> {
             let value = after.split_whitespace().next();
             if let Some(v) = value
                 && !v.is_empty()
-                && !["with", "and", "then", "password", "pass"].contains(&v)
+                && ![
+                    "with", "and", "then", "password", "pass", "in", "the", "to", "a", "for", "on",
+                    "my", "this",
+                ]
+                .contains(&v)
             {
                 return Some(v.to_string());
             }
@@ -463,5 +467,60 @@ mod tests {
         } else {
             panic!("expected Done action");
         }
+    }
+
+    // ── W4b: extract_credential stop list ────────────────────────────
+
+    #[test]
+    fn extract_credential_ignores_prepositions() {
+        // "enter email in waitlist" — "in" should not be extracted
+        let v = extract_credential("enter email in waitlist", &["email "]);
+        assert_eq!(v, None);
+    }
+
+    #[test]
+    fn extract_credential_ignores_articles() {
+        let v = extract_credential("type user the field", &["user "]);
+        assert_eq!(v, None);
+    }
+
+    #[test]
+    fn extract_credential_still_works_for_real_values() {
+        let v = extract_credential("login as alice@test.com pw secret", &["as "]);
+        assert_eq!(v, Some("alice@test.com".into()));
+    }
+
+    // ── W4c: generic text field confidence ───────────────────────────
+
+    #[test]
+    fn generic_text_field_confidence_below_threshold() {
+        let view = {
+            let mut v = view_with_text("https://example.com", "Home", "content page", "");
+            v.elements.push(crate::semantic::Element {
+                id: 1,
+                kind: crate::semantic::ElementKind::Input,
+                label: "Search".into(),
+                name: Some("q".into()),
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: Some("text".into()),
+                disabled: false,
+                form_index: None,
+                context: None,
+                hint: None,
+            });
+            v
+        };
+        let result = try_form_fill(&view, "enter testuser in search", &[]);
+        // Should either be None (deferred) or have confidence < 0.60
+        if let Some(r) = result {
+            assert!(
+                r.confidence < 0.60,
+                "generic text field confidence should be below threshold, got {}",
+                r.confidence
+            );
+        }
+        // None is also acceptable — means it deferred
     }
 }
