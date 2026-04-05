@@ -12,6 +12,48 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # ── Security & Quality ─────────────────────────────────────────────
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate code coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+
+  msrv:
+    name: msrv pinned
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@nightly-2025-01-01
+      - name: cargo check
+        run: cargo check --all-targets --all-features
+
   # ── Check ──────────────────────────────────────────────────────────
   check:
     name: fmt + clippy + test
@@ -128,43 +170,7 @@ jobs:
           name: llm-benchmark-results
           path: bench/results.json
 
-  # ── Auto-tag on main ───────────────────────────────────────────────
-  auto-tag:
-    name: auto-tag release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, build, fixture-tests, integration]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      created: ${{ steps.tag.outputs.created }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract version from Cargo.toml
-        id: version
-        run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Detected version: ${VERSION}"
-
-      - name: Create tag if not exists
-        id: tag
-        run: |
-          TAG="v${{ steps.version.outputs.version }}"
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists — skipping"
-            echo "created=false" >> "$GITHUB_OUTPUT"
-          else
-            git tag "${TAG}"
-            git push origin "${TAG}"
-            echo "Created tag ${TAG}"
-            echo "created=true" >> "$GITHUB_OUTPUT"
-          fi
-
+  # auto-tag removed (using release-plz)
   # ── Release (cross-platform binaries) ──────────────────────────────
   release:
     name: release
@@ -222,6 +228,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -236,6 +243,16 @@ jobs:
         with:
           name: release-macos-arm64
           path: dist/
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        
+      - name: Sign binaries
+        run: |
+          cosign sign-blob --yes dist/lad-linux-x86_64 --bundle dist/lad-linux-x86_64.bundle
+          if [ -f dist/llm-as-dom-mcp-linux-x86_64 ]; then cosign sign-blob --yes dist/llm-as-dom-mcp-linux-x86_64 --bundle dist/llm-as-dom-mcp-linux-x86_64.bundle; fi
+          cosign sign-blob --yes dist/lad-macos-arm64 --bundle dist/lad-macos-arm64.bundle
+          if [ -f dist/llm-as-dom-mcp-macos-arm64 ]; then cosign sign-blob --yes dist/llm-as-dom-mcp-macos-arm64 --bundle dist/llm-as-dom-mcp-macos-arm64.bundle; fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
@@ -265,6 +282,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -282,7 +302,7 @@ jobs:
       - name: Publish llm-as-dom-mcp
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: cd npm && npm publish --access public || echo "Version may already be published"
+        run: cd npm && npm publish --access public --provenance || echo "Version may already be published"
 
   # ── Publish to PyPI ────────────────────────────────────────────────
   publish-pypi:
@@ -290,6 +310,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-release
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -303,10 +325,12 @@ jobs:
           sed -i "s/^version = .*/version = \"${VERSION}\"/" python/pyproject.toml
           sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" python/llm_as_dom_mcp/__init__.py
 
-      - name: Build and publish
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      - name: Build python package
         run: |
-          pip install build twine
-          cd python && python -m build && twine upload dist/* || echo "Version may already be published"
+          pip install build
+          cd python && python -m build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist/
