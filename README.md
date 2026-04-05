@@ -8,6 +8,10 @@
 
 [![CI](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/example-org/llm-as-dom/actions)
 [![Crates.io](https://img.shields.io/crates/v/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
+[![Docs.rs](https://docs.rs/llm-as-dom/badge.svg)](https://docs.rs/llm-as-dom)
+[![Codecov](https://codecov.io/gh/example-org/llm-as-dom/graph/badge.svg)](https://codecov.io/gh/example-org/llm-as-dom)
+[![Downloads](https://img.shields.io/crates/d/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
+[![MSRV: 1.85](https://img.shields.io/badge/MSRV-1.85-orange.svg)](https://github.com/rust-lang/rust)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
@@ -297,3 +301,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep-dive.
 ## License
 
 AGPL-3.0-or-later — see [LICENSE](LICENSE).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=example-org/llm-as-dom&type=Date)](https://star-history.com/#example-org/llm-as-dom&Date)
