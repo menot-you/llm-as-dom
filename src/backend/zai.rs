@@ -14,6 +14,7 @@ pub struct ZaiBackend {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    max_prompt_length: usize,
     base_url: String,
 }
 
@@ -23,7 +24,12 @@ impl ZaiBackend {
     /// Reads `LAD_LLM_API_KEY` (or deprecated `Z_AI_API_KEY`) from environment
     /// if `api_key` is empty. Base URL falls back from `LAD_LLM_URL` to
     /// `Z_AI_BASE_URL` to the default Z.AI endpoint.
-    pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        max_prompt_length: Option<usize>,
+    ) -> Self {
+        let max_prompt_length = max_prompt_length.unwrap_or(10000);
         let cred = {
             let k = api_key.into();
             if k.is_empty() {
@@ -38,6 +44,7 @@ impl ZaiBackend {
             client: reqwest::Client::new(),
             api_key: cred,
             model: model.into(),
+            max_prompt_length,
             base_url: std::env::var("LAD_LLM_URL")
                 .or_else(|_| std::env::var("Z_AI_BASE_URL"))
                 .unwrap_or_else(|_| "https://api.z.ai/api/anthropic".into()),
@@ -86,7 +93,7 @@ impl PilotBackend for ZaiBackend {
         goal: &str,
         history: &[Step],
     ) -> Result<Action, crate::Error> {
-        let prompt = super::ollama::build_prompt(view, goal, history);
+        let prompt = super::generic::build_prompt(view, goal, history, self.max_prompt_length);
         tracing::debug!(prompt_len = prompt.len(), model = %self.model, "sending to Z.AI");
 
         let req = AnthropicRequest {
@@ -130,6 +137,6 @@ impl PilotBackend for ZaiBackend {
 
         tracing::debug!(response_len = text.len(), "Z.AI responded");
 
-        super::ollama::parse_action(&text)
+        super::generic::parse_action(&text)
     }
 }

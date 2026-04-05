@@ -598,7 +598,7 @@ fn kv_pairs_no_equals_falls_through() {
 /// Deeply nested think tags (Qwen3 edge case).
 #[test]
 fn parse_action_nested_think_tags() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let input = "<think>First thought<think>nested</think>more thought</think>{\"action\":\"click\",\"element\":0,\"reasoning\":\"done\"}";
     let result = parse_action(input);
     assert!(result.is_ok(), "nested think tags should still parse");
@@ -607,7 +607,7 @@ fn parse_action_nested_think_tags() {
 /// Response with ONLY think tags and no JSON.
 #[test]
 fn parse_action_only_think_no_json() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let input = "<think>I'm thinking but I won't give you JSON</think>";
     let result = parse_action(input);
     assert!(result.is_err(), "no JSON should produce an error");
@@ -616,7 +616,7 @@ fn parse_action_only_think_no_json() {
 /// Malformed JSON after think tags.
 #[test]
 fn parse_action_malformed_json() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let input = r#"<think>ok</think>{"action":"click","element":INVALID}"#;
     let result = parse_action(input);
     assert!(result.is_err(), "malformed JSON should produce an error");
@@ -625,7 +625,7 @@ fn parse_action_malformed_json() {
 /// Multiple JSON objects in response (should take first).
 #[test]
 fn parse_action_multiple_json_objects() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let input = r#"{"action":"click","element":0,"reasoning":"a"} {"action":"type","element":1,"value":"x","reasoning":"b"}"#;
     let action = parse_action(input).unwrap();
     // extract_json finds the first balanced {} pair.
@@ -638,7 +638,7 @@ fn parse_action_multiple_json_objects() {
 /// JSON wrapped in markdown code fences.
 #[test]
 fn parse_action_markdown_fences() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let input = "```json\n{\"action\":\"wait\",\"reasoning\":\"loading\"}\n```";
     let result = parse_action(input);
     assert!(result.is_ok(), "should extract JSON from markdown fences");
@@ -647,7 +647,7 @@ fn parse_action_markdown_fences() {
 /// Completely empty response.
 #[test]
 fn parse_action_empty_response() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let result = parse_action("");
     assert!(result.is_err(), "empty response should error");
 }
@@ -655,7 +655,7 @@ fn parse_action_empty_response() {
 /// Response with only whitespace.
 #[test]
 fn parse_action_whitespace_only() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let result = parse_action("   \n\t  \n  ");
     assert!(result.is_err(), "whitespace-only response should error");
 }
@@ -663,7 +663,7 @@ fn parse_action_whitespace_only() {
 /// JSON array wrapping a single action (some models do this).
 #[test]
 fn parse_action_json_array_wrapper() {
-    use llm_as_dom::backend::ollama::parse_action;
+    use llm_as_dom::backend::generic::parse_action;
     let input = r#"[{"action":"scroll","direction":"down","reasoning":"load more"}]"#;
     let result = parse_action(input);
     assert!(
@@ -767,7 +767,7 @@ fn action_json_roundtrip_all_variants() {
 /// Build prompt with very long history (>5 steps should be truncated).
 #[test]
 fn build_prompt_truncates_history() {
-    use llm_as_dom::backend::ollama::build_prompt;
+    use llm_as_dom::backend::generic::build_prompt;
     use llm_as_dom::pilot::Step;
     use std::time::Duration;
 
@@ -786,7 +786,7 @@ fn build_prompt_truncates_history() {
         })
         .collect();
 
-    let prompt = build_prompt(&v, "click Next 20 times", &history);
+    let prompt = build_prompt(&v, "click Next 20 times", &history, 10000);
     // Should only include last 5 steps (the code does .rev().take(5))
     let action_count = prompt.matches("Click {").count();
     assert!(
@@ -798,9 +798,9 @@ fn build_prompt_truncates_history() {
 /// Build prompt with empty goal.
 #[test]
 fn build_prompt_empty_goal() {
-    use llm_as_dom::backend::ollama::build_prompt;
+    use llm_as_dom::backend::generic::build_prompt;
     let v = view(vec![btn(0, "OK", None)], "content page");
-    let prompt = build_prompt(&v, "", &[]);
+    let prompt = build_prompt(&v, "", &[], 10000);
     assert!(prompt.contains("GOAL: "), "should have GOAL section");
     // Empty goal should still produce a valid prompt.
     assert!(
@@ -935,7 +935,7 @@ fn search_look_up_prefix() {
 /// Unmatched braces should return None.
 #[test]
 fn extract_balanced_unmatched() {
-    use llm_as_dom::backend::ollama::extract_balanced;
+    use llm_as_dom::backend::generic::extract_balanced;
     assert!(extract_balanced("{unclosed", b'{', b'}').is_none());
     assert!(extract_balanced("no braces", b'{', b'}').is_none());
     assert!(extract_balanced("}", b'{', b'}').is_none());
@@ -944,7 +944,7 @@ fn extract_balanced_unmatched() {
 /// Nested braces should find the outermost pair.
 #[test]
 fn extract_balanced_nested() {
-    use llm_as_dom::backend::ollama::extract_balanced;
+    use llm_as_dom::backend::generic::extract_balanced;
     let input = r#"{"a":{"b":1},"c":2}"#;
     let result = extract_balanced(input, b'{', b'}').unwrap();
     assert_eq!(result, input, "should extract outermost balanced pair");
@@ -953,7 +953,7 @@ fn extract_balanced_nested() {
 /// Empty braces.
 #[test]
 fn extract_balanced_empty_braces() {
-    use llm_as_dom::backend::ollama::extract_balanced;
+    use llm_as_dom::backend::generic::extract_balanced;
     let result = extract_balanced("{}", b'{', b'}').unwrap();
     assert_eq!(result, "{}");
 }
@@ -963,7 +963,7 @@ fn extract_balanced_empty_braces() {
 /// No think tags: input should pass through unchanged.
 #[test]
 fn strip_think_tags_no_tags() {
-    use llm_as_dom::backend::ollama::strip_think_tags;
+    use llm_as_dom::backend::generic::strip_think_tags;
     let input = r#"{"action":"click","element":0,"reasoning":"test"}"#;
     assert_eq!(strip_think_tags(input), input);
 }
@@ -971,7 +971,7 @@ fn strip_think_tags_no_tags() {
 /// Multiple consecutive think blocks.
 #[test]
 fn strip_think_tags_multiple_blocks() {
-    use llm_as_dom::backend::ollama::strip_think_tags;
+    use llm_as_dom::backend::generic::strip_think_tags;
     let input = "<think>first</think><think>second</think>result";
     assert_eq!(strip_think_tags(input), "result");
 }
@@ -979,7 +979,7 @@ fn strip_think_tags_multiple_blocks() {
 /// Think tag with no closing tag (malformed).
 #[test]
 fn strip_think_tags_unclosed() {
-    use llm_as_dom::backend::ollama::strip_think_tags;
+    use llm_as_dom::backend::generic::strip_think_tags;
     let input = "<think>this never closes and some JSON follows";
     let result = strip_think_tags(input);
     // Unclosed think tag: everything after <think> is swallowed.

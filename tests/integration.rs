@@ -247,7 +247,7 @@ fn test_heuristic_form_scoping() {
 /// Tests JSON extraction from various LLM response formats.
 #[test]
 fn test_ollama_response_parsing() {
-    // The parse_action function is in backend::ollama which is pub
+    // The parse_action function is in backend::generic which is pub
     // We test via the re-exported module
 
     // 1. Clean JSON
@@ -424,7 +424,7 @@ fn test_heuristic_generic_form() {
 /// Test that build_prompt contains few-shot examples relevant to the goal type.
 #[test]
 fn test_prompt_format() {
-    use llm_as_dom::backend::ollama::build_prompt;
+    use llm_as_dom::backend::generic::build_prompt;
 
     let view = mock_view(
         vec![
@@ -436,7 +436,7 @@ fn test_prompt_format() {
     );
 
     // Login prompt should contain login few-shot
-    let prompt = build_prompt(&view, "login as alice@test.com", &[]);
+    let prompt = build_prompt(&view, "login as alice@test.com", &[], 10000);
     assert!(
         prompt.contains("FEW-SHOT EXAMPLES"),
         "prompt should have few-shot section"
@@ -459,14 +459,14 @@ fn test_prompt_format() {
     );
 
     // Search prompt should contain search few-shot
-    let search_prompt = build_prompt(&view, "search for tutorials", &[]);
+    let search_prompt = build_prompt(&view, "search for tutorials", &[], 10000);
     assert!(
         search_prompt.contains("search"),
         "search prompt should contain search example"
     );
 
     // Navigation prompt should contain click example
-    let nav_prompt = build_prompt(&view, "click About", &[]);
+    let nav_prompt = build_prompt(&view, "click About", &[], 10000);
     assert!(
         nav_prompt.contains("click"),
         "nav prompt should contain click example"
