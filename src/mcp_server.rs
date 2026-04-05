@@ -86,6 +86,19 @@ struct SessionParams {
     action: String,
 }
 
+/// Parameters for the `lad_watch` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct WatchParams {
+    /// Action: "start" or "stop".
+    action: String,
+    /// URL to watch (only needed for start).
+    url: Option<String>,
+    /// Polling interval in ms (default: 1000).
+    interval_ms: Option<u32>,
+    /// JavaScript to evaluate periodically.
+    script: Option<String>,
+}
+
 // ── Session state (lightweight, server-side) ──────────────────────
 
 /// Lightweight session state tracked across MCP tool calls.
@@ -405,10 +418,17 @@ impl LadServer {
         params: Parameters<ExtractParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        let _ = p.max_length;
-        tracing::info!(url = %p.url, what = %p.what, "lad_extract");
+        let (_page, mut view) = self.navigate_and_extract(&p.url).await?;
 
-        let (_page, view) = self.navigate_and_extract(&p.url).await?;
+        if let Some(max_len) = p.max_length
+            && view.visible_text.len() > max_len
+        {
+            let mut end = max_len;
+            while !view.visible_text.is_char_boundary(end) && end > 0 {
+                end -= 1;
+            }
+            view.visible_text.truncate(end);
+        }
 
         let output = serde_json::json!({
             "url": view.url,
@@ -564,6 +584,56 @@ impl LadServer {
                 );
                 Err(rmcp::ErrorData::invalid_params(msg, None))
             }
+        }
+    }
+
+    /// Manage monitoring and watching of a web page
+    #[tool(
+        description = "Watch page state over time: start polling a URL with interval_ms and optional JS script, or stop watching. Pushes events to log."
+    )]
+    async fn lad_watch(
+        &self,
+        params: Parameters<WatchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(action = %p.action, "lad_watch");
+
+        if p.action == "start" {
+            let url = p.url.as_deref().unwrap_or("about:blank");
+            let (page, _view) = self.navigate_and_extract(url).await?;
+            let _ = page.enable_network_monitoring().await;
+
+            let interval = p.interval_ms.unwrap_or(1000);
+            let script = p.script.as_deref().unwrap_or(
+                "return { w: window.innerWidth, h: window.innerHeight, title: document.title, location: window.location.href };"
+            );
+
+            page.start_monitoring(interval, script)
+                .await
+                .map_err(mcp_err)?;
+
+            Ok(CallToolResult::success(vec![Content::text(format!(
+                "Started watching {} every {}ms. Check sidecar terminal for push events.",
+                url, interval
+            ))]))
+        } else if p.action == "stop" {
+            if let Some(engine) = self.engine.lock().await.as_ref() {
+                // To stop monitoring, we just tell the bridge to stop it globally for the page
+                // But we don't hold a persistent `PageHandle` per se in the MCP server if we didn't store it.
+                // Re-creating or re-getting the last tracked page?
+                // For MVP, we'll navigate to blank or just ask the engine to stop monitoring the active view.
+                // We'll create a dummy page to send the command to the bridge.
+                let page = engine.new_page("about:blank").await.map_err(mcp_err)?;
+                page.stop_monitoring().await.map_err(mcp_err)?;
+            }
+            Ok(CallToolResult::success(vec![Content::text(
+                "Stopped monitoring".to_string(),
+            )]))
+        } else {
+            Err(rmcp::ErrorData::invalid_params(
+                "action must be start or stop",
+                None,
+            ))
         }
     }
 }

@@ -85,6 +85,16 @@ pub trait PageHandle: Send + Sync {
     async fn enable_network_monitoring(&self) -> Result<bool, crate::Error> {
         Ok(false)
     }
+
+    /// Start timer-based monitoring.
+    async fn start_monitoring(&self, _interval_ms: u32, _script: &str) -> Result<(), crate::Error> {
+        Ok(())
+    }
+
+    /// Stop timer-based monitoring.
+    async fn stop_monitoring(&self) -> Result<(), crate::Error> {
+        Ok(())
+    }
 }
 
 /// Convenience: evaluate JS and deserialize into `T`.
