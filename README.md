@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/icon.svg" width="120" alt="lad minimal logo" />
+
 # lad
 
 ### Your AI agent's browser
