@@ -1,0 +1,221 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - text: "skip to:"
+          - link "skip to content" [ref=e8] [cursor=pointer]:
+            - /url: "#main"
+            - text: content
+          - link "skip to package search" [ref=e9] [cursor=pointer]:
+            - /url: "#search"
+            - text: package search
+        - generic [ref=e10]:
+          - generic [ref=e11]: ❤
+          - navigation "Product Navigation" [ref=e12]:
+            - list [ref=e13]:
+              - listitem [ref=e14]:
+                - link "Pro" [ref=e15] [cursor=pointer]:
+                  - /url: /products/pro
+              - listitem [ref=e16]:
+                - link "Teams" [ref=e17] [cursor=pointer]:
+                  - /url: /products/teams
+              - listitem [ref=e18]:
+                - link "Pricing" [ref=e19] [cursor=pointer]:
+                  - /url: /products
+              - listitem [ref=e20]:
+                - link "Documentation" [ref=e21] [cursor=pointer]:
+                  - /url: https://docs.npmjs.com
+      - generic [ref=e23]:
+        - generic [ref=e24]: npm
+        - link "Npm" [ref=e26] [cursor=pointer]:
+          - /url: /
+          - img [ref=e27]
+        - generic [ref=e30]:
+          - generic [ref=e32]:
+            - img [ref=e34]
+            - combobox "Search packages" [ref=e40]
+          - button "Search" [ref=e42]
+        - navigation [ref=e44]:
+          - button "Profile menu" [ref=e45]:
+            - generic [ref=e46]: Menu
+            - img [ref=e47]
+            - img [ref=e49]
+    - main [ref=e52]:
+      - generic [ref=e53]:
+        - complementary [ref=e54]:
+          - heading "Sidebar" [level=2] [ref=e55]
+          - generic [ref=e56]:
+            - navigation "Settings navigation" [ref=e57]:
+              - list [ref=e58]:
+                - listitem [ref=e59]:
+                  - link "Profile" [ref=e60] [cursor=pointer]:
+                    - /url: /~menot-you
+                    - img [ref=e61]
+                    - text: Profile
+                - listitem [ref=e63]:
+                  - link "Packages" [ref=e64] [cursor=pointer]:
+                    - /url: /settings/menot-you/packages
+                    - img [ref=e65]
+                    - text: Packages
+                - listitem [ref=e67]:
+                  - link "Account" [ref=e68] [cursor=pointer]:
+                    - /url: /settings/menot-you/profile
+                    - img [ref=e69]
+                    - text: Account
+                - listitem [ref=e71]:
+                  - link "Billing Info" [ref=e72] [cursor=pointer]:
+                    - /url: /settings/menot-you/billing
+                    - img [ref=e73]
+                    - text: Billing Info
+                - listitem [ref=e75]:
+                  - link "Access Tokens" [ref=e76] [cursor=pointer]:
+                    - /url: /settings/menot-you/tokens
+                    - img [ref=e77]
+                    - text: Access Tokens
+            - generic [ref=e79]:
+              - heading "Organizations" [level=3] [ref=e80]
+              - link "Create New Organization" [ref=e81] [cursor=pointer]:
+                - /url: /org/create
+                - text: +
+                - generic [ref=e82]: Create New Organization
+            - paragraph [ref=e83]: None
+        - generic [ref=e86]:
+          - generic [ref=e87]:
+            - generic [ref=e88]:
+              - heading "New Granular Access Token" [level=1] [ref=e89]
+              - link "View token documentation" [ref=e90] [cursor=pointer]:
+                - /url: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-granular-access-tokens-on-the-website
+            - paragraph [ref=e93]:
+              - link "Granular access tokens" [ref=e94] [cursor=pointer]:
+                - /url: https://docs.npmjs.com/about-access-tokens#about-granular-access-tokens
+              - text: provide the most control by allowing you to configure fine-grained, tightly scoped permissions for your packages and organizations.
+          - generic [ref=e95]:
+            - generic [ref=e96]:
+              - heading "General" [level=2] [ref=e97]
+              - generic [ref=e99]:
+                - generic [ref=e100]: Token name *
+                - caption [ref=e101]: Provide a unique name.
+                - textbox "Token name" [ref=e103]: llm-as-dom-ci-v2
+              - generic [ref=e104]:
+                - generic [ref=e106]: Description (optional)
+                - caption [ref=e107]: What is this token for?
+                - textbox "Description (optional)" [ref=e109]
+              - generic [ref=e112]:
+                - checkbox "Bypass two-factor authentication (2FA) for this token" [ref=e113]
+                - generic [ref=e114]: Bypass two-factor authentication (2FA)
+              - group "Allowed IP ranges (optional) Must be valid CIDR notation." [ref=e115]:
+                - generic [ref=e116]:
+                  - generic [ref=e117]: Allowed IP ranges (optional)
+                  - caption [ref=e118]:
+                    - text: Must be valid
+                    - link "CIDR notation" [ref=e119] [cursor=pointer]:
+                      - /url: https://docs.npmjs.com/creating-and-viewing-access-tokens/#cidr-restricted-token-errors
+                    - text: .
+                - generic [ref=e121]:
+                  - text: Input Range 1
+                  - textbox "Input Range 1" [ref=e122]
+                - button "Add IP Range" [ref=e123]
+            - generic [ref=e124]:
+              - heading "Packages and scopes" [level=2] [ref=e125]
+              - generic [ref=e127]:
+                - paragraph [ref=e128]: Permissions
+                - group [ref=e129]:
+                  - generic "Packages and scopes Permissions" [ref=e130] [cursor=pointer]:
+                    - text: Read and write
+                    - img [ref=e132]
+              - group "Select packages" [ref=e228]:
+                - generic [ref=e230]: Select packages
+                - generic [ref=e231]:
+                  - generic [ref=e232]:
+                    - radio "All packages" [checked] [ref=e234]
+                    - generic [ref=e235]:
+                      - text: All packages
+                      - paragraph [ref=e236]: Applies to current and future packages.
+                  - generic [ref=e237]:
+                    - radio "Only select packages and scopes" [ref=e239]
+                    - generic [ref=e240]:
+                      - text: Only select packages and scopes
+                      - paragraph [ref=e241]: Select at least one. Max 50.
+              - paragraph
+            - generic [ref=e135]:
+              - heading "Organizations" [level=2] [ref=e136]
+              - generic [ref=e138]:
+                - paragraph [ref=e139]: Permissions
+                - group [ref=e140]:
+                  - generic "Organizations Permissions" [ref=e141] [cursor=pointer]:
+                    - text: No access
+                    - img [ref=e143]
+              - paragraph
+            - generic [ref=e146]:
+              - heading "Expiration" [level=2] [ref=e147]
+              - generic [ref=e149]:
+                - generic [ref=e150]: Expiration Date
+                - group [ref=e153]:
+                  - generic "Expiration Date" [ref=e154] [cursor=pointer]:
+                    - text: 90 days
+                    - img [ref=e156]
+            - generic [ref=e159]:
+              - heading "Summary" [level=2] [ref=e160]
+              - generic [ref=e162]:
+                - paragraph [ref=e163]: "This token will:"
+                - list [ref=e164]:
+                  - listitem [ref=e165]: Provide read and write access to all packages
+                  - listitem [ref=e166]: Provide no access to organizations
+                  - listitem [ref=e167]: Expires on Thursday, July 2, 2026
+            - generic [ref=e169]:
+              - button "Generate token" [ref=e170]
+              - button "Cancel" [ref=e171]
+    - contentinfo [ref=e172]:
+      - heading "Footer" [level=2] [ref=e173]
+      - generic [ref=e174]:
+        - generic [ref=e175]:
+          - link "Visit npm GitHub page" [ref=e177] [cursor=pointer]:
+            - /url: https://github.com/npm
+            - img [ref=e178]
+          - link "GitHub" [ref=e182] [cursor=pointer]:
+            - /url: https://github.com
+            - img [ref=e183]
+        - generic [ref=e185]:
+          - heading "Support" [level=3] [ref=e186]
+          - list "Support" [ref=e187]:
+            - listitem [ref=e188]:
+              - link "Help" [ref=e189] [cursor=pointer]:
+                - /url: https://docs.npmjs.com
+            - listitem [ref=e190]:
+              - link "Advisories" [ref=e191] [cursor=pointer]:
+                - /url: https://github.com/advisories
+            - listitem [ref=e192]:
+              - link "Status" [ref=e193] [cursor=pointer]:
+                - /url: http://status.npmjs.org/
+            - listitem [ref=e194]:
+              - link "Contact npm" [ref=e195] [cursor=pointer]:
+                - /url: /support
+        - generic [ref=e196]:
+          - heading "Company" [level=3] [ref=e197]
+          - list "Company" [ref=e198]:
+            - listitem [ref=e199]:
+              - link "About" [ref=e200] [cursor=pointer]:
+                - /url: /about
+            - listitem [ref=e201]:
+              - link "Blog" [ref=e202] [cursor=pointer]:
+                - /url: https://github.blog/tag/npm/
+            - listitem [ref=e203]:
+              - link "Press" [ref=e204] [cursor=pointer]:
+                - /url: /press
+        - generic [ref=e205]:
+          - heading "Terms & Policies" [level=3] [ref=e206]
+          - list "Terms & Policies" [ref=e207]:
+            - listitem [ref=e208]:
+              - link "Policies" [ref=e209] [cursor=pointer]:
+                - /url: /policies/
+            - listitem [ref=e210]:
+              - link "Terms of Use" [ref=e211] [cursor=pointer]:
+                - /url: /policies/terms
+            - listitem [ref=e212]:
+              - link "Code of Conduct" [ref=e213] [cursor=pointer]:
+                - /url: /policies/conduct
+            - listitem [ref=e214]:
+              - link "Privacy" [ref=e215] [cursor=pointer]:
+                - /url: /policies/privacy
+  - generic [ref=e217]: New Granular Access Token

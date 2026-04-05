@@ -1,0 +1,6 @@
+[    -238ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ https://www.producthunt.com/golden-kitty-awards/hall-of-fame?year=2024#bootstrapped-small-teams-2:0
+[    -200ms] [ERROR] Failed to load resource: the server responded with a status of 403 () @ https://www.producthunt.com/manifest.json:0
+[    -200ms] [ERROR] Manifest fetch from https://www.producthunt.com/manifest.json failed, code 403 @ https://www.producthunt.com/golden-kitty-awards/hall-of-fame?year=2024#bootstrapped-small-teams-2:0
+[    1192ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ https://www.producthunt.com/golden-kitty-awards/hall-of-fame?year=2024:15
+[    1662ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ https://www.producthunt.com/_next/static/chunks/0uln-8_dfcj_j.js:4
+[    2400ms] [INFO] Clear-Site-Data header on 'https://www.producthunt.com/v4/reset': Cleared data types: "cache". @ https://www.producthunt.com/golden-kitty-awards/hall-of-fame?year=2024#bootstrapped-small-teams-2:0

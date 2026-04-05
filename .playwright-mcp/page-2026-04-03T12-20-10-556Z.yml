@@ -1,0 +1,545 @@
+- generic [active] [ref=e1]:
+  - link "Pular para o conteúdo principal" [ref=e2] [cursor=pointer]:
+    - /url: "#content"
+  - generic:
+    - generic: 
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "PyPI" [ref=e8] [cursor=pointer]:
+          - /url: /
+          - img "PyPI" [ref=e9]
+        - search [ref=e10]:
+          - generic [ref=e11]: Pesquisar PyPI
+          - textbox "Pesquisar PyPI" [ref=e12]:
+            - /placeholder: "Digite "
+          - button "Pesquisar" [ref=e13]:
+            - generic [ref=e15]: Pesquisar
+      - navigation "Navegação principal" [ref=e18]:
+        - button "Ver menu" [ref=e19] [cursor=pointer]:
+          - img "User Image" [ref=e20]
+          - text: menot-you
+  - main [ref=e23]:
+    - generic [ref=e24]:
+      - navigation "Migalhas de pão" [ref=e25]:
+        - list [ref=e26]:
+          - listitem [ref=e27]: Sua conta
+      - generic [ref=e28]:
+        - navigation "Navegação da conta" [ref=e31]:
+          - list [ref=e32]:
+            - listitem [ref=e33]:
+              - link "Seus projetos" [ref=e34] [cursor=pointer]:
+                - /url: /manage/projects/
+                - text: Seus projetos
+            - listitem [ref=e36]:
+              - link "Suas organizações" [ref=e37] [cursor=pointer]:
+                - /url: /manage/organizations/
+                - text: Suas organizações
+            - listitem [ref=e39]:
+              - link "Configurações da conta" [ref=e40] [cursor=pointer]:
+                - /url: /manage/account/
+                - text: Configurações da conta
+            - listitem [ref=e42]:
+              - link "Publicação" [ref=e43] [cursor=pointer]:
+                - /url: /manage/account/publishing/
+                - text: Publicação
+        - generic [ref=e45]:
+          - navigation "Navegação da conta":
+            - list:
+              - listitem
+              - listitem
+              - listitem
+              - listitem
+          - generic [ref=e46]:
+            - heading "Configurações da conta" [level=1] [ref=e47]
+            - generic [ref=e48]:
+              - heading "Imagem de perfil" [level=2] [ref=e49]
+              - generic [ref=e50]:
+                - img "Avatar para menot-you do gravatar.com" [ref=e51]
+                - generic [ref=e52]:
+                  - paragraph [ref=e53]:
+                    - text: Nós usamos
+                    - link "gravatar.com" [ref=e54] [cursor=pointer]:
+                      - /url: https://gravatar.com/
+                    - text: para gerar sua imagem de perfil com base no seu endereço de e-mail principal —
+                    - code [ref=e55]: tiago@menot.you
+                  - link "Alterar imagem no gravatar.com" [ref=e56] [cursor=pointer]:
+                    - /url: https://gravatar.com/e5995f3cb65fa979eb2a89f2bc919d5b
+            - separator [ref=e57]
+            - generic [ref=e58]:
+              - heading "Detalhes da conta" [level=2] [ref=e59]
+              - generic [ref=e60]:
+                - generic [ref=e61]: Nome de usuário
+                - paragraph [ref=e62]: menot-you
+                - generic [ref=e63]: Data de entrada
+                - paragraph [ref=e64]:
+                  - time [ref=e65]: 6 minutes ago
+                - paragraph [ref=e66]:
+                  - text: Exibido em seu
+                  - link "perfil público" [ref=e67] [cursor=pointer]:
+                    - /url: /user/menot-you/
+                  - text: . Não pode ser alterado.
+              - generic [ref=e68]:
+                - generic [ref=e69]:
+                  - generic [ref=e70]: Nome completo
+                  - textbox "Nome completo Senha antiga (obrigatório) Nova senha (obrigatório) Confirmar nova senha (obrigatório)" [ref=e71]:
+                    - /placeholder: Nenhum nome definido
+                    - text: menot-you
+                  - paragraph [ref=e72]:
+                    - text: Exibido em seu
+                    - link "perfil público" [ref=e73] [cursor=pointer]:
+                      - /url: /user/menot-you/
+                - generic [ref=e74]:
+                  - generic [ref=e75]: E-mail público
+                  - paragraph [ref=e76]:
+                    - combobox "E-mail público" [ref=e77]:
+                      - option "Not displayed" [selected]
+                      - option "tiago@menot.you"
+                  - paragraph [ref=e78]:
+                    - text: Um de seus e-mails verificados pode ser exibido em seu
+                    - link "perfil público" [ref=e79] [cursor=pointer]:
+                      - /url: /user/menot-you/
+                    - text: para usuários autenticados.
+                - button "Atualizar conta" [ref=e80] [cursor=pointer]
+            - separator [ref=e81]
+            - generic [ref=e82]:
+              - heading "E-mails da conta" [level=2] [ref=e83]
+              - paragraph [ref=e84]:
+                - text: Você pode associar vários e-mails à sua conta. Você pode usar qualquer classe e-mail
+                - generic [ref=e85]: Verificado
+                - text: para recuperar sua conta, mas apenas o seu e-mail Principal receberá notificações.
+              - table "E-mails associados à sua conta" [ref=e87]:
+                - caption [ref=e88]: E-mails associados à sua conta
+                - rowgroup [ref=e89]:
+                  - row "Endereço de e-mail Status" [ref=e90]:
+                    - columnheader "Endereço de e-mail" [ref=e91]
+                    - columnheader "Status" [ref=e92]
+                    - columnheader [ref=e93]
+                - rowgroup [ref=e94]:
+                  - row "tiago@menot.you Principal Verificado" [ref=e95]:
+                    - cell "tiago@menot.you" [ref=e96]
+                    - cell "Principal Verificado" [ref=e97]:
+                      - generic [ref=e98]:
+                        - text: Principal
+                        - generic [ref=e99]: Verificado
+                    - cell [ref=e101]
+              - generic [ref=e102]:
+                - generic [ref=e103]:
+                  - generic [ref=e104]: Adicionar e-mail (obrigatório)
+                  - textbox "Adicionar e-mail (obrigatório)" [ref=e105]:
+                    - /placeholder: Seu endereço de e-mail
+                - button "Adicionar e-mail" [ref=e106] [cursor=pointer]
+            - separator [ref=e107]
+            - generic [ref=e108]:
+              - heading "Alterar senha" [level=2] [ref=e109]
+              - generic [ref=e110]:
+                - generic [ref=e111]:
+                  - generic [ref=e112]:
+                    - generic [ref=e113]: Senha antiga (obrigatório)
+                    - generic [ref=e114]:
+                      - checkbox "Mostrar senhas" [ref=e115]
+                      - text: Mostrar senhas
+                  - textbox "Sua senha atual" [ref=e116]
+                - generic [ref=e117]:
+                  - generic [ref=e118]: Nova senha (obrigatório)
+                  - textbox "Selecione uma nova senha" [ref=e120]
+                  - generic [ref=e121]:
+                    - paragraph [ref=e122]: Escolha uma senha forte que contenha letras (maiúsculas e minúsculas), números e caracteres especiais. Evite palavras comuns ou repetição.
+                    - paragraph [ref=e123]:
+                      - strong [ref=e124]: "Força da senha:"
+                      - generic [ref=e126]: O campo da senha está vazio
+                - generic [ref=e127]:
+                  - generic [ref=e128]: Confirmar nova senha (obrigatório)
+                  - textbox "Confirmar senha" [ref=e129]
+                - generic:
+                  - list: 
+                - button "Atualizar senha" [disabled] [ref=e131]
+            - separator [ref=e132]
+            - generic [ref=e133]:
+              - heading "Autenticação de dois fatores (2FA)" [level=2] [ref=e134]
+              - paragraph [ref=e135]:
+                - text: A autenticação de dois fatores adiciona uma camada adicional de segurança à sua conta.
+                - link "Saiba mais sobre 2FA" [ref=e136] [cursor=pointer]:
+                  - /url: /help#twofa
+                - text: . Uma vez que 2FA tenha sido habilitada, ela não pode ser desabilitada
+              - table "Métodos de recuperação habilitados" [ref=e137]:
+                - caption [ref=e138]: Métodos de recuperação habilitados
+                - rowgroup [ref=e139]:
+                  - row "Método de recuperação" [ref=e140]:
+                    - columnheader "Método de recuperação" [ref=e141]
+                - rowgroup [ref=e142]:
+                  - row "Códigos de recuperação - gerada em 2026-04-03 14:16:56 (+02:00) (7 não usado(s)). Gerar novamente" [ref=e143]:
+                    - rowheader "Códigos de recuperação - gerada em 2026-04-03 14:16:56 (+02:00) (7 não usado(s))." [ref=e144]:
+                      - text: Códigos de recuperação - gerada em
+                      - time [ref=e145]: 3 minutes ago
+                      - text: (7 não usado(s)).
+                    - cell "Gerar novamente" [ref=e146]:
+                      - link "Gerar novamente" [ref=e147] [cursor=pointer]:
+                        - /url: /manage/account/recovery-codes/regenerate
+              - table "Métodos de autenticação de dois fatores habilitados" [ref=e148]:
+                - caption [ref=e149]: Métodos de autenticação de dois fatores habilitados
+                - rowgroup [ref=e150]:
+                  - row "Método de dois fatores" [ref=e151]:
+                    - columnheader "Método de dois fatores" [ref=e152]
+                - rowgroup [ref=e153]:
+                  - row "Para remover este método de 2FA, você deve primeiro adicionar outro método." [ref=e154]:
+                    - cell "Para remover este método de 2FA, você deve primeiro adicionar outro método." [ref=e155]:
+                      - generic [ref=e156]: Para remover este método de 2FA, você deve primeiro adicionar outro método.
+                  - row "Aplicativo de autenticação (TOTP) Edit Remover" [ref=e157]:
+                    - rowheader "Aplicativo de autenticação (TOTP)" [ref=e158]
+                    - cell "Edit Remover" [ref=e159]:
+                      - link "Edit" [ref=e160] [cursor=pointer]:
+                        - /url: /manage/account/totp-provision
+                      - button "Remover" [disabled] [ref=e161]
+              - generic [ref=e162]:
+                - link "Adicione 2FA com uma aplicação de autenticação" [ref=e163]:
+                  - /url: /manage/account/totp-provision
+                - link "Adicionar 2FA com dispositivo de segurança (por exemplo, chave USB)" [ref=e164] [cursor=pointer]:
+                  - /url: /manage/account/webauthn-provision
+              - list: 
+            - separator [ref=e165]
+            - generic [ref=e166]:
+              - heading "Account associations" [level=2] [ref=e167]
+              - paragraph [ref=e168]: Conecte sua conta do PyPI com serviços externos. Contas conectadas podem ser usadas para recuperação de conta ou acessar recursos específicos de serviços.
+              - paragraph [ref=e170]: You have not connected any external accounts yet.
+              - heading "Connect external accounts" [level=3] [ref=e171]
+              - paragraph [ref=e172]: Link your external accounts to your PyPI account. You'll be redirected to authorize the connection.
+              - link "Connect GitHub" [ref=e174] [cursor=pointer]:
+                - /url: /manage/account/associations/github/connect
+                - text: Connect GitHub
+            - separator [ref=e176]
+            - generic [ref=e177]:
+              - heading "Tokens de API" [level=2] [ref=e178]
+              - paragraph [ref=e179]:
+                - text: Os tokens de API fornecem uma maneira alternativa de autenticar ao enviar pacotes para o PyPI.
+                - link "Saiba mais sobre tokens de API" [ref=e180] [cursor=pointer]:
+                  - /url: https://pypi.org/help/#apitoken
+                - text: .
+              - link "Adicionar token de API" [ref=e181] [cursor=pointer]:
+                - /url: /manage/account/token/
+            - separator [ref=e182]
+            - generic [ref=e183]:
+              - heading "Histórico de segurança" [level=2] [ref=e184]
+              - paragraph [ref=e185]:
+                - text: Os eventos aparecem aqui à medida que as ações relacionadas à segurança ocorrem em sua conta. Se você notar algo suspeito, por favor
+                - link ", proteja sua conta" [ref=e186] [cursor=pointer]:
+                  - /url: https://pypi.org/help/#suspicious-activity
+                - text: o mais rápido possível.
+              - table "Atividade recente da conta" [ref=e187]:
+                - caption [ref=e188]: Atividade recente da conta
+                - rowgroup [ref=e189]:
+                  - row "Evento Horário Informações adicionais" [ref=e190]:
+                    - columnheader "Evento" [ref=e191]
+                    - columnheader "Horário" [ref=e192]
+                    - columnheader "Informações adicionais" [ref=e193]
+                - rowgroup [ref=e194]:
+                  - 'row "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Two-factor method added 2026-04-03 14:17:43 (+02:00) Redacted No User-Agent" [ref=e195]':
+                    - 'cell "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Two-factor method added" [ref=e196]':
+                      - strong [ref=e197]: E-mail enviado
+                      - generic [ref=e198]:
+                        - text: "De: noreply@pypi.org"
+                        - text: "Para: tiago@menot.you"
+                        - text: "Assunto: [PyPI] Two-factor method added"
+                    - cell "2026-04-03 14:17:43 (+02:00)" [ref=e199]:
+                      - time [ref=e200]: 2 minutes ago
+                    - cell "Redacted No User-Agent" [ref=e201]:
+                      - text: Redacted
+                      - text: No User-Agent
+                  - 'row "Autenticação de dois fatores adicionada Método: Aplicativo de autenticação (TOTP) 2026-04-03 14:17:42 (+02:00) Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e202]':
+                    - 'cell "Autenticação de dois fatores adicionada Método: Aplicativo de autenticação (TOTP)" [ref=e203]':
+                      - strong [ref=e204]: Autenticação de dois fatores adicionada
+                      - generic [ref=e205]: "Método: Aplicativo de autenticação (TOTP)"
+                    - cell "2026-04-03 14:17:42 (+02:00)" [ref=e206]:
+                      - time [ref=e207]: 2 minutes ago
+                    - cell "Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e208]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Safari (Mac OS X on Mac)
+                  - 'row "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Recovery code use notification 2026-04-03 14:17:17 (+02:00) Redacted No User-Agent" [ref=e209]':
+                    - 'cell "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Recovery code use notification" [ref=e210]':
+                      - strong [ref=e211]: E-mail enviado
+                      - generic [ref=e212]:
+                        - text: "De: noreply@pypi.org"
+                        - text: "Para: tiago@menot.you"
+                        - text: "Assunto: [PyPI] Recovery code use notification"
+                    - cell "2026-04-03 14:17:17 (+02:00)" [ref=e213]:
+                      - time [ref=e214]: 3 minutes ago
+                    - cell "Redacted No User-Agent" [ref=e215]:
+                      - text: Redacted
+                      - text: No User-Agent
+                  - 'row "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Recovery codes generation notification 2026-04-03 14:16:57 (+02:00) Redacted No User-Agent" [ref=e216]':
+                    - 'cell "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Recovery codes generation notification" [ref=e217]':
+                      - strong [ref=e218]: E-mail enviado
+                      - generic [ref=e219]:
+                        - text: "De: noreply@pypi.org"
+                        - text: "Para: tiago@menot.you"
+                        - text: "Assunto: [PyPI] Recovery codes generation notification"
+                    - cell "2026-04-03 14:16:57 (+02:00)" [ref=e220]:
+                      - time [ref=e221]: 3 minutes ago
+                    - cell "Redacted No User-Agent" [ref=e222]:
+                      - text: Redacted
+                      - text: No User-Agent
+                  - row "Códigos de recuperação gerados 2026-04-03 14:16:56 (+02:00) Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e223]:
+                    - cell "Códigos de recuperação gerados" [ref=e224]:
+                      - strong [ref=e225]: Códigos de recuperação gerados
+                    - cell "2026-04-03 14:16:56 (+02:00)" [ref=e226]:
+                      - time [ref=e227]: 3 minutes ago
+                    - cell "Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e228]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Safari (Mac OS X on Mac)
+                  - row "Reautenticação de sessão falhou Motivo:Senha incorreta 2026-04-03 14:16:41 (+02:00) Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e229]:
+                    - cell "Reautenticação de sessão falhou Motivo:Senha incorreta" [ref=e230]:
+                      - strong [ref=e231]: Reautenticação de sessão falhou
+                      - generic [ref=e232]: Motivo:Senha incorreta
+                    - cell "2026-04-03 14:16:41 (+02:00)" [ref=e233]:
+                      - time [ref=e234]: 3 minutes ago
+                    - cell "Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e235]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Chrome (Mac OS X on Mac)
+                  - row "Reautenticação de sessão falhou Motivo:Senha incorreta 2026-04-03 14:15:57 (+02:00) Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e236]:
+                    - cell "Reautenticação de sessão falhou Motivo:Senha incorreta" [ref=e237]:
+                      - strong [ref=e238]: Reautenticação de sessão falhou
+                      - generic [ref=e239]: Motivo:Senha incorreta
+                    - cell "2026-04-03 14:15:57 (+02:00)" [ref=e240]:
+                      - time [ref=e241]: 4 minutes ago
+                    - cell "Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e242]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Chrome (Mac OS X on Mac)
+                  - row "Reautenticação de sessão falhou Motivo:Senha incorreta 2026-04-03 14:15:36 (+02:00) Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e243]:
+                    - cell "Reautenticação de sessão falhou Motivo:Senha incorreta" [ref=e244]:
+                      - strong [ref=e245]: Reautenticação de sessão falhou
+                      - generic [ref=e246]: Motivo:Senha incorreta
+                    - cell "2026-04-03 14:15:36 (+02:00)" [ref=e247]:
+                      - time [ref=e248]: 5 minutes ago
+                    - cell "Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e249]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Chrome (Mac OS X on Mac)
+                  - row "Reautenticação de sessão falhou Motivo:Senha incorreta 2026-04-03 14:15:30 (+02:00) Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e250]:
+                    - cell "Reautenticação de sessão falhou Motivo:Senha incorreta" [ref=e251]:
+                      - strong [ref=e252]: Reautenticação de sessão falhou
+                      - generic [ref=e253]: Motivo:Senha incorreta
+                    - cell "2026-04-03 14:15:30 (+02:00)" [ref=e254]:
+                      - time [ref=e255]: 5 minutes ago
+                    - cell "Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e256]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Chrome (Mac OS X on Mac)
+                  - row "E-mail verificado tiago@menot.you 2026-04-03 14:14:49 (+02:00) Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e257]:
+                    - cell "E-mail verificado tiago@menot.you" [ref=e258]:
+                      - strong [ref=e259]: E-mail verificado
+                      - generic [ref=e260]: tiago@menot.you
+                    - cell "2026-04-03 14:14:49 (+02:00)" [ref=e261]:
+                      - time [ref=e262]: 5 minutes ago
+                    - cell "Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e263]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Safari (Mac OS X on Mac)
+                  - row "Entrou Método de dois fatores:Nenhum 2026-04-03 14:14:49 (+02:00) Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e264]:
+                    - cell "Entrou Método de dois fatores:Nenhum" [ref=e265]:
+                      - strong [ref=e266]: Entrou
+                      - generic [ref=e267]: Método de dois fatores:Nenhum
+                    - cell "2026-04-03 14:14:49 (+02:00)" [ref=e268]:
+                      - time [ref=e269]: 5 minutes ago
+                    - cell "Rotterdam, ZH, NL Safari (Mac OS X on Mac)" [ref=e270]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Safari (Mac OS X on Mac)
+                  - 'row "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Email verification 2026-04-03 14:14:26 (+02:00) 127.0.0.1 No User-Agent" [ref=e271]':
+                    - 'cell "E-mail enviado De: noreply@pypi.org Para: tiago@menot.you Assunto: [PyPI] Email verification" [ref=e272]':
+                      - strong [ref=e273]: E-mail enviado
+                      - generic [ref=e274]:
+                        - text: "De: noreply@pypi.org"
+                        - text: "Para: tiago@menot.you"
+                        - text: "Assunto: [PyPI] Email verification"
+                    - cell "2026-04-03 14:14:26 (+02:00)" [ref=e275]:
+                      - time [ref=e276]: 6 minutes ago
+                    - cell "127.0.0.1 No User-Agent" [ref=e277]:
+                      - text: 127.0.0.1
+                      - text: No User-Agent
+                  - 'row "Entrou Método de dois fatores: 2026-04-03 14:14:26 (+02:00) Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e278]':
+                    - cell "Entrou Método de dois fatores:" [ref=e279]:
+                      - strong [ref=e280]: Entrou
+                      - generic [ref=e281]: "Método de dois fatores:"
+                    - cell "2026-04-03 14:14:26 (+02:00)" [ref=e282]:
+                      - time [ref=e283]: 6 minutes ago
+                    - cell "Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e284]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Chrome (Mac OS X on Mac)
+                  - row "Conta criada 2026-04-03 14:14:26 (+02:00) Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e285]:
+                    - cell "Conta criada" [ref=e286]:
+                      - strong [ref=e287]: Conta criada
+                    - cell "2026-04-03 14:14:26 (+02:00)" [ref=e288]:
+                      - time [ref=e289]: 6 minutes ago
+                    - cell "Rotterdam, ZH, NL Chrome (Mac OS X on Mac)" [ref=e290]:
+                      - text: Rotterdam, ZH, NL
+                      - text: Chrome (Mac OS X on Mac)
+            - separator [ref=e291]
+            - generic [ref=e292]:
+              - heading "Excluir conta" [level=2] [ref=e293]
+              - generic [ref=e294]:
+                - heading "Prossiga com cautela!" [level=3] [ref=e295]
+                - paragraph [ref=e296]:
+                  - generic [ref=e298]: Aviso
+                  - text: Você não poderá recuperar sua conta depois de excluí-la
+                - link "Excluir sua conta PyPI" [ref=e299] [cursor=pointer]:
+                  - /url: "#excluir-sua-conta-pypi-modal"
+  - contentinfo [ref=e300]:
+    - generic [ref=e302]:
+      - generic [ref=e303]:
+        - heading "Ajuda" [level=2] [ref=e304]
+        - navigation "Navegação de ajuda" [ref=e305]:
+          - list [ref=e306]:
+            - listitem [ref=e307]:
+              - link "Instalando pacotes" [ref=e308] [cursor=pointer]:
+                - /url: https://packaging.python.org/tutorials/installing-packages/
+            - listitem [ref=e309]:
+              - link "Enviando pacotes" [ref=e310] [cursor=pointer]:
+                - /url: https://packaging.python.org/tutorials/packaging-projects/
+            - listitem [ref=e311]:
+              - link "Guia de usuário" [ref=e312] [cursor=pointer]:
+                - /url: https://packaging.python.org/
+            - listitem [ref=e313]:
+              - link "Retenção do nome do projeto" [ref=e314] [cursor=pointer]:
+                - /url: https://www.python.org/dev/peps/pep-0541/
+            - listitem [ref=e315]:
+              - link "FAQs" [ref=e316] [cursor=pointer]:
+                - /url: /help/
+      - generic [ref=e317]:
+        - heading "Sobre o PyPI" [level=2] [ref=e318]
+        - navigation "Sobre a navegação do PyPI" [ref=e319]:
+          - list [ref=e320]:
+            - listitem [ref=e321]:
+              - link "Blog do PyPI" [ref=e322] [cursor=pointer]:
+                - /url: https://blog.pypi.org
+            - listitem [ref=e323]:
+              - link "Painel de infraestrutura" [ref=e324] [cursor=pointer]:
+                - /url: https://dtdg.co/pypi
+            - listitem [ref=e325]:
+              - link "Estatísticas" [ref=e326] [cursor=pointer]:
+                - /url: /stats/
+            - listitem [ref=e327]:
+              - link "Logotipos e marcas registradas" [ref=e328] [cursor=pointer]:
+                - /url: /trademarks/
+            - listitem [ref=e329]:
+              - link "Nossos patrocinadores" [ref=e330] [cursor=pointer]:
+                - /url: /sponsors/
+      - generic [ref=e331]:
+        - heading "Contribuindo para o PyPI" [level=2] [ref=e332]
+        - navigation "Como contribuir para navegação" [ref=e333]:
+          - list [ref=e334]:
+            - listitem [ref=e335]:
+              - link "Bugs e feedback" [ref=e336] [cursor=pointer]:
+                - /url: /help/#feedback
+            - listitem [ref=e337]:
+              - link "Contribuir no GitHub" [ref=e338] [cursor=pointer]:
+                - /url: https://github.com/pypi/warehouse
+            - listitem [ref=e339]:
+              - link "Traduzir o PyPI" [ref=e340] [cursor=pointer]:
+                - /url: https://hosted.weblate.org/projects/pypa/warehouse/
+            - listitem [ref=e341]:
+              - link "Patrocinar o PyPI" [ref=e342] [cursor=pointer]:
+                - /url: /sponsors/
+            - listitem [ref=e343]:
+              - link "Créditos por desenvolvimento" [ref=e344] [cursor=pointer]:
+                - /url: https://github.com/pypi/warehouse/graphs/contributors
+      - generic [ref=e345]:
+        - heading "Usando o PyPI" [level=2] [ref=e346]
+        - navigation "Usando a navegação do PyPI" [ref=e347]:
+          - list [ref=e348]:
+            - listitem [ref=e349]:
+              - link "Termos de Serviço" [ref=e350] [cursor=pointer]:
+                - /url: https://policies.python.org/pypi.org/Terms-of-Service/
+            - listitem [ref=e351]:
+              - link "Relatar problema de segurança" [ref=e352] [cursor=pointer]:
+                - /url: /security/
+            - listitem [ref=e353]:
+              - link "Código de conduta" [ref=e354] [cursor=pointer]:
+                - /url: https://policies.python.org/python.org/code-of-conduct/
+            - listitem [ref=e355]:
+              - link "Aviso de Privacidade" [ref=e356] [cursor=pointer]:
+                - /url: https://policies.python.org/pypi.org/Privacy-Notice/
+            - listitem [ref=e357]:
+              - link "Política de Uso Aceitável" [ref=e358] [cursor=pointer]:
+                - /url: https://policies.python.org/pypi.org/Acceptable-Use-Policy/
+    - separator [ref=e359]
+    - generic [ref=e360]:
+      - paragraph [ref=e361]:
+        - text: "Status:"
+        - link "All Systems Operational" [ref=e362] [cursor=pointer]:
+          - /url: https://status.python.org/
+      - paragraph [ref=e363]:
+        - text: Desenvolvido e mantido pela comunidade Python, para a comunidade Python.
+        - link "Doe hoje!" [ref=e364] [cursor=pointer]:
+          - /url: https://donate.pypi.org
+      - paragraph [ref=e365]:
+        - text: "\"PyPI\", \"Python Package Index\", e os logotipos dos blocos são"
+        - link "marcas registradas" [ref=e366] [cursor=pointer]:
+          - /url: /trademarks/
+        - text: da
+        - link "Python Software Foundation" [ref=e367] [cursor=pointer]:
+          - /url: https://www.python.org/psf-landing
+        - text: .
+      - paragraph [ref=e368]:
+        - text: © 2026
+        - link "Python Software Foundation" [ref=e369] [cursor=pointer]:
+          - /url: https://www.python.org/psf-landing/
+        - link "Mapa do site" [ref=e370] [cursor=pointer]:
+          - /url: /sitemap/
+  - list [ref=e373]:
+    - listitem [ref=e374]:
+      - button "English" [ref=e375]
+    - listitem [ref=e376]:
+      - button "español" [ref=e377]
+    - listitem [ref=e378]:
+      - button "français" [ref=e379]
+    - listitem [ref=e380]:
+      - button "日本語" [ref=e381]
+    - listitem [ref=e382]:
+      - button "português (Brasil)"
+    - listitem [ref=e383]:
+      - button "українська" [ref=e384]
+    - listitem [ref=e385]:
+      - button "Ελληνικά" [ref=e386]
+    - listitem [ref=e387]:
+      - button "Deutsch" [ref=e388]
+    - listitem [ref=e389]:
+      - button "中文 (简体)" [ref=e390]
+    - listitem [ref=e391]:
+      - button "中文 (繁體)" [ref=e392]
+    - listitem [ref=e393]:
+      - button "русский" [ref=e394]
+    - listitem [ref=e395]:
+      - button "עברית" [ref=e396]
+    - listitem [ref=e397]:
+      - button "Esperanto" [ref=e398]
+    - listitem [ref=e399]:
+      - button "한국어" [ref=e400]
+  - generic [ref=e401]:
+    - link "AWS Cloud computing and Security Sponsor" [ref=e402] [cursor=pointer]:
+      - /url: https://aws.amazon.com/
+      - generic [ref=e403]: AWS
+      - generic [ref=e404]: Cloud computing and Security Sponsor
+    - link "Datadog Monitoring" [ref=e405] [cursor=pointer]:
+      - /url: https://www.datadoghq.com/
+      - generic [ref=e406]: Datadog
+      - generic [ref=e407]: Monitoring
+    - link "Depot Continuous Integration" [ref=e408] [cursor=pointer]:
+      - /url: https://depot.dev
+      - generic [ref=e409]: Depot
+      - generic [ref=e410]: Continuous Integration
+    - link "Fastly CDN" [ref=e411] [cursor=pointer]:
+      - /url: https://www.fastly.com/
+      - generic [ref=e412]: Fastly
+      - generic [ref=e413]: CDN
+    - link "Google Download Analytics" [ref=e414] [cursor=pointer]:
+      - /url: https://careers.google.com/
+      - generic [ref=e415]: Google
+      - generic [ref=e416]: Download Analytics
+    - link "Pingdom Monitoring" [ref=e417] [cursor=pointer]:
+      - /url: https://www.pingdom.com/
+      - generic [ref=e418]: Pingdom
+      - generic [ref=e419]: Monitoring
+    - link "Sentry Error logging" [ref=e420] [cursor=pointer]:
+      - /url: https://sentry.io/for/python/?utm_source=pypi&utm_medium=paid-community&utm_campaign=python-na-evergreen&utm_content=static-ad-pypi-sponsor-learnmore
+      - generic [ref=e421]: Sentry
+      - generic [ref=e422]: Error logging
+    - link "StatusPage Status page" [ref=e423] [cursor=pointer]:
+      - /url: https://statuspage.io
+      - generic [ref=e424]: StatusPage
+      - generic [ref=e425]: Status page

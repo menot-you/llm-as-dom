@@ -1,0 +1,25 @@
+- main [ref=e5]:
+  - link "Npm" [ref=e7] [cursor=pointer]:
+    - /url: /
+    - img [ref=e8]
+  - generic [ref=e12]:
+    - generic [ref=e13]:
+      - button "Toggle between showing and hiding a shade over a wombat's head" [ref=e15] [cursor=pointer]
+      - button "Make the animated wombat visibly giggle" [ref=e20]
+    - generic [ref=e23]:
+      - heading "Sign In" [level=1] [ref=e24]
+      - generic [ref=e25]:
+        - generic [ref=e27]: Username
+        - textbox "Username" [ref=e28]:
+          - /placeholder: ""
+      - link "Forgot password?" [ref=e30] [cursor=pointer]:
+        - /url: /forgot
+      - generic [ref=e31]:
+        - generic [ref=e33]: Password
+        - generic [ref=e34]:
+          - textbox "Password" [ref=e35]:
+            - /placeholder: ""
+          - button "Show password" [ref=e36] [cursor=pointer]: Show
+      - button "Sign In" [ref=e38]
+    - link "Create Account" [ref=e39] [cursor=pointer]:
+      - /url: /signup?next=%2Fsettings%2F~%2Ftokens

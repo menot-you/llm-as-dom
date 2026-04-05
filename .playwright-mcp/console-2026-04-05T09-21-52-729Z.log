@@ -1,0 +1,70 @@
+[    1024ms] [WARNING] Multiple GoTrueClient instances detected in the same browser context. It is not an error, but this should be avoided as it may produce undefined behavior when used concurrently under the same storage key. @ https://21st.dev/_next/static/chunks/39645-c444f5370daa6b28.js:5
+[    1507ms] Minified React error #419; visit https://react.dev/errors/419 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+[    1749ms] [WARNING] [PostHog.js] You have already initialized PostHog! Re-initializing is a no-op @ https://21st.dev/_next/static/chunks/2d2d3c67-4d6f2c780fa8c97c.js:0
+[    1767ms] [ERROR] %c << query #2 %cusers.isCurrentUserAdmin%c %O 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+   
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: bold; 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: normal; {input: undefined, result: TRPCClientError: User must be authenticated
+    at a.from (https://21st.dev/_next/static/chunks/621…, elapsedMs: 253, context: Object} @ https://21st.dev/_next/static/chunks/62146-272dcd108e05cda7.js:4
+[    1939ms] [LOG] [Featurebase SDK] Initializing SDK! @ https://do.featurebase.app/js/sdk.js:240
+[    2069ms] [LOG] [Featurebase SDK] Messenger initialization already in progress, checking if data changed @ https://do.featurebase.app/js/sdk.js:240
+[    2069ms] [LOG] [Featurebase SDK] Data changed, canceling previous request @ https://do.featurebase.app/js/sdk.js:240
+[    2070ms] [LOG] [Featurebase SDK] Previous request canceled due to new request @ https://do.featurebase.app/js/sdk.js:240
+[    2092ms] [LOG] [Featurebase SDK] Messenger initialization already in progress, checking if data changed @ https://do.featurebase.app/js/sdk.js:240
+[    2092ms] [LOG] [Featurebase SDK] Same data as previous request, waiting for completion @ https://do.featurebase.app/js/sdk.js:240
+[    2104ms] [ERROR] Failed to load resource: the server responded with a status of 500 () @ https://21st.dev/api/bundle:0
+[    2211ms] [LOG] [Featurebase SDK] Messenger initialization already in progress, checking if data changed @ https://do.featurebase.app/js/sdk.js:240
+[    2211ms] [LOG] [Featurebase SDK] Same data as previous request, waiting for completion @ https://do.featurebase.app/js/sdk.js:240
+[    2405ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ https://do.featurebase.app/js/sdk.js:234
+[    2978ms] [ERROR] %c << query #4 %cusers.isCurrentUserAdmin%c %O 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+   
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: bold; 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: normal; {input: undefined, result: TRPCClientError: User must be authenticated
+    at a.from (https://21st.dev/_next/static/chunks/621…, elapsedMs: 209, context: Object} @ https://21st.dev/_next/static/chunks/62146-272dcd108e05cda7.js:4
+[    5179ms] [ERROR] %c << query #5 %cusers.isCurrentUserAdmin%c %O 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+   
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: bold; 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: normal; {input: undefined, result: TRPCClientError: User must be authenticated
+    at a.from (https://21st.dev/_next/static/chunks/621…, elapsedMs: 201, context: Object} @ https://21st.dev/_next/static/chunks/62146-272dcd108e05cda7.js:4
+[    9390ms] [ERROR] %c << query #6 %cusers.isCurrentUserAdmin%c %O 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+   
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: bold; 
+    background-color: #3fb0d8;
+    color: white;
+    padding: 2px;
+  ; font-weight: normal; {input: undefined, result: TRPCClientError: User must be authenticated
+    at a.from (https://21st.dev/_next/static/chunks/621…, elapsedMs: 209, context: Object} @ https://21st.dev/_next/static/chunks/62146-272dcd108e05cda7.js:4
+[   81425ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ https://col.csbops.io/data/sandpack:0

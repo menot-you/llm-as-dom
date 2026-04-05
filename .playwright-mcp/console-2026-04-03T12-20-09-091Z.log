@@ -1,0 +1,28 @@
+[     750ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'ambient-light-sensor'. @ :0
+[     750ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'battery'. @ :0
+[     750ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'document-domain'. @ :0
+[     750ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'execution-while-not-rendered'. @ :0
+[     750ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'execution-while-out-of-viewport'. @ :0
+[     750ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'speaker-selection'. @ :0
+[     838ms] [VERBOSE] [DOM] Password forms should have (optionally hidden) username fields for accessibility: (More info: https://goo.gl/9p2vKq) %o @ https://pypi.org/manage/account/#api-tokens:0
+[    1056ms] Error: No ad placements found.
+    at w (https://media.ethicalads.io/media/client/v1.4.0/ethicalads.min.js:1:11867)
+    at https://media.ethicalads.io/media/client/v1.4.0/ethicalads.min.js:1:12977
+[   15174ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'ambient-light-sensor'. @ :0
+[   15174ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'battery'. @ :0
+[   15174ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'document-domain'. @ :0
+[   15174ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'execution-while-not-rendered'. @ :0
+[   15174ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'execution-while-out-of-viewport'. @ :0
+[   15174ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'speaker-selection'. @ :0
+[   15204ms] Error: No ad placements found.
+    at w (https://media.ethicalads.io/media/client/v1.4.0/ethicalads.min.js:1:11867)
+    at https://media.ethicalads.io/media/client/v1.4.0/ethicalads.min.js:1:12977
+[   34375ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'ambient-light-sensor'. @ :0
+[   34375ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'battery'. @ :0
+[   34375ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'document-domain'. @ :0
+[   34375ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'execution-while-not-rendered'. @ :0
+[   34375ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'execution-while-out-of-viewport'. @ :0
+[   34375ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'speaker-selection'. @ :0
+[   34409ms] Error: No ad placements found.
+    at w (https://media.ethicalads.io/media/client/v1.4.0/ethicalads.min.js:1:11867)
+    at https://media.ethicalads.io/media/client/v1.4.0/ethicalads.min.js:1:12977
