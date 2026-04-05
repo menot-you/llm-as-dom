@@ -29,7 +29,7 @@ impl ZaiBackend {
         model: impl Into<String>,
         max_prompt_length: Option<usize>,
     ) -> Self {
-        let max_prompt_length = max_prompt_length.unwrap_or(10000);
+        let max_prompt_length = max_prompt_length.unwrap_or(40000);
         let cred = {
             let k = api_key.into();
             if k.is_empty() {
