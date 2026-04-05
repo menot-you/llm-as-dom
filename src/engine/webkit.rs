@@ -83,7 +83,7 @@ impl BridgeConnection {
 pub struct WebKitEngine {
     conn: Arc<BridgeConnection>,
     reader_task: tokio::task::JoinHandle<()>,
-    child: Mutex<Child>,
+    child: Option<Child>,
 }
 
 impl WebKitEngine {
@@ -152,7 +152,7 @@ impl WebKitEngine {
         Ok(Self {
             conn,
             reader_task,
-            child: Mutex::new(child),
+            child: Some(child),
         })
     }
 
@@ -259,10 +259,22 @@ impl Drop for WebKitEngine {
         // 1. Abort the reader task (stops reading stdout).
         self.reader_task.abort();
 
-        // 2. Kill the child process. Mutex::get_mut works because &mut self
-        //    guarantees exclusive access — no async lock needed.
-        let child = self.child.get_mut();
-        let _ = child.start_kill();
+        // 2. Extract child process and spawn a graceful shutdown wait task.
+        if let Some(mut child) = self.child.take() {
+            tokio::spawn(async move {
+                // Wait up to 3 seconds for clean exit (e.g. following EOF or 'close' command)
+                match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
+                    Ok(Ok(status)) => {
+                        tracing::debug!(%status, "webkit bridge exited cleanly via drop")
+                    }
+                    Ok(Err(e)) => tracing::warn!(error = %e, "webkit bridge error on wait"),
+                    Err(_) => {
+                        tracing::warn!("webkit bridge failed to exit within 3s, force killing");
+                        let _ = child.start_kill();
+                    }
+                }
+            });
+        }
     }
 }
 
