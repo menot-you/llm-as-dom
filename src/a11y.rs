@@ -21,12 +21,27 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
         (() => {
             const MAX_ELEMENTS = 300;
             const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"]';
-            const els = document.querySelectorAll(selectors);
             const rawElements = [];
             let id = 0;
 
+            // ── Shadow DOM + light DOM recursive query ─────────────────
+            function deepQueryAll(root, sel) {
+                const results = [];
+                try { results.push(...root.querySelectorAll(sel)); } catch(_) {}
+                // Walk all elements looking for shadow roots
+                const allEls = root.querySelectorAll('*');
+                for (const el of allEls) {
+                    if (el.shadowRoot) {
+                        try { results.push(...deepQueryAll(el.shadowRoot, sel)); } catch(_) {}
+                    }
+                }
+                return results;
+            }
+
+            const els = deepQueryAll(document, selectors);
+
             // Build a form index: map each <form> to a sequential number
-            const allForms = document.querySelectorAll('form');
+            const allForms = deepQueryAll(document, 'form');
             const formMap = new Map();
             allForms.forEach((f, i) => formMap.set(f, i));
 
@@ -174,7 +189,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 id++;
             }
 
-            const textNodes = document.querySelectorAll('h1, h2, h3, h4, p, label, legend, [role="heading"]');
+            const textNodes = deepQueryAll(document, 'h1, h2, h3, h4, p, label, legend, [role="heading"]');
             let visibleText = '';
             for (const node of textNodes) {
                 const text = node.textContent?.trim();
@@ -185,7 +200,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
             }
             // Fallback: collect substantial text from td, span, a when headings/paragraphs yielded little
             if (visibleText.length < 100) {
-                const extraNodes = document.querySelectorAll('td, span, a');
+                const extraNodes = deepQueryAll(document, 'td, span, a');
                 for (const node of extraNodes) {
                     const text = node.textContent?.trim();
                     if (text && text.length > 20 && visibleText.length < 500) {
