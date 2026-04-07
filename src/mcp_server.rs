@@ -3,7 +3,7 @@
 //! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
 //! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
 //! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`, `lad_screenshot`,
-//! `lad_wait`, `lad_network`.
+//! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`.
 
 use llm_as_dom::engine::chromium::ChromiumEngine;
 use llm_as_dom::engine::webkit::WebKitEngine;
@@ -181,6 +181,31 @@ struct NetworkParams {
 
 fn default_network_filter() -> String {
     "all".to_string()
+}
+
+/// Parameters for the `lad_hover` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct HoverParams {
+    /// Element ID from a prior lad_snapshot.
+    element: u32,
+}
+
+/// Parameters for the `lad_dialog` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DialogParams {
+    /// Action: "accept", "dismiss", or "status".
+    action: String,
+    /// Optional text to enter for prompt() dialogs (only used with "accept").
+    text: Option<String>,
+}
+
+/// Parameters for the `lad_upload` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct UploadParams {
+    /// Element ID of the file input from a prior lad_snapshot.
+    element: u32,
+    /// Absolute file paths to upload.
+    files: Vec<String>,
 }
 
 // ── Active page (persistent across snapshot -> click/type/select) ─
@@ -1323,6 +1348,212 @@ impl LadServer {
             to_pretty_json(&output),
         )]))
     }
+
+    // ── W3: lad_hover ───────────────────────────────────────────────
+
+    /// Hover over an element by its ID from lad_snapshot.
+    #[tool(
+        description = "Hover over an element by its ID from lad_snapshot. Triggers mouseenter, mouseover, and mousemove events. Useful for dropdown menus, tooltips, and hover states. Requires a prior lad_snapshot call."
+    )]
+    async fn lad_hover(
+        &self,
+        params: Parameters<HoverParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(element = p.element, "lad_hover");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let js = format!(
+                r#"(() => {{
+                    const el = document.querySelector('[data-lad-id="{}"]');
+                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                    for (const type of ['mouseenter', 'mouseover', 'mousemove']) {{
+                        el.dispatchEvent(new MouseEvent(type, {{
+                            bubbles: true, cancelable: true, view: window
+                        }}));
+                    }}
+                    return JSON.stringify({{ ok: true }});
+                }})()"#,
+                p.element, p.element
+            );
+            check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
+    // ── W3: lad_dialog ──────────────────────────────────────────────
+
+    /// Handle JavaScript dialogs (alert, confirm, prompt).
+    #[tool(
+        description = "Handle JavaScript dialogs (alert, confirm, prompt). Actions: 'accept' auto-accepts future dialogs (with optional text for prompt inputs), 'dismiss' auto-dismisses, 'status' returns captured dialog history. Call before triggering actions that may show dialogs."
+    )]
+    async fn lad_dialog(
+        &self,
+        params: Parameters<DialogParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(action = %p.action, text = ?p.text, "lad_dialog");
+
+        let active = self.active_page.lock().await;
+        let ap = active.as_ref().ok_or_else(no_active_page)?;
+
+        // Ensure dialog overrides are installed
+        let setup_js = r#"
+            if (!window.__lad_dialogs) {
+                window.__lad_dialogs = [];
+                window.__lad_dialog_auto = 'accept';
+                window.__lad_dialog_response = '';
+
+                window.alert = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'alert', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                };
+                window.confirm = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'confirm', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                    return window.__lad_dialog_auto === 'accept';
+                };
+                window.prompt = function(msg, def) {
+                    window.__lad_dialogs.push({
+                        type: 'prompt', message: String(msg),
+                        default: def || '', timestamp: Date.now()
+                    });
+                    if (window.__lad_dialog_auto !== 'accept') return null;
+                    return window.__lad_dialog_response || def || '';
+                };
+            }
+        "#;
+        ap.page.eval_js(setup_js).await.map_err(mcp_err)?;
+
+        match p.action.as_str() {
+            "accept" => {
+                let text_escaped = p
+                    .text
+                    .as_deref()
+                    .unwrap_or("")
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'");
+                let js = format!(
+                    "window.__lad_dialog_auto = 'accept'; \
+                     window.__lad_dialog_response = '{}';",
+                    text_escaped
+                );
+                ap.page.eval_js(&js).await.map_err(mcp_err)?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "dialogs will be auto-accepted"}"#.to_string(),
+                )]))
+            }
+            "dismiss" => {
+                ap.page
+                    .eval_js("window.__lad_dialog_auto = 'dismiss';")
+                    .await
+                    .map_err(mcp_err)?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "dialogs will be auto-dismissed"}"#.to_string(),
+                )]))
+            }
+            "status" => {
+                let result = ap
+                    .page
+                    .eval_js("JSON.stringify(window.__lad_dialogs || [])")
+                    .await
+                    .map_err(mcp_err)?;
+                let text = result.as_str().unwrap_or("[]");
+                Ok(CallToolResult::success(vec![Content::text(
+                    text.to_string(),
+                )]))
+            }
+            other => Err(rmcp::ErrorData::invalid_params(
+                format!(
+                    "unknown dialog action '{}' — use 'accept', 'dismiss', or 'status'",
+                    other
+                ),
+                None,
+            )),
+        }
+    }
+
+    // ── W3: lad_upload ──────────────────────────────────────────────
+
+    /// Upload file(s) to a file input element.
+    #[tool(
+        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. Requires a prior lad_snapshot call."
+    )]
+    async fn lad_upload(
+        &self,
+        params: Parameters<UploadParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(element = p.element, files = ?p.files, "lad_upload");
+
+        if p.files.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "files array must not be empty",
+                None,
+            ));
+        }
+
+        // Validate all file paths exist on disk
+        for path in &p.files {
+            if !std::path::Path::new(path).exists() {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("file not found: {path}"),
+                    None,
+                ));
+            }
+        }
+
+        let selector = format!(r#"[data-lad-id="{}"]"#, p.element);
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+
+            // Verify element exists and is a file input
+            let check_js = format!(
+                r#"(() => {{
+                    const el = document.querySelector('[data-lad-id="{}"]');
+                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                    if (el.tagName !== 'INPUT' || el.type !== 'file')
+                        return JSON.stringify({{ error: "element {} is not a file input" }});
+                    return JSON.stringify({{ ok: true }});
+                }})()"#,
+                p.element, p.element, p.element
+            );
+            check_js_result(&ap.page.eval_js(&check_js).await.map_err(mcp_err)?)?;
+
+            // Use engine-level file upload (CDP on Chromium)
+            ap.page
+                .set_input_files(&selector, &p.files)
+                .await
+                .map_err(mcp_err)?;
+
+            // Dispatch change event so frameworks react
+            let change_js = format!(
+                r#"document.querySelector('[data-lad-id="{}"]')
+                    .dispatchEvent(new Event('change', {{ bubbles: true }}))"#,
+                p.element
+            );
+            ap.page.eval_js(&change_js).await.map_err(mcp_err)?;
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            r#"{{"status": "uploaded", "files": {}, "element": {}}}"#,
+            p.files.len(),
+            p.element
+        ))]))
+    }
 }
 
 /// Evaluate a single assertion against a semantic view.
@@ -1475,7 +1706,7 @@ impl ServerHandler for LadServer {
                 .enable_resources_subscribe()
                 .build(),
         )
-        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction, lad_hover for hover states/tooltips/dropdowns, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection, lad_dialog for JS alert/confirm/prompt handling, lad_upload for file input uploads (Chromium only). Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 
     async fn initialize(
@@ -1848,5 +2079,62 @@ mod tests {
         let json = r#"{"filter":"auth"}"#;
         let p: NetworkParams = serde_json::from_str(json).unwrap();
         assert_eq!(p.filter, "auth");
+    }
+
+    // ── W3: param parsing tests ─────────────────────────────────
+
+    #[test]
+    fn hover_params_parse() {
+        let json = r#"{"element":42}"#;
+        let p: HoverParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 42);
+    }
+
+    #[test]
+    fn dialog_params_accept_with_text() {
+        let json = r#"{"action":"accept","text":"hello"}"#;
+        let p: DialogParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.action, "accept");
+        assert_eq!(p.text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn dialog_params_status_no_text() {
+        let json = r#"{"action":"status"}"#;
+        let p: DialogParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.action, "status");
+        assert!(p.text.is_none());
+    }
+
+    #[test]
+    fn dialog_params_dismiss() {
+        let json = r#"{"action":"dismiss"}"#;
+        let p: DialogParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.action, "dismiss");
+    }
+
+    #[test]
+    fn upload_params_parse() {
+        let json = r#"{"element":7,"files":["/tmp/a.png","/tmp/b.pdf"]}"#;
+        let p: UploadParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 7);
+        assert_eq!(p.files.len(), 2);
+        assert_eq!(p.files[0], "/tmp/a.png");
+        assert_eq!(p.files[1], "/tmp/b.pdf");
+    }
+
+    #[test]
+    fn upload_params_single_file() {
+        let json = r#"{"element":1,"files":["/tmp/test.csv"]}"#;
+        let p: UploadParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 1);
+        assert_eq!(p.files.len(), 1);
+    }
+
+    #[test]
+    fn upload_params_empty_files() {
+        let json = r#"{"element":1,"files":[]}"#;
+        let p: UploadParams = serde_json::from_str(json).unwrap();
+        assert!(p.files.is_empty());
     }
 }
