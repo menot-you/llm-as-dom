@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Iframe Test Page</title>
+  <style>
+    body { font-family: system-ui; padding: 2rem; }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { margin-bottom: 1rem; }
+    iframe { border: 2px solid #4a90d9; border-radius: 8px; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Iframe Traversal Test</h1>
+
+    <!-- Light DOM element (always found) -->
+    <button id="main-btn">Main Page Button</button>
+    <input type="text" name="main-input" placeholder="Main page input">
+
+    <!-- Same-origin iframe with interactive content -->
+    <iframe id="same-origin-frame" srcdoc='
+      <!DOCTYPE html>
+      <html>
+      <head><title>Embedded Form</title></head>
+      <body style="font-family: system-ui; padding: 1rem;">
+        <h2>Embedded Contact Form</h2>
+        <form>
+          <label for="iframe-name">Name</label>
+          <input type="text" id="iframe-name" name="contact-name" placeholder="Your name">
+          <label for="iframe-email">Email</label>
+          <input type="email" id="iframe-email" name="contact-email" placeholder="you@example.com">
+          <button type="submit">Send Message</button>
+        </form>
+        <a href="/iframe-help">Need help?</a>
+      </body>
+      </html>
+    ' width="550" height="250"></iframe>
+
+    <!-- Cross-origin iframe (should be silently skipped) -->
+    <iframe id="cross-origin-frame" src="https://example.com" width="550" height="100"></iframe>
+  </div>
+</body>
+</html>

@@ -48,6 +48,7 @@ fn input_element(
         form_index: form,
         context: None,
         hint: None,
+        frame_index: None,
     }
 }
 
@@ -65,6 +66,7 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         form_index: form,
         context: None,
         hint: None,
+        frame_index: None,
     }
 }
 
@@ -83,6 +85,7 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         form_index: None,
         context: None,
         hint: None,
+        frame_index: None,
     }
 }
 
@@ -663,6 +666,7 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "field".into(),
                     value: "email".into(),
                 }),
+                frame_index: None,
             },
             Element {
                 id: 1,
@@ -680,6 +684,7 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "field".into(),
                     value: "password".into(),
                 }),
+                frame_index: None,
             },
             Element {
                 id: 2,
@@ -697,6 +702,7 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "action".into(),
                     value: "submit".into(),
                 }),
+                frame_index: None,
             },
         ],
         forms: vec![],
@@ -1137,6 +1143,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 form_index: None,
                 context: None,
                 hint: None,
+                frame_index: None,
             },
             Element {
                 id: 1,
@@ -1151,6 +1158,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 form_index: None,
                 context: None,
                 hint: None,
+                frame_index: None,
             },
         ],
         forms: vec![],
@@ -1212,6 +1220,7 @@ fn test_hints_active_when_heuristics_disabled() {
                 hint_type: "field".into(),
                 value: "email".into(),
             }),
+            frame_index: None,
         }],
         forms: vec![],
         visible_text: "".into(),
@@ -1985,6 +1994,113 @@ async fn test_extract_shadow_dom_elements() {
         view.elements.len()
     );
 
+    assert_eq!(view.state, PageState::Ready);
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+// ── iframe traversal test (browser required) ─────────────────────────
+
+/// Extracts elements from a fixture page containing same-origin iframes.
+///
+/// The fixture `iframe.html` has:
+/// - 2 light-DOM elements (button + input)
+/// - 4 same-origin iframe elements (name input, email input, submit button, link)
+/// - 1 cross-origin iframe (should be silently skipped)
+///
+/// Total: at least 6 interactive elements should be found.
+#[ignore]
+#[tokio::test]
+async fn test_extract_iframe_elements() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use llm_as_dom::semantic::ElementKind;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/iframe.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // Light DOM elements
+    let main_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Main Page Button"));
+    assert!(main_btn.is_some(), "main page button should be found");
+    // Main page elements should have frame_index = None
+    assert_eq!(
+        main_btn.unwrap().frame_index,
+        None,
+        "main document elements should have frame_index = None"
+    );
+
+    let main_input = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("main-input"));
+    assert!(main_input.is_some(), "main page input should be found");
+
+    // Same-origin iframe elements
+    let iframe_name = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("contact-name"));
+    assert!(
+        iframe_name.is_some(),
+        "iframe name input should be extracted"
+    );
+    // Iframe elements should have frame_index = Some(0) (first iframe)
+    assert_eq!(
+        iframe_name.unwrap().frame_index,
+        Some(0),
+        "iframe elements should have frame_index = Some(0)"
+    );
+
+    let iframe_email = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("contact-email"));
+    assert!(
+        iframe_email.is_some(),
+        "iframe email input should be extracted"
+    );
+
+    let iframe_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Send Message") && e.kind == ElementKind::Button);
+    assert!(
+        iframe_btn.is_some(),
+        "iframe submit button should be extracted"
+    );
+
+    let iframe_link = view
+        .elements
+        .iter()
+        .find(|e| e.href.as_deref() == Some("/iframe-help"));
+    assert!(iframe_link.is_some(), "iframe link should be extracted");
+
+    // Should have at least 6 elements (2 main + 4 iframe)
+    assert!(
+        view.elements.len() >= 6,
+        "expected >= 6 elements (2 main + 4 iframe), got {}",
+        view.elements.len()
+    );
+
+    // Cross-origin iframe should NOT have caused any errors
     assert_eq!(view.state, PageState::Ready);
 
     drop(page);
