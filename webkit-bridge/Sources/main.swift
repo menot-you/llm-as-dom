@@ -177,7 +177,7 @@ final class BridgeApp: NSObject, NSApplicationDelegate {
             self?.readLoop()
         }
 
-        writer.event("ready", extra: ["version": "0.1.0"])
+        writer.event("ready", extra: ["version": "0.1.1"])
     }
 
     private func setupWebView() {
