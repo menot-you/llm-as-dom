@@ -205,7 +205,7 @@ lad --url "https://staging.myapp.com/login" \
 
 ## MCP Server
 
-`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **18 semantic tools** — near Playwright parity with 60x fewer tokens.
+`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **21 semantic tools** — full Playwright parity with 60x fewer tokens.
 
 ```bash
 llm-as-dom-mcp  # starts MCP server (stdio)
@@ -233,6 +233,14 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 | `lad_type` | Type text into an element by its ID from `lad_snapshot` |
 | `lad_select` | Select a dropdown option by element ID from `lad_snapshot` |
 | `lad_press_key` | Press a keyboard key (Enter, Tab, Escape, etc.). Optionally focus an element first |
+| `lad_hover` | Hover over an element — triggers dropdown menus, tooltips, hover states |
+| `lad_upload` | Upload file(s) to a `<input type="file">` element (Chromium CDP) |
+
+### Dialog Handling
+
+| Tool | What it does |
+|------|-------------|
+| `lad_dialog` | Handle JavaScript dialogs (alert/confirm/prompt) — accept, dismiss, or inspect history |
 
 ### Waiting
 
@@ -321,7 +329,7 @@ lad matches Playwright's tool surface with fundamentally different economics:
 
 | Dimension | lad | Playwright MCP |
 |-----------|-----|---------------|
-| **Tools** | 18 (21 soon: +hover, +dialog, +upload) | 21 |
+| **Tools** | 21 | 21 |
 | **Tokens per login test** | ~300 | ~18,000 |
 | **Cost ratio** | 1x | 60x |
 | **Decision engine** | Heuristics-first (70-90% no LLM) | None — LLM parses every page |
