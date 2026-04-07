@@ -1,4 +1,4 @@
-"""llm-as-dom-mcp: AI browser pilot MCP server binary wrapper."""
+"""menot-you-mcp-lad: AI browser pilot MCP server binary wrapper."""
 
 import os
 import platform
@@ -25,7 +25,7 @@ def _get_platform() -> str:
     raise RuntimeError(
         f"Unsupported platform: {system}-{machine}. "
         f"Supported: darwin-arm64, linux-x86_64. "
-        f"Install from source: cargo install llm-as-dom"
+        f"Install from source: cargo install menot-you-mcp-lad"
     )
 
 
@@ -42,17 +42,17 @@ def _ensure_binary() -> str:
     artifact = f"{BINARY}-{plat}"
     url = f"https://github.com/{REPO}/releases/download/v{__version__}/{artifact}"
 
-    print(f"llm-as-dom: downloading {BINARY} v{__version__} for {plat}...", file=sys.stderr)
+    print(f"mcp-lad: downloading {BINARY} v{__version__} for {plat}...", file=sys.stderr)
 
     try:
         urllib.request.urlretrieve(url, path)
         st = os.stat(path)
         os.chmod(path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         size_mb = os.path.getsize(path) / 1024 / 1024
-        print(f"llm-as-dom: installed {BINARY} ({size_mb:.1f} MB)", file=sys.stderr)
+        print(f"mcp-lad: installed {BINARY} ({size_mb:.1f} MB)", file=sys.stderr)
     except Exception as e:
-        print(f"llm-as-dom: failed to download — {e}", file=sys.stderr)
-        print("llm-as-dom: install from source: cargo install llm-as-dom", file=sys.stderr)
+        print(f"mcp-lad: failed to download — {e}", file=sys.stderr)
+        print("mcp-lad: install from source: cargo install menot-you-mcp-lad", file=sys.stderr)
         sys.exit(1)
 
     return path
