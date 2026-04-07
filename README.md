@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" alt="nott" width="120" />
+
 # LLM-as-DOM
 
 ## Your AI agent's browser
