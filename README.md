@@ -19,7 +19,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-purple.svg)](https://modelcontextprotocol.io)
 
-[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Watch System](#watch-system) · [Playwright Parity](#playwright-parity) · [Benchmarks](#benchmarks)
 
 </div>
 
@@ -205,20 +205,69 @@ lad --url "https://staging.myapp.com/login" \
 
 ## MCP Server
 
-`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly.
+`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **18 semantic tools** — near Playwright parity with 60x fewer tokens.
 
 ```bash
 llm-as-dom-mcp  # starts MCP server (stdio)
 ```
 
+### Autonomous
+
 | Tool | What it does |
 |------|-------------|
-| `lad_browse` | Navigate + accomplish a goal autonomously |
-| `lad_extract` | Extract structured page info (never raw HTML) |
-| `lad_assert` | Verify assertions ("has login form", "title contains Dashboard") |
-| `lad_locate` | Map a DOM element back to its source file |
-| `lad_audit` | Audit page quality: a11y, forms, links |
-| `lad_session` | Inspect/reset session state (auth, cookies, history) |
+| `lad_browse` | Navigate to a URL and accomplish a goal autonomously (login, fill form, click, search) |
+
+### Extraction
+
+| Tool | What it does |
+|------|-------------|
+| `lad_extract` | Extract structured page info: elements, text, page type. Never returns raw HTML |
+| `lad_snapshot` | Semantic snapshot of the current page — elements with IDs for `lad_click`/`lad_type`. Like Playwright's `browser_snapshot` but 10-60x fewer tokens |
+| `lad_screenshot` | Take a base64-encoded PNG screenshot of the active page |
+
+### Interaction
+
+| Tool | What it does |
+|------|-------------|
+| `lad_click` | Click an element by its ID from `lad_snapshot` |
+| `lad_type` | Type text into an element by its ID from `lad_snapshot` |
+| `lad_select` | Select a dropdown option by element ID from `lad_snapshot` |
+| `lad_press_key` | Press a keyboard key (Enter, Tab, Escape, etc.). Optionally focus an element first |
+
+### Waiting
+
+| Tool | What it does |
+|------|-------------|
+| `lad_wait` | Wait for a semantic condition to be true (blocks until satisfied or timeout) |
+| `lad_watch` | Continuous page monitoring — start/stop polling, diff semantic views, cursor-based event retrieval |
+
+### Verification
+
+| Tool | What it does |
+|------|-------------|
+| `lad_assert` | Check assertions on a URL: has login form, title contains X, has button Y |
+| `lad_audit` | Audit page quality: a11y (alt text, labels), forms (autocomplete), links (void hrefs) |
+
+### Navigation
+
+| Tool | What it does |
+|------|-------------|
+| `lad_back` | Navigate back in browser history |
+
+### Debugging
+
+| Tool | What it does |
+|------|-------------|
+| `lad_eval` | Evaluate arbitrary JavaScript — escape hatch for when semantic tools can't handle a specific interaction |
+| `lad_network` | Inspect network traffic with timing data. Filter by type: auth, api, navigation, asset |
+| `lad_locate` | Map a DOM element back to its source file (React dev source, data-ds, data-lad attributes) |
+
+### Lifecycle
+
+| Tool | What it does |
+|------|-------------|
+| `lad_close` | Close the browser and release all resources |
+| `lad_session` | View or reset session state: auth status, visited URLs, browse count |
 
 <details>
 <summary>Claude Desktop config</summary>
@@ -240,6 +289,47 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 
 Set `LAD_ENGINE=webkit` for WebKit on macOS.
 </details>
+
+## Watch System
+
+`lad_watch` enables continuous page monitoring — your agent can observe a page over time and react to changes without polling manually.
+
+```
+Agent                          lad_watch                         Page
+  │                                │                               │
+  ├─ start(url, interval_ms) ─────►│  begin polling loop           │
+  │                                ├── extract SemanticView ◄──────┤
+  │                                ├── diff against previous       │
+  │                                ├── store in ring buffer (cap 1000)
+  │                                ├── MCP resource notification ──►│ (push to client)
+  │                                │   ... repeat every tick ...   │
+  │                                │                               │
+  ├─ events(since_seq=42) ────────►│  cursor-based retrieval       │
+  │◄──── [events 43..N] ──────────┤                               │
+  │                                │                               │
+  ├─ stop ────────────────────────►│  cleanly abort                │
+```
+
+- **Ring buffer** stores up to 1,000 events with monotonic sequence numbers
+- **Semantic diffing** via `observer.rs` — detects added/removed/changed elements, value changes, disabled state transitions
+- **MCP resource notifications** pushed to client on each non-empty diff (`watch://url`)
+- **Cursor-based retrieval** — `since_seq=N` returns only events newer than sequence N
+
+## Playwright Parity
+
+lad matches Playwright's tool surface with fundamentally different economics:
+
+| Dimension | lad | Playwright MCP |
+|-----------|-----|---------------|
+| **Tools** | 18 (21 soon: +hover, +dialog, +upload) | 21 |
+| **Tokens per login test** | ~300 | ~18,000 |
+| **Cost ratio** | 1x | 60x |
+| **Decision engine** | Heuristics-first (70-90% no LLM) | None — LLM parses every page |
+| **Output format** | Semantic JSON (never raw HTML) | Raw DOM snapshots |
+| **Browser engines** | Chromium + WebKit | Chromium only |
+| **DOM traversal** | Shadow DOM + same-origin iframes | Standard DOM |
+
+The key architectural difference: Playwright gives the LLM a DOM and asks it to figure out what to do. lad compresses the DOM, runs heuristics, and only calls the LLM when genuinely ambiguous.
 
 ## Benchmarks
 
@@ -282,10 +372,10 @@ The 3 extra WebKit elements are footer links that GitHub serves differently to S
 
 ## Test Suite
 
-- **341 tests** (unit + chaos + integration + protocol)
-- **11 heuristic modules** (login, form, search, navigation, OAuth, MFA, ecommerce, validation, multistep, hints)
+- **387 tests** (unit + chaos + integration + protocol)
+- **11 heuristic modules** (login, form, search, navigation, OAuth, MFA, ecommerce, validation, multistep, hints, selector)
 - **8 micro-benchmarks** (criterion)
-- **~11,000 lines of Rust** + 300 lines of Swift
+- **~13,600 lines of Rust** (45 files) + ~576 lines of Swift
 
 ## Requirements
 
