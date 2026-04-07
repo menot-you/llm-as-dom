@@ -14,6 +14,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+use rmcp::model::ResourceUpdatedNotificationParam;
+use rmcp::service::RoleServer;
+
 use crate::observer::{self, SemanticDiff};
 use crate::semantic::SemanticView;
 
@@ -130,6 +133,8 @@ pub struct WatchConfig {
     pub url: String,
     pub interval_ms: u32,
     pub initial_view: SemanticView,
+    /// Optional MCP peer for pushing resource-updated notifications.
+    pub peer: Option<Arc<Mutex<Option<rmcp::Peer<RoleServer>>>>>,
 }
 
 /// Start a polling loop. Returns a `WatchState` whose `task_handle` runs
@@ -138,6 +143,9 @@ pub struct WatchConfig {
 /// The `extract_fn` closure is called each tick to obtain the current
 /// `SemanticView` from the live page. This keeps the watch module
 /// decoupled from the engine/a11y layer.
+///
+/// When a `peer` is provided in the config, a `notifications/resources/updated`
+/// notification is pushed after every non-empty diff.
 pub fn start_watch<F, Fut>(cfg: WatchConfig, extract_fn: F) -> WatchState
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -147,6 +155,7 @@ where
     let events_clone = events.clone();
     let url = cfg.url.clone();
     let url_for_task = cfg.url.clone();
+    let peer_arc = cfg.peer.clone();
 
     let task_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(cfg.interval_ms as u64));
@@ -175,6 +184,16 @@ where
             {
                 let seq = events_clone.push(&url_for_task, diff).await;
                 tracing::debug!(url = %url_for_task, seq, "watch: diff captured");
+
+                // Push MCP resource notification if peer is available.
+                if let Some(ref peer_mutex) = peer_arc
+                    && let Some(ref peer) = *peer_mutex.lock().await
+                {
+                    let uri = format!("watch://{}", sanitize_uri(&url_for_task));
+                    let _ = peer
+                        .notify_resource_updated(ResourceUpdatedNotificationParam::new(uri))
+                        .await;
+                }
             }
 
             last_view = current_view;
@@ -310,6 +329,7 @@ mod tests {
                 url: "http://test".into(),
                 interval_ms: 10,
                 initial_view: v1,
+                peer: None,
             },
             move || {
                 let c = cc.fetch_add(1, Ordering::SeqCst);
@@ -345,6 +365,7 @@ mod tests {
                 url: "https://example.com/dashboard".into(),
                 interval_ms: 1000,
                 initial_view: v,
+                peer: None,
             },
             || async { None },
         );
