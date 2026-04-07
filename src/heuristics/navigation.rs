@@ -61,13 +61,16 @@ pub fn try_navigation(
 /// Extract the navigation target from a goal string (case-insensitive prefix match).
 ///
 /// Supports patterns: "click X", "go to X", "navigate to X", "open X".
-/// Preserves the original case of the extracted target.
+///
+/// FIX-16: Slices the lowered string instead of the original to avoid
+/// byte-index panics when non-ASCII characters change byte length
+/// during lowercasing.
 fn extract_nav_target(goal: &str) -> Option<String> {
     let lower = goal.to_lowercase();
     let prefixes = ["click ", "go to ", "navigate to ", "open "];
     for prefix in &prefixes {
         if let Some(pos) = lower.find(prefix) {
-            let rest = goal[pos + prefix.len()..].trim();
+            let rest = lower[pos + prefix.len()..].trim();
             if !rest.is_empty() {
                 return Some(rest.to_string());
             }
@@ -82,19 +85,28 @@ mod tests {
 
     #[test]
     fn extract_click_target() {
-        assert_eq!(extract_nav_target("click About"), Some("About".into()));
+        // FIX-16: now returns lowercase to avoid byte-index panics
+        assert_eq!(extract_nav_target("click About"), Some("about".into()));
     }
 
     #[test]
     fn extract_go_to_target() {
+        // FIX-16: now returns lowercase
         assert_eq!(
             extract_nav_target("go to Settings"),
-            Some("Settings".into())
+            Some("settings".into())
         );
     }
 
     #[test]
     fn no_nav_target() {
         assert_eq!(extract_nav_target("login as admin"), None);
+    }
+
+    // FIX-16: Non-ASCII goals must not panic
+    #[test]
+    fn extract_nav_target_non_ascii_no_panic() {
+        let result = extract_nav_target("click Ação Rápida");
+        assert_eq!(result, Some("ação rápida".into()));
     }
 }

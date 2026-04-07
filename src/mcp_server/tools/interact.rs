@@ -14,6 +14,13 @@ use crate::params::{
 
 use llm_as_dom::pilot;
 
+/// FIX-7: Default delay (ms) after interaction before re-extracting the DOM.
+/// 150ms gives SPAs enough time to react without feeling slow.
+const DEFAULT_INTERACT_DELAY_MS: u64 = 150;
+
+/// Shorter delay for simple value-setting (type/select) where no navigation occurs.
+const VALUE_SET_DELAY_MS: u64 = 100;
+
 impl LadServer {
     /// Common pattern: execute JS on active page, wait, refresh view, return prompt.
     async fn interact_and_refresh(
@@ -43,7 +50,8 @@ impl LadServer {
         tracing::info!(element = p.element, "lad_click");
 
         let js = build_element_js(p.element, "el.click();");
-        self.interact_and_refresh(&js, 150).await
+        self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS)
+            .await
     }
 
     /// Type text into an element by its ID from lad_snapshot.
@@ -52,7 +60,25 @@ impl LadServer {
         params: Parameters<TypeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(element = p.element, text = %p.text, "lad_type");
+        // FIX-13: Redact typed text if the target is a sensitive field.
+        let log_text = {
+            let active = self.active_page.lock().await;
+            let is_sensitive = active.as_ref().is_some_and(|ap| {
+                ap.view.elements.iter().any(|el| {
+                    el.id == p.element
+                        && el
+                            .input_type
+                            .as_deref()
+                            .is_some_and(|t| t.eq_ignore_ascii_case("password"))
+                })
+            });
+            if is_sensitive {
+                "[REDACTED]".to_string()
+            } else {
+                p.text.clone()
+            }
+        };
+        tracing::info!(element = p.element, text = %log_text, "lad_type");
 
         let escaped = pilot::js_escape(&p.text);
         let body = format!(
@@ -62,7 +88,7 @@ impl LadServer {
              el.dispatchEvent(new Event('change', {{ bubbles: true }}));"
         );
         let js = build_element_js(p.element, &body);
-        self.interact_and_refresh(&js, 100).await
+        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
     }
 
     /// Select an option in a `<select>` element by its ID from lad_snapshot.
@@ -81,7 +107,7 @@ impl LadServer {
             id = p.element,
         );
         let js = build_element_js(p.element, &body);
-        self.interact_and_refresh(&js, 100).await
+        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
     }
 
     /// Hover over an element by its ID from lad_snapshot.
@@ -99,7 +125,9 @@ impl LadServer {
                 }));\
             }";
         let js = build_element_js(p.element, body);
-        self.interact_and_refresh(&js, 200).await
+        // Hover needs slightly longer for CSS transitions / dropdown menus.
+        self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS + 50)
+            .await
     }
 
     /// Press a keyboard key on the active page.
@@ -138,7 +166,7 @@ impl LadServer {
             ap.page.eval_js(&js).await.map_err(mcp_err)?;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_INTERACT_DELAY_MS)).await;
         let view = self.refresh_active_view().await?;
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),
@@ -160,9 +188,17 @@ impl LadServer {
             ));
         }
 
-        // Validate all file paths exist on disk
+        // FIX-14: Validate all file paths are absolute (reject relative paths
+        // that could be used for path traversal).
         for path in &p.files {
-            if !std::path::Path::new(path).exists() {
+            let p = std::path::Path::new(path);
+            if !p.is_absolute() {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("file path must be absolute: {path}"),
+                    None,
+                ));
+            }
+            if !p.exists() {
                 return Err(rmcp::ErrorData::invalid_params(
                     format!("file not found: {path}"),
                     None,

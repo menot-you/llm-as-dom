@@ -931,7 +931,8 @@ fn search_look_up_prefix() {
     assert!(r.action.is_some());
     match r.action.unwrap() {
         Action::Type { value, .. } => {
-            assert_eq!(value, "Rust lang");
+            // FIX-16: extract_search_query now returns lowercase
+            assert_eq!(value, "rust lang");
         }
         other => panic!("expected Type, got {other:?}"),
     }

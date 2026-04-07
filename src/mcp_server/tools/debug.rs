@@ -9,6 +9,16 @@ use crate::params::{EvalParams, LocateParams, NetworkParams};
 
 use llm_as_dom::{locate, network};
 
+/// FIX-13: Truncate a string for safe logging. Avoids leaking secrets,
+/// long scripts, or password-containing goals into tracing output.
+fn redact_for_log(field: &str, max_len: usize) -> String {
+    if field.len() <= max_len {
+        field.to_string()
+    } else {
+        format!("{}...", &field[..field.floor_char_boundary(max_len)])
+    }
+}
+
 impl LadServer {
     /// Evaluate arbitrary JavaScript on the active page.
     pub(crate) async fn tool_lad_eval(
@@ -16,7 +26,11 @@ impl LadServer {
         params: Parameters<EvalParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(script = %p.script, "lad_eval");
+        // FIX-13+14: Truncate script in info log, add audit warning for
+        // arbitrary JS execution (this is an explicit escape hatch).
+        let truncated = redact_for_log(&p.script, 50);
+        tracing::info!(script = %truncated, "lad_eval");
+        tracing::warn!(script = %truncated, "lad_eval: arbitrary JS execution");
 
         let active = self.active_page.lock().await;
         let ap = active.as_ref().ok_or_else(no_active_page)?;

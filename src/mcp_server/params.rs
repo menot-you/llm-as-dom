@@ -4,8 +4,6 @@ use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::helpers::default_network_filter;
-
 /// Parameters for the `lad_browse` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct BrowseParams {
@@ -150,6 +148,12 @@ fn default_wait_timeout() -> u64 {
 }
 fn default_wait_poll() -> u64 {
     500
+}
+
+/// FIX-17: Default network filter value ("all") — moved here from helpers.rs
+/// since it's only used as a serde default for `NetworkParams`.
+fn default_network_filter() -> String {
+    "all".to_string()
 }
 
 /// Parameters for the `lad_network` tool.

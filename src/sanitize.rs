@@ -37,20 +37,29 @@ fn is_steganographic(c: char) -> bool {
 /// Prevents credentials from leaking into LLM prompts.
 pub fn mask_sensitive_value(input_type: Option<&str>, value: Option<&str>) -> Option<String> {
     match input_type {
-        Some("password") => value.map(|_| "[filled]".to_string()),
+        Some(t) if t.eq_ignore_ascii_case("password") => value.map(|_| "[filled]".to_string()),
         _ => value.map(String::from),
     }
 }
+
+/// Schemes that must never be navigated to.
+const BLOCKED_SCHEMES: &[&str] = &["file", "javascript", "data", "blob"];
 
 /// Check whether a URL is safe for automated navigation.
 ///
 /// Blocks `file://`, `javascript:`, `data:`, `blob:` schemes and
 /// private/loopback IP addresses to prevent SSRF.
+///
+/// Uses `url::Url::parse()` for scheme detection so that single-slash
+/// variants like `file:/etc/passwd` are caught (they parse as scheme
+/// `file`). String prefix checks remain as a fallback for malformed
+/// URLs that `url::Url` cannot parse.
 pub fn is_safe_url(url: &str) -> bool {
     let lower = url.trim().to_lowercase();
 
-    // Block dangerous schemes
-    if lower.starts_with("file://")
+    // Fallback string prefix check for malformed URLs that might not parse.
+    // Covers both `file://…` and the single-slash `file:/…` variant.
+    if lower.starts_with("file:")
         || lower.starts_with("javascript:")
         || lower.starts_with("data:")
         || lower.starts_with("blob:")
@@ -58,11 +67,16 @@ pub fn is_safe_url(url: &str) -> bool {
         return false;
     }
 
-    // Try to parse as absolute URL and check host
-    if let Ok(parsed) = url::Url::parse(url)
-        && let Some(host) = parsed.host_str()
-    {
-        return !is_private_host(host);
+    // Authoritative check: parse the URL and inspect the scheme + host.
+    if let Ok(parsed) = url::Url::parse(url) {
+        // Block dangerous schemes (catches edge cases the prefix missed).
+        if BLOCKED_SCHEMES.contains(&parsed.scheme()) {
+            return false;
+        }
+        // Check for private/loopback hosts (SSRF targets).
+        if let Some(host) = parsed.host_str() {
+            return !is_private_host(host);
+        }
     }
 
     // Allow relative URLs and unparseable (browser handles resolution)
@@ -284,6 +298,39 @@ mod tests {
     fn case_insensitive_scheme_block() {
         assert!(!is_safe_url("JAVASCRIPT:alert(1)"));
         assert!(!is_safe_url("File:///etc/shadow"));
+    }
+
+    #[test]
+    fn blocks_file_single_slash() {
+        // FIX-1: `file:/etc/passwd` (single slash) must be blocked
+        assert!(!is_safe_url("file:/etc/passwd"));
+        assert!(!is_safe_url("FILE:/etc/shadow"));
+    }
+
+    #[test]
+    fn blocks_file_no_authority() {
+        // Various file: scheme edge cases
+        assert!(!is_safe_url("file:///tmp/secret"));
+        assert!(!is_safe_url("file://localhost/etc/passwd"));
+    }
+
+    // ── mask_sensitive_value (case-insensitive) ────────────
+
+    #[test]
+    fn masks_password_field_uppercase() {
+        // FIX-2: PASSWORD, Password variants must be masked
+        assert_eq!(
+            mask_sensitive_value(Some("PASSWORD"), Some("s3cret")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_password_field_mixed_case() {
+        assert_eq!(
+            mask_sensitive_value(Some("Password"), Some("s3cret")),
+            Some("[filled]".to_string()),
+        );
     }
 
     // ── random_boundary ────────────────────────────────────
