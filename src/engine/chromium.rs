@@ -241,6 +241,28 @@ impl PageHandle for ChromiumPage {
         Ok(())
     }
 
+    async fn set_input_files(&self, selector: &str, files: &[String]) -> Result<(), crate::Error> {
+        use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
+
+        let element = self
+            .page
+            .find_element(selector)
+            .await
+            .map_err(|e| crate::Error::ActionFailed(format!("element not found: {e}")))?;
+
+        let cmd = SetFileInputFilesParams::builder()
+            .files(files.iter().map(String::as_str))
+            .backend_node_id(element.backend_node_id)
+            .build()
+            .map_err(|e| crate::Error::ActionFailed(format!("CDP command build failed: {e}")))?;
+
+        self.page.execute(cmd).await.map_err(|e| {
+            crate::Error::ActionFailed(format!("CDP setFileInputFiles failed: {e}"))
+        })?;
+
+        Ok(())
+    }
+
     async fn enable_network_monitoring(&self) -> Result<bool, crate::Error> {
         use chromiumoxide::cdp::browser_protocol::network::EnableParams;
         self.page

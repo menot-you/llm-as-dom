@@ -81,6 +81,23 @@ pub trait PageHandle: Send + Sync {
         cookies: &[crate::session::CookieEntry],
     ) -> Result<(), crate::Error>;
 
+    /// Set files on a `<input type="file">` element via CDP or engine-native API.
+    ///
+    /// `selector` is a CSS selector identifying the file input.
+    /// `files` are absolute file paths on the host filesystem.
+    ///
+    /// Default implementation returns an error — only engines with CDP
+    /// or equivalent support override this.
+    async fn set_input_files(
+        &self,
+        _selector: &str,
+        _files: &[String],
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::Backend(
+            "file upload not supported on this engine".into(),
+        ))
+    }
+
     /// Enable network traffic monitoring. Returns `false` if unsupported.
     async fn enable_network_monitoring(&self) -> Result<bool, crate::Error> {
         Ok(false)
