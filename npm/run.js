@@ -13,7 +13,7 @@ if (!fs.existsSync(binaryPath)) {
     `llm-as-dom: binary not found at ${binaryPath}\n` +
       `This usually means the postinstall download failed.\n` +
       `\nAlternatives:\n` +
-      `  cargo install llm-as-dom    # if you have Rust\n` +
+      `  cargo install example-org-mcp-lad    # if you have Rust\n` +
       `  curl -fsSL https://raw.githubusercontent.com/example-org/llm-as-dom/main/install.sh | sh\n`
   );
   process.exit(1);

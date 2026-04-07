@@ -7,10 +7,10 @@
 **Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
 
 [![CI](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
-[![docs.rs](https://docs.rs/llm-as-dom/badge.svg)](https://docs.rs/llm-as-dom)
-[![npm](https://img.shields.io/npm/v/llm-as-dom-mcp.svg)](https://www.npmjs.com/package/llm-as-dom-mcp)
-[![PyPI](https://img.shields.io/pypi/v/llm-as-dom-mcp.svg)](https://pypi.org/project/llm-as-dom-mcp/)
+[![crates.io](https://img.shields.io/crates/v/example-org-mcp-lad.svg)](https://crates.io/crates/example-org-mcp-lad)
+[![docs.rs](https://docs.rs/example-org-mcp-lad/badge.svg)](https://docs.rs/example-org-mcp-lad)
+[![npm](https://img.shields.io/npm/v/@example-org/mcp-lad.svg)](https://www.npmjs.com/package/@example-org/mcp-lad)
+[![PyPI](https://img.shields.io/pypi/v/example-org-mcp-lad.svg)](https://pypi.org/project/example-org-mcp-lad/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-nightly-orange.svg)](https://www.rust-lang.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-purple.svg)](https://modelcontextprotocol.io)
@@ -39,7 +39,7 @@ lad:          Claude → lad_browse("test login") → { success: true, steps: 3 
 ## Quick Start
 
 ```bash
-cargo install llm-as-dom
+cargo install example-org-mcp-lad
 
 # See what lad "sees" on your app
 lad --url "http://localhost:3000/login" --extract-only
@@ -292,7 +292,7 @@ The 3 extra WebKit elements are footer links that GitHub serves differently to S
 - **LLM fallback** (optional): Ollama with `qwen2.5:7b`
 
 ```bash
-cargo install llm-as-dom  # installs both lad and llm-as-dom-mcp
+cargo install example-org-mcp-lad  # installs both lad and llm-as-dom-mcp
 ```
 
 ## Architecture
