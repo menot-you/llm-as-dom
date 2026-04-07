@@ -1,0 +1,126 @@
+//! Navigation tools: `lad_back`, `lad_dialog`.
+
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::*;
+
+use crate::LadServer;
+use crate::helpers::{mcp_err, no_active_page};
+use crate::params::DialogParams;
+
+use llm_as_dom::pilot;
+
+impl LadServer {
+    /// Navigate back in browser history.
+    pub(crate) async fn tool_lad_back(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        tracing::info!("lad_back");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
+        }
+
+        // Wait for navigation to settle
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let view = self.refresh_active_view().await?;
+
+        // Update stored URL to match where we ended up
+        {
+            let mut active = self.active_page.lock().await;
+            if let Some(ap) = active.as_mut()
+                && let Ok(url) = ap.page.url().await
+            {
+                ap.url = url;
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
+    /// Handle JavaScript dialogs (alert, confirm, prompt).
+    pub(crate) async fn tool_lad_dialog(
+        &self,
+        params: Parameters<DialogParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(action = %p.action, text = ?p.text, "lad_dialog");
+
+        let active = self.active_page.lock().await;
+        let ap = active.as_ref().ok_or_else(no_active_page)?;
+
+        // Ensure dialog overrides are installed
+        let setup_js = r#"
+            if (!window.__lad_dialogs) {
+                window.__lad_dialogs = [];
+                window.__lad_dialog_auto = 'accept';
+                window.__lad_dialog_response = '';
+
+                window.alert = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'alert', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                };
+                window.confirm = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'confirm', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                    return window.__lad_dialog_auto === 'accept';
+                };
+                window.prompt = function(msg, def) {
+                    window.__lad_dialogs.push({
+                        type: 'prompt', message: String(msg),
+                        default: def || '', timestamp: Date.now()
+                    });
+                    if (window.__lad_dialog_auto !== 'accept') return null;
+                    return window.__lad_dialog_response || def || '';
+                };
+            }
+        "#;
+        ap.page.eval_js(setup_js).await.map_err(mcp_err)?;
+
+        match p.action.as_str() {
+            "accept" => {
+                let text_escaped = pilot::js_escape(p.text.as_deref().unwrap_or(""));
+                let js = format!(
+                    "window.__lad_dialog_auto = 'accept'; \
+                     window.__lad_dialog_response = '{text_escaped}';",
+                );
+                ap.page.eval_js(&js).await.map_err(mcp_err)?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "dialogs will be auto-accepted"}"#.to_string(),
+                )]))
+            }
+            "dismiss" => {
+                ap.page
+                    .eval_js("window.__lad_dialog_auto = 'dismiss';")
+                    .await
+                    .map_err(mcp_err)?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "dialogs will be auto-dismissed"}"#.to_string(),
+                )]))
+            }
+            "status" => {
+                let result = ap
+                    .page
+                    .eval_js("JSON.stringify(window.__lad_dialogs || [])")
+                    .await
+                    .map_err(mcp_err)?;
+                let text = result.as_str().unwrap_or("[]");
+                Ok(CallToolResult::success(vec![Content::text(
+                    text.to_string(),
+                )]))
+            }
+            other => Err(rmcp::ErrorData::invalid_params(
+                format!(
+                    "unknown dialog action '{}' — use 'accept', 'dismiss', or 'status'",
+                    other
+                ),
+                None,
+            )),
+        }
+    }
+}

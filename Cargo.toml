@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "llm-as-dom-mcp"
-path = "src/mcp_server.rs"
+path = "src/mcp_server/mod.rs"
 
 [dependencies]
 # Browser (CDP)
