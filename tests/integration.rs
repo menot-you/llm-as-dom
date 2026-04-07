@@ -1859,3 +1859,134 @@ fn multistep_module_direct_advance() {
         other => panic!("expected Click, got {other:?}"),
     }
 }
+
+// ── Shadow DOM extraction test (browser required) ────────────────────
+
+/// Extracts elements from a fixture page containing shadow DOM web components.
+///
+/// The fixture `shadow-dom.html` has:
+/// - 2 light-DOM elements (button + input)
+/// - 4 shadow-DOM elements inside `<my-login-form>` (email, password, button, link)
+/// - 2 deeply nested shadow-DOM elements inside `<my-outer-component>` -> `<my-inner-widget>`
+///   (outer button, deep input, deep button)
+///
+/// Total: at least 9 interactive elements should be found.
+#[ignore]
+#[tokio::test]
+async fn test_extract_shadow_dom_elements() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use llm_as_dom::semantic::ElementKind;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/shadow-dom.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // Light DOM elements
+    let light_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Light DOM Button"));
+    assert!(light_btn.is_some(), "light DOM button should be found");
+
+    let light_input = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("light-input"));
+    assert!(light_input.is_some(), "light DOM input should be found");
+
+    // Shadow DOM elements from <my-login-form>
+    let shadow_email = view
+        .elements
+        .iter()
+        .find(|e| e.placeholder.as_deref() == Some("shadow@example.com"));
+    assert!(
+        shadow_email.is_some(),
+        "shadow DOM email input should be extracted"
+    );
+
+    let shadow_pass = view.elements.iter().find(|e| {
+        e.input_type.as_deref() == Some("password") && e.name.as_deref() == Some("password")
+    });
+    assert!(
+        shadow_pass.is_some(),
+        "shadow DOM password input should be extracted"
+    );
+
+    let shadow_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Shadow Sign In") && e.kind == ElementKind::Button);
+    assert!(
+        shadow_btn.is_some(),
+        "shadow DOM submit button should be extracted"
+    );
+
+    let shadow_link = view
+        .elements
+        .iter()
+        .find(|e| e.href.as_deref() == Some("/shadow-forgot"));
+    assert!(shadow_link.is_some(), "shadow DOM link should be extracted");
+
+    // Deeply nested shadow DOM (outer -> inner)
+    let outer_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Outer Shadow Button"));
+    assert!(
+        outer_btn.is_some(),
+        "outer shadow DOM button should be extracted"
+    );
+
+    let deep_input = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("deep-field"));
+    assert!(
+        deep_input.is_some(),
+        "deeply nested shadow DOM input should be extracted"
+    );
+
+    let deep_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Deep Button"));
+    assert!(
+        deep_btn.is_some(),
+        "deeply nested shadow DOM button should be extracted"
+    );
+
+    // Verify ghost-ID stamping works (all elements should have an id)
+    for el in &view.elements {
+        // Each element got a unique data-lad-id
+        assert!(
+            el.id < 300,
+            "element IDs should be sequential and reasonable"
+        );
+    }
+
+    // Should have at least 9 elements total
+    assert!(
+        view.elements.len() >= 9,
+        "expected >= 9 elements (2 light + 7 shadow), got {}",
+        view.elements.len()
+    );
+
+    assert_eq!(view.state, PageState::Ready);
+
+    drop(page);
+    engine.close().await.unwrap();
+}

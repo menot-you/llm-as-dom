@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow DOM Test Page</title>
+  <style>
+    body { font-family: system-ui; padding: 2rem; }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Shadow DOM Component Test</h1>
+
+    <!-- Light DOM element (should always be found) -->
+    <button id="light-btn">Light DOM Button</button>
+    <input type="text" name="light-input" placeholder="Light DOM input">
+
+    <!-- Custom element with shadow DOM -->
+    <my-login-form></my-login-form>
+
+    <!-- Nested shadow DOM: outer -> inner -->
+    <my-outer-component></my-outer-component>
+  </div>
+
+  <script>
+    // ── my-login-form: shadow DOM with interactive elements ──
+    class MyLoginForm extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            .shadow-form { padding: 1rem; border: 2px solid #4a90d9; border-radius: 8px; margin: 1rem 0; }
+            label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.875rem; }
+            input { width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+            button { margin-top: 0.75rem; padding: 0.5rem 1rem; background: #4a90d9; color: white; border: none; border-radius: 4px; cursor: pointer; }
+          </style>
+          <div class="shadow-form">
+            <h2>Shadow Login</h2>
+            <form>
+              <label for="shadow-email">Email</label>
+              <input type="email" id="shadow-email" name="email" placeholder="shadow@example.com">
+              <label for="shadow-pass">Password</label>
+              <input type="password" id="shadow-pass" name="password" placeholder="Enter password">
+              <button type="submit">Shadow Sign In</button>
+            </form>
+            <a href="/shadow-forgot">Forgot password?</a>
+          </div>
+        `;
+      }
+    }
+    customElements.define('my-login-form', MyLoginForm);
+
+    // ── my-outer-component: nested shadow DOM ──
+    class MyOuterComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <div style="padding: 1rem; border: 2px solid #e74c3c; border-radius: 8px; margin: 1rem 0;">
+            <h3>Outer Shadow</h3>
+            <button id="outer-shadow-btn">Outer Shadow Button</button>
+            <my-inner-widget></my-inner-widget>
+          </div>
+        `;
+      }
+    }
+    customElements.define('my-outer-component', MyOuterComponent);
+
+    // ── my-inner-widget: deeply nested shadow DOM ──
+    class MyInnerWidget extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <div style="padding: 0.5rem; border: 1px dashed #999; border-radius: 4px; margin-top: 0.5rem;">
+            <label for="deep-input">Deep Input</label>
+            <input type="text" id="deep-input" name="deep-field" placeholder="Deeply nested">
+            <button id="deep-btn">Deep Button</button>
+          </div>
+        `;
+      }
+    }
+    customElements.define('my-inner-widget', MyInnerWidget);
+  </script>
+</body>
+</html>
