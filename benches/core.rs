@@ -28,6 +28,7 @@ fn input_element(
         form_index: form,
         context: None,
         hint: None,
+        frame_index: None,
     }
 }
 
@@ -45,6 +46,7 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         form_index: form,
         context: None,
         hint: None,
+        frame_index: None,
     }
 }
 
@@ -62,6 +64,7 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         form_index: None,
         context: None,
         hint: None,
+        frame_index: None,
     }
 }
 

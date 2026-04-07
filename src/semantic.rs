@@ -71,6 +71,9 @@ pub struct Element {
     /// Semantic hint from `@lad/hints` (`data-lad="field:email"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<ElementHint>,
+    /// Index of the iframe this element belongs to (`None` if in the main document).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_index: Option<u32>,
 }
 
 /// Semantic hint from `@lad/hints` (`data-lad="field:email"`).
@@ -180,6 +183,9 @@ impl SemanticView {
             }
             if let Some(hint) = &el.hint {
                 let _ = write!(out, " [hint:{}:{}]", hint.hint_type, hint.value);
+            }
+            if let Some(fi) = el.frame_index {
+                let _ = write!(out, " [iframe:{fi}]");
             }
             if el.disabled {
                 out.push_str(" [disabled]");

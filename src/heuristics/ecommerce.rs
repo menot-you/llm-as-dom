@@ -107,6 +107,7 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            frame_index: None,
         }
     }
 
@@ -124,6 +125,7 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            frame_index: None,
         }
     }
 

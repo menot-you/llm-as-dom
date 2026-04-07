@@ -81,78 +81,106 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 return true;
             }
 
-            // ── Collect visible elements ────────────────────────────────
-            for (const el of els) {
-                if (!isVisible(el)) continue;
+            // ── Collect visible elements from a list ───────────────────
+            function collectElements(elList, frameIdx) {
+                for (const el of elList) {
+                    if (!isVisible(el)) continue;
 
-                const tag = el.tagName.toLowerCase();
-                let kind = 'other';
-                if (tag === 'button' || el.getAttribute('role') === 'button' || (tag === 'input' && el.type === 'submit')) kind = 'button';
-                else if (tag === 'input' && el.type !== 'hidden') kind = 'input';
-                else if (tag === 'textarea') kind = 'textarea';
-                else if (tag === 'select') kind = 'select';
-                else if (tag === 'a') kind = 'link';
-                else if (el.getAttribute('role') === 'checkbox' || (tag === 'input' && el.type === 'checkbox')) kind = 'checkbox';
-                else if (el.getAttribute('role') === 'radio' || (tag === 'input' && el.type === 'radio')) kind = 'radio';
-                else if (el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'menuitem') kind = 'button';
+                    const tag = el.tagName.toLowerCase();
+                    let kind = 'other';
+                    if (tag === 'button' || el.getAttribute('role') === 'button' || (tag === 'input' && el.type === 'submit')) kind = 'button';
+                    else if (tag === 'input' && el.type !== 'hidden') kind = 'input';
+                    else if (tag === 'textarea') kind = 'textarea';
+                    else if (tag === 'select') kind = 'select';
+                    else if (tag === 'a') kind = 'link';
+                    else if (el.getAttribute('role') === 'checkbox' || (tag === 'input' && el.type === 'checkbox')) kind = 'checkbox';
+                    else if (el.getAttribute('role') === 'radio' || (tag === 'input' && el.type === 'radio')) kind = 'radio';
+                    else if (el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'menuitem') kind = 'button';
 
-                const ariaLabel = el.getAttribute('aria-label');
-                const labelEl = el.labels?.[0];
-                const labelText = labelEl?.textContent?.trim();
-                const placeholder = el.getAttribute('placeholder');
-                const textContent = el.textContent?.trim()?.substring(0, 80);
-                const elTitle = el.getAttribute('title');
-                const href = el.getAttribute('href') || '';
-                let label = (ariaLabel || labelText || placeholder || textContent || elTitle || '').replace(/\s+/g, ' ').trim();
-                if (!label && kind === 'link' && href) {
-                    label = href.split('/').filter(Boolean).pop() || '';
-                }
-
-                const closestForm = el.closest('form');
-                const formIndex = closestForm ? (formMap.get(closestForm) ?? null) : null;
-
-                // ── Relevance score (used when cap triggers) ────────────
-                let score = 0;
-                if (closestForm) score += 3;
-                if (kind === 'input' || kind === 'textarea' || kind === 'select'
-                    || kind === 'checkbox' || kind === 'radio') score += 5;
-                if (kind === 'button') score += 4;
-                if (tag === 'input' && el.type === 'submit') score += 2;
-                if (ariaLabel) score += 2;
-                if (kind === 'link') {
-                    if (href === '#' || href.startsWith('#')) score -= 2;
-                    const lcHref = href.toLowerCase();
-                    if (lcHref.includes('facebook.com') || lcHref.includes('twitter.com')
-                        || lcHref.includes('instagram.com') || lcHref.includes('linkedin.com')
-                        || lcHref.includes('youtube.com') || lcHref.includes('tiktok.com')) score -= 3;
-                }
-
-                // ── @lad/hints detection ─────────────────────────────
-                let hintType = null;
-                let hintValue = null;
-                const ladHint = el.getAttribute('data-lad');
-                if (ladHint) {
-                    const colonIdx = ladHint.indexOf(':');
-                    if (colonIdx > 0) {
-                        hintType = ladHint.substring(0, colonIdx);
-                        hintValue = ladHint.substring(colonIdx + 1);
+                    const ariaLabel = el.getAttribute('aria-label');
+                    const labelEl = el.labels?.[0];
+                    const labelText = labelEl?.textContent?.trim();
+                    const placeholder = el.getAttribute('placeholder');
+                    const textContent = el.textContent?.trim()?.substring(0, 80);
+                    const elTitle = el.getAttribute('title');
+                    const href = el.getAttribute('href') || '';
+                    let label = (ariaLabel || labelText || placeholder || textContent || elTitle || '').replace(/\s+/g, ' ').trim();
+                    if (!label && kind === 'link' && href) {
+                        label = href.split('/').filter(Boolean).pop() || '';
                     }
-                }
 
-                rawElements.push({
-                    el, kind, label: label.substring(0, 80),
-                    name: el.getAttribute('name') || null,
-                    value: el.value || null,
-                    placeholder: placeholder || null,
-                    href: href || null,
-                    input_type: el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
-                    disabled: el.disabled || false,
-                    form_index: formIndex,
-                    hint_type: hintType,
-                    hint_value: hintValue,
-                    score,
-                    isActionable: kind !== 'link' && kind !== 'other',
-                });
+                    const closestForm = el.closest('form');
+                    const formIndex = closestForm ? (formMap.get(closestForm) ?? null) : null;
+
+                    // ── Relevance score (used when cap triggers) ────────
+                    let score = 0;
+                    if (closestForm) score += 3;
+                    if (kind === 'input' || kind === 'textarea' || kind === 'select'
+                        || kind === 'checkbox' || kind === 'radio') score += 5;
+                    if (kind === 'button') score += 4;
+                    if (tag === 'input' && el.type === 'submit') score += 2;
+                    if (ariaLabel) score += 2;
+                    if (kind === 'link') {
+                        if (href === '#' || href.startsWith('#')) score -= 2;
+                        const lcHref = href.toLowerCase();
+                        if (lcHref.includes('facebook.com') || lcHref.includes('twitter.com')
+                            || lcHref.includes('instagram.com') || lcHref.includes('linkedin.com')
+                            || lcHref.includes('youtube.com') || lcHref.includes('tiktok.com')) score -= 3;
+                    }
+
+                    // ── @lad/hints detection ─────────────────────────
+                    let hintType = null;
+                    let hintValue = null;
+                    const ladHint = el.getAttribute('data-lad');
+                    if (ladHint) {
+                        const colonIdx = ladHint.indexOf(':');
+                        if (colonIdx > 0) {
+                            hintType = ladHint.substring(0, colonIdx);
+                            hintValue = ladHint.substring(colonIdx + 1);
+                        }
+                    }
+
+                    rawElements.push({
+                        el, kind, label: label.substring(0, 80),
+                        name: el.getAttribute('name') || null,
+                        value: el.value || null,
+                        placeholder: placeholder || null,
+                        href: href || null,
+                        input_type: el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
+                        disabled: el.disabled || false,
+                        form_index: formIndex,
+                        hint_type: hintType,
+                        hint_value: hintValue,
+                        frame_index: frameIdx,
+                        score,
+                        isActionable: kind !== 'link' && kind !== 'other',
+                    });
+                }
+            }
+
+            // Collect from main document (including shadow DOM)
+            collectElements(els, null);
+
+            // ── iframe same-origin traversal ───────────────────────────
+            const iframes = document.querySelectorAll('iframe');
+            for (let fi = 0; fi < iframes.length; fi++) {
+                try {
+                    const iframeDoc = iframes[fi].contentDocument;
+                    if (!iframeDoc) continue;
+                    // Same-origin iframe accessible — collect elements
+                    const iframeEls = deepQueryAll(iframeDoc, selectors);
+                    collectElements(iframeEls, fi);
+                    // Also collect forms from iframe
+                    const iframeForms = deepQueryAll(iframeDoc, 'form');
+                    iframeForms.forEach(f => {
+                        if (!formMap.has(f)) {
+                            const idx = formMap.size;
+                            formMap.set(f, idx);
+                        }
+                    });
+                } catch(_) {
+                    // Cross-origin iframe — silently skip
+                }
             }
 
             // ── Element cap: keep top MAX_ELEMENTS by score ─────────────
@@ -185,6 +213,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                     form_index: raw.form_index,
                     hint_type: raw.hint_type,
                     hint_value: raw.hint_value,
+                    frame_index: raw.frame_index,
                 });
                 id++;
             }
@@ -256,6 +285,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 form_index: e.form_index,
                 context: None,
                 hint,
+                frame_index: e.frame_index,
             }
         })
         .collect();
@@ -341,6 +371,9 @@ struct JsElement {
     hint_type: Option<String>,
     /// `@lad/hints` hint value (e.g. `"email"`, `"login"`, `"submit"`).
     hint_value: Option<String>,
+    /// Index of the iframe this element belongs to (`null` if in the main document).
+    #[serde(default)]
+    frame_index: Option<u32>,
 }
 
 /// Map a JS kind string to the strongly-typed [`ElementKind`].
