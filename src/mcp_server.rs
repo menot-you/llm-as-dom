@@ -2,13 +2,15 @@
 //!
 //! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
 //! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
-//! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`.
+//! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`, `lad_screenshot`,
+//! `lad_wait`, `lad_network`.
 
 use llm_as_dom::engine::chromium::ChromiumEngine;
 use llm_as_dom::engine::webkit::WebKitEngine;
 use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
-use llm_as_dom::{a11y, audit, backend, locate, pilot, semantic, watch};
+use llm_as_dom::{a11y, audit, backend, locate, network, pilot, semantic, watch};
 
+use base64::Engine as _;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -147,6 +149,38 @@ struct PressKeyParams {
     key: String,
     /// Optional element ID from snapshot to focus before pressing the key.
     element: Option<u32>,
+}
+
+/// Parameters for the `lad_wait` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct WaitParams {
+    /// Natural language condition, e.g. "has button Dashboard", "title contains Welcome".
+    condition: String,
+    /// Max wait time in ms (default: 10000).
+    #[serde(default = "default_wait_timeout")]
+    timeout_ms: u64,
+    /// Poll interval in ms (default: 500).
+    #[serde(default = "default_wait_poll")]
+    poll_ms: u64,
+}
+
+fn default_wait_timeout() -> u64 {
+    10_000
+}
+fn default_wait_poll() -> u64 {
+    500
+}
+
+/// Parameters for the `lad_network` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct NetworkParams {
+    /// Filter by request kind: "auth", "api", "navigation", "asset", or "all" (default).
+    #[serde(default = "default_network_filter")]
+    filter: String,
+}
+
+fn default_network_filter() -> String {
+    "all".to_string()
 }
 
 // ── Active page (persistent across snapshot -> click/type/select) ─
@@ -388,6 +422,7 @@ impl LadServer {
                 url: url.to_owned(),
                 interval_ms,
                 initial_view,
+                peer: Some(Arc::clone(&self.peer)),
             },
             extract_fn,
         );
@@ -1148,6 +1183,146 @@ impl LadServer {
             view.to_prompt(),
         )]))
     }
+
+    // ── W2: lad_screenshot ──────────────────────────────────────
+
+    /// Take a screenshot of the active page.
+    #[tool(
+        description = "Take a screenshot of the active page. Returns a base64-encoded PNG image. Requires a prior lad_snapshot or lad_browse call."
+    )]
+    async fn lad_screenshot(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        tracing::info!("lad_screenshot");
+        let guard = self.active_page.lock().await;
+        let active = guard.as_ref().ok_or_else(no_active_page)?;
+        let png = active.page.screenshot_png().await.map_err(mcp_err)?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        Ok(CallToolResult::success(vec![Content::image(
+            b64,
+            "image/png",
+        )]))
+    }
+
+    // ── W2: lad_wait ────────────────────────────────────────────
+
+    /// Wait for a condition to be true on the active page.
+    #[tool(
+        description = "Wait for a condition to be true on the active page. Uses natural language conditions like lad_assert but blocks until satisfied or timeout. Default timeout: 10s, poll interval: 500ms."
+    )]
+    async fn lad_wait(
+        &self,
+        params: Parameters<WaitParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(condition = %p.condition, timeout_ms = p.timeout_ms, "lad_wait");
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(p.timeout_ms);
+        let poll_dur = std::time::Duration::from_millis(p.poll_ms);
+        let cond_lower = p.condition.to_lowercase();
+
+        loop {
+            let view = self.refresh_active_view().await?;
+            let prompt_text = view.to_prompt();
+            if check_assertion(&cond_lower, &view, &prompt_text) {
+                return Ok(CallToolResult::success(vec![Content::text(
+                    view.to_prompt(),
+                )]));
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Err(rmcp::ErrorData::internal_error(
+                    format!(
+                        "timeout after {}ms waiting for condition: {}",
+                        p.timeout_ms, p.condition
+                    ),
+                    None,
+                ));
+            }
+
+            tokio::time::sleep(poll_dur).await;
+        }
+    }
+
+    // ── W2: lad_network ─────────────────────────────────────────
+
+    /// Inspect network traffic captured during browsing.
+    #[tool(
+        description = "Inspect network traffic captured during browsing. Uses performance.getEntries() to collect requests with timing data. Optionally filter by type: auth, api, navigation, asset, all."
+    )]
+    async fn lad_network(
+        &self,
+        params: Parameters<NetworkParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(filter = %p.filter, "lad_network");
+
+        let guard = self.active_page.lock().await;
+        let active = guard.as_ref().ok_or_else(no_active_page)?;
+
+        // Use performance.getEntries() to gather network timing data via JS.
+        let js = r#"JSON.stringify(
+            performance.getEntriesByType('resource').concat(
+                performance.getEntriesByType('navigation')
+            ).map(e => ({
+                url: e.name,
+                type: e.initiatorType || e.entryType,
+                duration_ms: Math.round(e.duration),
+                transfer_size: e.transferSize || 0,
+                start_ms: Math.round(e.startTime)
+            }))
+        )"#;
+
+        let raw_value = active.page.eval_js(js).await.map_err(mcp_err)?;
+        let json_str = raw_value
+            .as_str()
+            .ok_or_else(|| mcp_err("performance.getEntries() returned non-string"))?;
+
+        let entries: Vec<serde_json::Value> = serde_json::from_str(json_str)
+            .map_err(|e| mcp_err(format!("parse performance entries: {e}")))?;
+
+        // Build a NetworkCapture from JS entries for classification.
+        let mut capture = network::NetworkCapture::new();
+        for (i, entry) in entries.iter().enumerate() {
+            let url = entry["url"].as_str().unwrap_or("").to_string();
+            // performance entries don't carry HTTP method; default to GET.
+            let method = "GET";
+            capture.on_request(i.to_string(), url, method.to_string(), None);
+        }
+
+        let summary = capture.summary();
+        let filter_kind = match p.filter.as_str() {
+            "auth" => Some(network::RequestKind::Auth),
+            "api" => Some(network::RequestKind::Api),
+            "navigation" => Some(network::RequestKind::Navigation),
+            "asset" => Some(network::RequestKind::Asset),
+            _ => None,
+        };
+
+        let filtered: Vec<&network::CapturedRequest> = if let Some(kind) = filter_kind {
+            capture
+                .requests
+                .values()
+                .filter(|r| r.kind == kind)
+                .collect()
+        } else {
+            capture.requests.values().collect()
+        };
+
+        let output = serde_json::json!({
+            "summary": summary,
+            "filter": p.filter,
+            "count": filtered.len(),
+            "requests": filtered.iter().map(|r| serde_json::json!({
+                "url": r.url,
+                "kind": r.kind,
+                "method": r.method,
+                "timestamp_ms": r.timestamp_ms,
+            })).collect::<Vec<_>>(),
+        });
+
+        Ok(CallToolResult::success(vec![Content::text(
+            to_pretty_json(&output),
+        )]))
+    }
 }
 
 /// Evaluate a single assertion against a semantic view.
@@ -1300,7 +1475,7 @@ impl ServerHandler for LadServer {
                 .enable_resources_subscribe()
                 .build(),
         )
-        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 
     async fn initialize(
@@ -1623,5 +1798,55 @@ mod tests {
         assert_eq!(key_to_code("End"), "End");
         assert_eq!(key_to_code("PageUp"), "PageUp");
         assert_eq!(key_to_code("PageDown"), "PageDown");
+    }
+
+    // ── W2: lad_wait assertion reuse tests ──────────────────────
+
+    #[test]
+    fn check_assertion_title_contains() {
+        let mut view = empty_view();
+        view.title = "Welcome to Dashboard".into();
+        assert!(check_assertion("title contains dashboard", &view, ""));
+        assert!(!check_assertion("title contains settings", &view, ""));
+    }
+
+    #[test]
+    fn check_assertion_url_contains() {
+        let mut view = empty_view();
+        view.url = "https://example.com/dashboard".into();
+        assert!(check_assertion("url contains dashboard", &view, ""));
+        assert!(!check_assertion("url contains settings", &view, ""));
+    }
+
+    #[test]
+    fn check_assertion_visible_text_fallback() {
+        let mut view = empty_view();
+        view.visible_text = "Loading complete. Welcome back, user!".into();
+        assert!(check_assertion("welcome back", &view, ""));
+        assert!(!check_assertion("error occurred", &view, ""));
+    }
+
+    // ── W2: param defaults ──────────────────────────────────────
+
+    #[test]
+    fn wait_params_defaults() {
+        let json = r#"{"condition":"has button submit"}"#;
+        let p: WaitParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.timeout_ms, 10_000);
+        assert_eq!(p.poll_ms, 500);
+    }
+
+    #[test]
+    fn network_params_defaults() {
+        let json = r#"{}"#;
+        let p: NetworkParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.filter, "all");
+    }
+
+    #[test]
+    fn network_params_custom_filter() {
+        let json = r#"{"filter":"auth"}"#;
+        let p: NetworkParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.filter, "auth");
     }
 }
