@@ -1,23 +1,23 @@
 <div align="center">
 
-# lad
+# LLM-as-DOM
 
-### Your AI agent's browser
+## Your AI agent's browser
 
 **Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
 
 [![CI](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/menot-you-mcp-lad.svg)](https://crates.io/crates/menot-you-mcp-lad)
 [![docs.rs](https://docs.rs/menot-you-mcp-lad/badge.svg)](https://docs.rs/menot-you-mcp-lad)
+
+[![crates.io](https://img.shields.io/crates/v/menot-you-mcp-lad.svg)](https://crates.io/crates/menot-you-mcp-lad)
 [![npm](https://img.shields.io/npm/v/@menot-you/mcp-lad.svg)](https://www.npmjs.com/package/@menot-you/mcp-lad)
 [![PyPI](https://img.shields.io/pypi/v/menot-you-mcp-lad.svg)](https://pypi.org/project/menot-you-mcp-lad/)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+
 [![Rust 1.85+](https://img.shields.io/badge/rust-nightly-orange.svg)](https://www.rust-lang.org)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-purple.svg)](https://modelcontextprotocol.io)
 
 [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
-
-![lad demo](assets/demo.gif)
 
 </div>
 
