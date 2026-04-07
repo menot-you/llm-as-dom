@@ -128,44 +128,8 @@ jobs:
           name: llm-benchmark-results
           path: bench/results.json
 
-  # ── Auto-tag on main ───────────────────────────────────────────────
-  auto-tag:
-    name: auto-tag release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, build, fixture-tests, integration]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      created: ${{ steps.tag.outputs.created }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract version from VERSION file
-        id: version
-        run: |
-          VERSION=$(cat VERSION)
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Detected version: ${VERSION}"
-
-      - name: Create tag if not exists
-        id: tag
-        run: |
-          TAG="v${{ steps.version.outputs.version }}"
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists — skipping"
-            echo "created=false" >> "$GITHUB_OUTPUT"
-          else
-            git tag "${TAG}"
-            git push origin "${TAG}"
-            echo "Created tag ${TAG}"
-            echo "created=true" >> "$GITHUB_OUTPUT"
-          fi
-
   # ── Release (cross-platform binaries) ──────────────────────────────
+  # Tags are created by release.yml (workflow_dispatch), not auto-tag.
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/v')
