@@ -97,6 +97,11 @@ pub async fn execute_action(
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
         Action::Navigate { url, .. } => {
+            if !crate::sanitize::is_safe_url(url) {
+                return Err(crate::Error::ActionFailed(format!(
+                    "blocked navigation to unsafe URL: {url}"
+                )));
+            }
             page.navigate(url).await?;
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
