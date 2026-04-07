@@ -1,7 +1,8 @@
 //! `llm-as-dom-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
 //! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
-//! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`.
+//! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
+//! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`.
 
 use llm_as_dom::engine::chromium::ChromiumEngine;
 use llm_as_dom::engine::webkit::WebKitEngine;
@@ -130,6 +131,22 @@ struct SelectParams {
     element: u32,
     /// Value to select.
     value: String,
+}
+
+/// Parameters for the `lad_eval` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct EvalParams {
+    /// JavaScript expression to evaluate on the active page.
+    script: String,
+}
+
+/// Parameters for the `lad_press_key` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct PressKeyParams {
+    /// Key name: "Enter", "Tab", "Escape", "ArrowDown", "ArrowUp", "Backspace", "Delete", "Space".
+    key: String,
+    /// Optional element ID from snapshot to focus before pressing the key.
+    element: Option<u32>,
 }
 
 // ── Active page (persistent across snapshot -> click/type/select) ─
@@ -422,6 +439,43 @@ fn check_js_result(value: &serde_json::Value) -> Result<(), rmcp::ErrorData> {
         return Err(rmcp::ErrorData::invalid_params(err.to_string(), None));
     }
     Ok(())
+}
+
+/// Map a key name to its `KeyboardEvent.code` string.
+///
+/// Standard keys (Enter, Tab, Escape, arrows, etc.) have well-known codes.
+/// For single characters, the code is `Key{UPPER}`.
+/// Unknown keys fall back to the key name itself.
+fn key_to_code(key: &str) -> &str {
+    match key {
+        "Enter" => "Enter",
+        "Tab" => "Tab",
+        "Escape" => "Escape",
+        "Backspace" => "Backspace",
+        "Delete" => "Delete",
+        "Space" | " " => "Space",
+        "ArrowUp" => "ArrowUp",
+        "ArrowDown" => "ArrowDown",
+        "ArrowLeft" => "ArrowLeft",
+        "ArrowRight" => "ArrowRight",
+        "Home" => "Home",
+        "End" => "End",
+        "PageUp" => "PageUp",
+        "PageDown" => "PageDown",
+        "F1" => "F1",
+        "F2" => "F2",
+        "F3" => "F3",
+        "F4" => "F4",
+        "F5" => "F5",
+        "F6" => "F6",
+        "F7" => "F7",
+        "F8" => "F8",
+        "F9" => "F9",
+        "F10" => "F10",
+        "F11" => "F11",
+        "F12" => "F12",
+        _ => key,
+    }
 }
 
 // ── Tool implementations ───────────────────────────────────────────
@@ -891,6 +945,144 @@ impl LadServer {
             view.to_prompt(),
         )]))
     }
+
+    // ── W1-escape: lad_eval ──────────────────────────────────────
+
+    /// Evaluate arbitrary JavaScript on the active page.
+    /// This is an escape hatch for when semantic tools cannot handle
+    /// a specific interaction.
+    #[tool(
+        description = "Evaluate arbitrary JavaScript on the active page. This is an escape hatch for when semantic tools (browse, click, type) cannot handle a specific interaction. Requires a prior lad_snapshot or lad_browse call. Returns the raw JS result."
+    )]
+    async fn lad_eval(
+        &self,
+        params: Parameters<EvalParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(script = %p.script, "lad_eval");
+
+        let active = self.active_page.lock().await;
+        let ap = active.as_ref().ok_or_else(no_active_page)?;
+        let result = ap.page.eval_js(&p.script).await.map_err(mcp_err)?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            to_pretty_json(&result),
+        )]))
+    }
+
+    // ── W1-escape: lad_close ─────────────────────────────────────
+
+    /// Close the browser and release all resources.
+    #[tool(
+        description = "Close the browser and release all resources. Use this when done with browser automation to prevent resource leaks."
+    )]
+    async fn lad_close(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        tracing::info!("lad_close");
+
+        // Clear active page first
+        *self.active_page.lock().await = None;
+
+        // Close the engine if one was launched
+        let mut engine_lock = self.engine.lock().await;
+        if let Some(engine) = engine_lock.take() {
+            engine.close().await.map_err(mcp_err)?;
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(
+            r#"{"status": "browser closed"}"#.to_string(),
+        )]))
+    }
+
+    // ── W1-escape: lad_press_key ─────────────────────────────────
+
+    /// Press a keyboard key on the active page.
+    /// Optionally focus an element first by its ID from a prior snapshot.
+    #[tool(
+        description = "Press a keyboard key on the active page. Optionally focus an element first by its ID from a prior snapshot. Common keys: Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, Delete, Space."
+    )]
+    async fn lad_press_key(
+        &self,
+        params: Parameters<PressKeyParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(key = %p.key, element = ?p.element, "lad_press_key");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+
+            // If element specified, focus it first
+            if let Some(id) = p.element {
+                let focus_js = format!(
+                    r#"(() => {{
+                        const el = document.querySelector('[data-lad-id="{}"]');
+                        if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                        el.focus();
+                        return JSON.stringify({{ ok: true }});
+                    }})()"#,
+                    id, id
+                );
+                check_js_result(&ap.page.eval_js(&focus_js).await.map_err(mcp_err)?)?;
+            }
+
+            // Dispatch keyboard event sequence: keydown, keypress, keyup
+            let code = key_to_code(&p.key);
+            let key_escaped = p.key.replace('\\', "\\\\").replace('\'', "\\'");
+            let code_escaped = code.replace('\\', "\\\\").replace('\'', "\\'");
+            let js = format!(
+                r#"(() => {{
+                    const target = document.activeElement || document.body;
+                    for (const type of ['keydown', 'keypress', 'keyup']) {{
+                        target.dispatchEvent(new KeyboardEvent(type, {{
+                            key: '{}', code: '{}', bubbles: true, cancelable: true
+                        }}));
+                    }}
+                }})()"#,
+                key_escaped, code_escaped
+            );
+            ap.page.eval_js(&js).await.map_err(mcp_err)?;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
+    // ── W1-escape: lad_back ──────────────────────────────────────
+
+    /// Navigate back in browser history.
+    #[tool(
+        description = "Navigate back in browser history (equivalent to clicking the back button). Returns the semantic view of the previous page."
+    )]
+    async fn lad_back(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        tracing::info!("lad_back");
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
+        }
+
+        // Wait for navigation to settle
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let view = self.refresh_active_view().await?;
+
+        // Update stored URL to match where we ended up
+        {
+            let mut active = self.active_page.lock().await;
+            if let Some(ap) = active.as_mut()
+                && let Ok(url) = ap.page.url().await
+            {
+                ap.url = url;
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
 }
 
 /// Evaluate a single assertion against a semantic view.
@@ -1037,7 +1229,7 @@ fn fuzzy_label_match(element_label: &str, target: &str) -> bool {
 impl ServerHandler for LadServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction.")
+            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 }
 
@@ -1257,5 +1449,46 @@ mod tests {
     fn check_js_result_err() {
         let err = serde_json::json!(r#"{"error":"element 5 not found"}"#);
         assert!(check_js_result(&err).is_err());
+    }
+
+    // ── Escape hatch helper tests ────────────────────────────────
+
+    #[test]
+    fn key_to_code_standard_keys() {
+        assert_eq!(key_to_code("Enter"), "Enter");
+        assert_eq!(key_to_code("Tab"), "Tab");
+        assert_eq!(key_to_code("Escape"), "Escape");
+        assert_eq!(key_to_code("Backspace"), "Backspace");
+        assert_eq!(key_to_code("Delete"), "Delete");
+        assert_eq!(key_to_code("Space"), "Space");
+        assert_eq!(key_to_code(" "), "Space");
+    }
+
+    #[test]
+    fn key_to_code_arrow_keys() {
+        assert_eq!(key_to_code("ArrowUp"), "ArrowUp");
+        assert_eq!(key_to_code("ArrowDown"), "ArrowDown");
+        assert_eq!(key_to_code("ArrowLeft"), "ArrowLeft");
+        assert_eq!(key_to_code("ArrowRight"), "ArrowRight");
+    }
+
+    #[test]
+    fn key_to_code_function_keys() {
+        assert_eq!(key_to_code("F1"), "F1");
+        assert_eq!(key_to_code("F12"), "F12");
+    }
+
+    #[test]
+    fn key_to_code_unknown_falls_back() {
+        assert_eq!(key_to_code("a"), "a");
+        assert_eq!(key_to_code("Shift"), "Shift");
+    }
+
+    #[test]
+    fn key_to_code_navigation_keys() {
+        assert_eq!(key_to_code("Home"), "Home");
+        assert_eq!(key_to_code("End"), "End");
+        assert_eq!(key_to_code("PageUp"), "PageUp");
+        assert_eq!(key_to_code("PageDown"), "PageDown");
     }
 }
