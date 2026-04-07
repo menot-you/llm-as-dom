@@ -1,6 +1,6 @@
 [package]
 name = "llm-as-dom"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "AI browser pilot — test your app 60x cheaper. Heuristics + cheap LLM navigate so expensive models never parse HTML."
 license = "AGPL-3.0-or-later"
