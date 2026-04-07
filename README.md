@@ -6,9 +6,14 @@
 
 **Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
 
-[![CI](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/menot-you/llm-as-dom/actions)
-[![Crates.io](https://img.shields.io/crates/v/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
+[![CI](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/llm-as-dom.svg)](https://crates.io/crates/llm-as-dom)
+[![docs.rs](https://docs.rs/llm-as-dom/badge.svg)](https://docs.rs/llm-as-dom)
+[![npm](https://img.shields.io/npm/v/llm-as-dom-mcp.svg)](https://www.npmjs.com/package/llm-as-dom-mcp)
+[![PyPI](https://img.shields.io/pypi/v/llm-as-dom-mcp.svg)](https://pypi.org/project/llm-as-dom-mcp/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Rust 1.85+](https://img.shields.io/badge/rust-nightly-orange.svg)](https://www.rust-lang.org)
+[![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-purple.svg)](https://modelcontextprotocol.io)
 
 [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Benchmarks](#benchmarks)
 
