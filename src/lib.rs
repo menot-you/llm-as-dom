@@ -17,6 +17,7 @@ pub mod observer;
 pub mod pilot;
 pub mod playbook;
 pub mod profile;
+pub mod sanitize;
 pub mod selector;
 pub mod semantic;
 pub mod session;

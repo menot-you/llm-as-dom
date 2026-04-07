@@ -317,6 +317,9 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
         session_context: None,
     };
 
+    // ── Security: strip steganographic characters + mask passwords ──
+    sanitize_view(&mut view);
+
     // Detect bot-challenge / CAPTCHA pages after extraction.
     if let Some(reason) = detect_bot_challenge(&view) {
         tracing::warn!(reason = %reason, "bot challenge detected");
@@ -582,6 +585,35 @@ pub fn classify_challenge(reason: &str) -> ChallengeKind {
     } else {
         // Default to interactive captcha (safe fallback).
         ChallengeKind::Captcha
+    }
+}
+
+// ── Steganographic sanitization ───────────────────────────────────
+
+/// Strip steganographic characters and mask sensitive values in a
+/// [`SemanticView`] before any LLM sees the data.
+fn sanitize_view(view: &mut SemanticView) {
+    use crate::sanitize::{mask_sensitive_value, sanitize_text};
+
+    view.title = sanitize_text(&view.title);
+    view.visible_text = sanitize_text(&view.visible_text);
+
+    for el in &mut view.elements {
+        el.label = sanitize_text(&el.label);
+        if let Some(ref ph) = el.placeholder {
+            el.placeholder = Some(sanitize_text(ph));
+        }
+        if let Some(ref ctx) = el.context {
+            el.context = Some(sanitize_text(ctx));
+        }
+        // Mask passwords, sanitize other values
+        el.value = mask_sensitive_value(el.input_type.as_deref(), el.value.as_deref());
+        // Sanitize remaining non-masked values
+        if el.input_type.as_deref() != Some("password")
+            && let Some(ref v) = el.value
+        {
+            el.value = Some(sanitize_text(v));
+        }
     }
 }
 
