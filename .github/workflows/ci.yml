@@ -144,10 +144,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract version from Cargo.toml
+      - name: Extract version from VERSION file
         id: version
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(cat VERSION)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Detected version: ${VERSION}"
 
@@ -273,9 +273,9 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
-      - name: Sync version from Cargo.toml
+      - name: Sync version from VERSION file
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(cat VERSION)
           cd npm
           node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
 
@@ -297,11 +297,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync version from Cargo.toml
+      - name: Sync version from VERSION file
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(cat VERSION)
           sed -i "s/^version = .*/version = \"${VERSION}\"/" python/pyproject.toml
-          sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" python/llm_as_dom_mcp/__init__.py
+          sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" python/menot_you_mcp_lad/__init__.py
 
       - name: Build and publish
         env:
