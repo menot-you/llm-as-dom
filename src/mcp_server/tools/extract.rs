@@ -11,6 +11,11 @@ impl LadServer {
     /// Extract structured information from a web page.
     /// Returns interactive elements, visible text, page classification.
     /// Never returns raw HTML.
+    ///
+    /// FIX-18: The `what` parameter now filters elements by relevance.
+    /// Elements whose label, name, placeholder, or href contain any word
+    /// from `what` are promoted to the front; all elements are still
+    /// returned but `relevant_count` tells the caller how many matched.
     pub(crate) async fn tool_lad_extract(
         &self,
         params: Parameters<ExtractParams>,
@@ -28,11 +33,46 @@ impl LadServer {
             view.visible_text.truncate(end);
         }
 
+        // FIX-18: Score elements by relevance to `what` and sort.
+        let what_lower = p.what.to_lowercase();
+        let what_words: Vec<&str> = what_lower.split_whitespace().collect();
+
+        let relevance_score = |el: &llm_as_dom::semantic::Element| -> u32 {
+            if what_words.is_empty() {
+                return 0;
+            }
+            let fields = [
+                el.label.to_lowercase(),
+                el.name.as_deref().unwrap_or("").to_lowercase(),
+                el.placeholder.as_deref().unwrap_or("").to_lowercase(),
+                el.href.as_deref().unwrap_or("").to_lowercase(),
+            ];
+            let mut score = 0u32;
+            for word in &what_words {
+                for field in &fields {
+                    if field.contains(word) {
+                        score += 1;
+                    }
+                }
+            }
+            score
+        };
+
+        // Sort relevant elements first (stable sort preserves DOM order within same score).
+        view.elements
+            .sort_by_key(|el| std::cmp::Reverse(relevance_score(el)));
+        let relevant_count = view
+            .elements
+            .iter()
+            .filter(|el| relevance_score(el) > 0)
+            .count();
+
         let output = serde_json::json!({
             "url": view.url,
             "title": view.title,
             "page_type": view.page_hint,
             "elements_count": view.elements.len(),
+            "relevant_count": relevant_count,
             "estimated_tokens": view.estimated_tokens(),
             "elements": view.elements,
             "forms": view.forms,

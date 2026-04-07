@@ -187,10 +187,12 @@ fn extract_selector_text(goal: &str) -> Option<String> {
     }
 
     // Natural language after action verb: "click the login button"
+    // FIX-16: Use `lower` instead of `goal` when slicing to avoid
+    // byte-index panics on non-ASCII goals.
     let prefixes = ["click ", "go to ", "navigate to ", "open ", "press "];
     for prefix in &prefixes {
         if let Some(pos) = lower.find(prefix) {
-            let rest = goal[pos + prefix.len()..].trim();
+            let rest = lower[pos + prefix.len()..].trim();
             if !rest.is_empty() {
                 return Some(rest.to_string());
             }
@@ -199,7 +201,7 @@ fn extract_selector_text(goal: &str) -> Option<String> {
 
     // "type X into Y" / "enter X into Y" / "fill Y with X"
     if let Some(pos) = lower.find(" into ") {
-        let rest = goal[pos + " into ".len()..].trim();
+        let rest = lower[pos + " into ".len()..].trim();
         if !rest.is_empty() {
             return Some(rest.to_string());
         }
@@ -214,13 +216,15 @@ fn extract_selector_text(goal: &str) -> Option<String> {
 /// - `type "hello" into [name=q]` → `hello`
 /// - `type hello into .search` → `hello`
 /// - `enter foo into bar` → `foo`
+///
+/// FIX-16: Uses `lower` consistently to avoid byte-index panics on non-ASCII.
 fn extract_type_value(goal: &str) -> String {
     let lower = goal.to_lowercase();
 
     // "type X into Y" pattern
     for verb in &["type ", "enter ", "fill "] {
         if let Some(verb_pos) = lower.find(verb) {
-            let after_verb = &goal[verb_pos + verb.len()..];
+            let after_verb = &lower[verb_pos + verb.len()..];
 
             // Quoted value: type "hello world" into ...
             if after_verb.starts_with('"') || after_verb.starts_with('\'') {
@@ -231,7 +235,7 @@ fn extract_type_value(goal: &str) -> String {
             }
 
             // Unquoted: type hello into ...
-            if let Some(into_pos) = after_verb.to_lowercase().find(" into ") {
+            if let Some(into_pos) = after_verb.find(" into ") {
                 let val = after_verb[..into_pos].trim();
                 if !val.is_empty() {
                     return val.to_string();

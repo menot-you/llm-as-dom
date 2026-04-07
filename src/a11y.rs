@@ -600,16 +600,30 @@ fn sanitize_view(view: &mut SemanticView) {
 
     for el in &mut view.elements {
         el.label = sanitize_text(&el.label);
+        // FIX-3: sanitize name, href, context, and input_type — these flow
+        // into to_prompt() raw and could carry steganographic payloads.
+        if let Some(ref name) = el.name {
+            el.name = Some(sanitize_text(name));
+        }
+        if let Some(ref href) = el.href {
+            el.href = Some(sanitize_text(href));
+        }
         if let Some(ref ph) = el.placeholder {
             el.placeholder = Some(sanitize_text(ph));
         }
         if let Some(ref ctx) = el.context {
             el.context = Some(sanitize_text(ctx));
         }
+        if let Some(ref itype) = el.input_type {
+            el.input_type = Some(sanitize_text(itype));
+        }
         // Mask passwords, sanitize other values
         el.value = mask_sensitive_value(el.input_type.as_deref(), el.value.as_deref());
         // Sanitize remaining non-masked values
-        if el.input_type.as_deref() != Some("password")
+        if !el
+            .input_type
+            .as_deref()
+            .is_some_and(|t| t.eq_ignore_ascii_case("password"))
             && let Some(ref v) = el.value
         {
             el.value = Some(sanitize_text(v));
@@ -676,6 +690,43 @@ pub async fn wait_for_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── FIX-3: sanitize_view covers name, href, context, input_type ──
+
+    #[test]
+    fn sanitize_view_cleans_name_and_href() {
+        let mut view = SemanticView {
+            url: String::new(),
+            title: String::new(),
+            page_hint: String::new(),
+            elements: vec![Element {
+                id: 0,
+                kind: ElementKind::Link,
+                label: String::new(),
+                name: Some("my\u{200B}name".into()),
+                value: None,
+                placeholder: None,
+                href: Some("https://evil\u{200D}.com".into()),
+                input_type: Some("text\u{FEFF}".into()),
+                disabled: false,
+                form_index: None,
+                context: Some("ctx\u{200C}val".into()),
+                hint: None,
+                frame_index: None,
+            }],
+            forms: vec![],
+            visible_text: String::new(),
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        sanitize_view(&mut view);
+        assert_eq!(view.elements[0].name.as_deref(), Some("myname"));
+        assert_eq!(view.elements[0].href.as_deref(), Some("https://evil.com"));
+        assert_eq!(view.elements[0].input_type.as_deref(), Some("text"));
+        assert_eq!(view.elements[0].context.as_deref(), Some("ctxval"));
+    }
 
     #[test]
     fn classify_turnstile_from_title() {

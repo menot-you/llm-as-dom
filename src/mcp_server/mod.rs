@@ -117,15 +117,22 @@ impl LadServer {
         &self,
         url: &str,
     ) -> Result<(Box<dyn PageHandle>, semantic::SemanticView), rmcp::ErrorData> {
+        // FIX-4: SSRF gate — block file://, javascript:, data:, private IPs.
+        if !llm_as_dom::sanitize::is_safe_url(url) {
+            return Err(mcp_err(format!("blocked: unsafe URL '{url}'")));
+        }
         let engine = self.ensure_engine().await.map_err(mcp_err)?;
-        let page = engine.new_page(url).await.map_err(mcp_err)?;
+
+        // FIX-10: Inject cookies BEFORE navigating to the target URL so
+        // authenticated sessions are present on the initial request.
+        // Open about:blank first, inject cookies, then navigate.
+        let page = engine.new_page("about:blank").await.map_err(mcp_err)?;
+        self.inject_profile_cookies(page.as_ref()).await;
+        page.navigate(url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
         a11y::wait_for_content(page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
             .await
             .map_err(mcp_err)?;
-
-        // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
-        self.inject_profile_cookies(page.as_ref()).await;
 
         let view = a11y::extract_semantic_view(page.as_ref())
             .await
@@ -139,6 +146,10 @@ impl LadServer {
         &self,
         url: &str,
     ) -> Result<semantic::SemanticView, rmcp::ErrorData> {
+        // FIX-4: SSRF gate — block file://, javascript:, data:, private IPs.
+        if !llm_as_dom::sanitize::is_safe_url(url) {
+            return Err(mcp_err(format!("blocked: unsafe URL '{url}'")));
+        }
         let mut active = self.active_page.lock().await;
 
         // Reuse existing page if same origin
@@ -211,32 +222,13 @@ impl LadServer {
         }
     }
 
-    /// Auto-detect which LLM backend to use based on env/URL.
+    /// FIX-9: Delegate to the canonical factory in `backend::create_backend`.
     pub(crate) fn create_backend(
         url: &str,
         model: &str,
         max_prompt_length: Option<usize>,
     ) -> Box<dyn pilot::PilotBackend> {
-        let llm_cred = read_env_with_fallback("LAD_LLM_API_KEY", "ANTHROPIC_API_KEY", "");
-        if !llm_cred.is_empty() || url.contains("openai") {
-            Box::new(backend::openai::OpenAiBackend::new(
-                &llm_cred,
-                model,
-                max_prompt_length,
-            ))
-        } else if url.contains("z.ai") || url.contains("anthropic") {
-            Box::new(backend::anthropic::AnthropicBackend::new(
-                &llm_cred,
-                model,
-                max_prompt_length,
-            ))
-        } else {
-            Box::new(backend::generic::GenericLlmBackend::new(
-                url,
-                model,
-                max_prompt_length,
-            ))
-        }
+        backend::create_backend(url, model, max_prompt_length)
     }
 }
 
@@ -892,5 +884,51 @@ mod tests {
         let json = r#"{"element":1,"files":[]}"#;
         let p: UploadParams = serde_json::from_str(json).unwrap();
         assert!(p.files.is_empty());
+    }
+
+    // ── FIX-1: SSRF scheme bypass tests (unit) ────────────
+
+    #[test]
+    fn ssrf_file_single_slash_blocked() {
+        assert!(!llm_as_dom::sanitize::is_safe_url("file:/etc/passwd"));
+    }
+
+    #[test]
+    fn ssrf_file_triple_slash_blocked() {
+        assert!(!llm_as_dom::sanitize::is_safe_url("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn ssrf_data_scheme_blocked() {
+        assert!(!llm_as_dom::sanitize::is_safe_url(
+            "data:text/html,<h1>xss</h1>"
+        ));
+    }
+
+    // ── FIX-12: watch interval validation ─────────────────
+
+    #[test]
+    fn watch_params_zero_interval() {
+        let json = r#"{"action":"start","url":"https://example.com","interval_ms":0}"#;
+        let p: WatchParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.interval_ms, Some(0));
+        // The actual validation happens in watch_start() runtime
+    }
+
+    // ── FIX-14: upload path must be absolute ──────────────
+
+    #[test]
+    fn upload_params_relative_path_detected() {
+        let json = r#"{"element":1,"files":["./relative/file.txt"]}"#;
+        let p: UploadParams = serde_json::from_str(json).unwrap();
+        // Validation happens at runtime, but we can assert path checking
+        assert!(!std::path::Path::new(&p.files[0]).is_absolute());
+    }
+
+    #[test]
+    fn upload_params_absolute_path_detected() {
+        let json = r#"{"element":1,"files":["/tmp/file.txt"]}"#;
+        let p: UploadParams = serde_json::from_str(json).unwrap();
+        assert!(std::path::Path::new(&p.files[0]).is_absolute());
     }
 }

@@ -137,9 +137,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n=== JSON ===\n");
         println!("{}", serde_json::to_string_pretty(&view)?);
     } else {
-        let llm_cred = std::env::var("LAD_LLM_API_KEY")
-            .or_else(|_| std::env::var("Z_AI_API_KEY"))
-            .unwrap_or_default();
+        // FIX-9: Use canonical backend factory for auto-detect.
+        // Explicit backend names still override for backwards compat.
         let backend_impl: Box<dyn pilot::PilotBackend> = match cli.backend.as_str() {
             "anthropic" => Box::new(backend::anthropic::AnthropicBackend::new(
                 "",
@@ -156,28 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &cli.llm_model,
                 None,
             )),
-            _ => {
-                // auto-detect
-                if !llm_cred.is_empty() || cli.llm_url.contains("openai") {
-                    Box::new(backend::openai::OpenAiBackend::new(
-                        &llm_cred,
-                        &cli.llm_model,
-                        None,
-                    ))
-                } else if cli.llm_url.contains("z.ai") || cli.llm_url.contains("anthropic") {
-                    Box::new(backend::anthropic::AnthropicBackend::new(
-                        &llm_cred,
-                        &cli.llm_model,
-                        None,
-                    ))
-                } else {
-                    Box::new(backend::generic::GenericLlmBackend::new(
-                        &cli.llm_url,
-                        &cli.llm_model,
-                        None,
-                    ))
-                }
-            }
+            _ => backend::create_backend(&cli.llm_url, &cli.llm_model, None),
         };
 
         let playbook_path = std::path::PathBuf::from(&cli.playbook_dir);

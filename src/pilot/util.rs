@@ -21,6 +21,10 @@ pub fn js_escape(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\0' => out.push_str("\\0"),
+            // FIX-15: Line Separator and Paragraph Separator throw
+            // SyntaxError in single-quoted JS string literals.
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
             '<' => {
                 // Only escape `</` to prevent `</script>` breakout.
                 // Peek-ahead is not needed: we always emit `<\/` for `<`
@@ -153,5 +157,21 @@ mod tests {
     #[test]
     fn script_close_mid_string() {
         assert_eq!(js_escape("foo</script>bar"), "foo<\\/script>bar");
+    }
+
+    // FIX-15: U+2028/U+2029 line/paragraph separators
+    #[test]
+    fn escapes_line_separator() {
+        assert_eq!(js_escape("a\u{2028}b"), "a\\u2028b");
+    }
+
+    #[test]
+    fn escapes_paragraph_separator() {
+        assert_eq!(js_escape("a\u{2029}b"), "a\\u2029b");
+    }
+
+    #[test]
+    fn escapes_both_separators_in_same_string() {
+        assert_eq!(js_escape("x\u{2028}y\u{2029}z"), "x\\u2028y\\u2029z");
     }
 }

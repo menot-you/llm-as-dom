@@ -13,6 +13,12 @@ impl LadServer {
     pub(crate) async fn tool_lad_close(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         tracing::info!("lad_close");
 
+        // FIX-11: Abort any active watch before closing the browser so
+        // the polling task doesn't leak.
+        if let Some(ws) = self.watch_state.lock().await.take() {
+            ws.stop();
+        }
+
         // Clear active page first
         *self.active_page.lock().await = None;
 

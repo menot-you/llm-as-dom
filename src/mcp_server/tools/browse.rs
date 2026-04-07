@@ -18,7 +18,14 @@ impl LadServer {
         params: Parameters<BrowseParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(url = %p.url, goal = %p.goal, "lad_browse");
+        // FIX-13: Mask anything after "password" keyword in goal for logging.
+        let log_goal = if let Some(idx) = p.goal.to_lowercase().find("password") {
+            let boundary = p.goal.ceil_char_boundary(idx + "password".len());
+            format!("{}[REDACTED]", &p.goal[..boundary])
+        } else {
+            p.goal.clone()
+        };
+        tracing::info!(url = %p.url, goal = %log_goal, "lad_browse");
 
         tracing::info!(url = %p.url, "launching page");
         let engine = self.ensure_engine().await.map_err(mcp_err)?;
@@ -72,9 +79,40 @@ impl LadServer {
             }
         }
 
+        // FIX-5: Persist the page and final view into active_page so follow-up
+        // tools (click, type, eval, screenshot) work after lad_browse.
+        {
+            let final_view = a11y::extract_semantic_view(page.as_ref())
+                .await
+                .unwrap_or_else(|_| llm_as_dom::semantic::SemanticView {
+                    url: p.url.clone(),
+                    title: String::new(),
+                    page_hint: String::new(),
+                    elements: vec![],
+                    forms: vec![],
+                    visible_text: String::new(),
+                    state: llm_as_dom::semantic::PageState::Ready,
+                    element_cap: None,
+                    blocked_reason: None,
+                    session_context: None,
+                });
+            let mut active = self.active_page.lock().await;
+            *active = Some(crate::state::ActivePage {
+                page,
+                url: p.url.clone(),
+                view: final_view,
+            });
+        }
+
         // Always capture a final screenshot for visual verification.
         tracing::info!("capturing final screenshot");
-        let final_screenshot = pilot::take_screenshot(page.as_ref()).await;
+        let active_guard = self.active_page.lock().await;
+        let final_screenshot = if let Some(ap) = active_guard.as_ref() {
+            pilot::take_screenshot(ap.page.as_ref()).await
+        } else {
+            None
+        };
+        drop(active_guard);
 
         let session_snapshot = {
             let session = self.session.lock().await;

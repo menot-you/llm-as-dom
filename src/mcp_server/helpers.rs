@@ -101,12 +101,36 @@ pub(crate) fn key_to_code(key: &str) -> &str {
 
 /// Build JS to find an element by `data-lad-id` and execute a body expression.
 ///
-/// Returns an IIFE that queries `[data-lad-id="N"]`, returns an error JSON if
-/// not found, otherwise executes `body` and returns `{"ok": true}`.
+/// Returns an IIFE that uses `deepQuerySelector` to search shadow roots and
+/// iframe contentDocuments recursively (mirrors `deepQueryAll` in a11y.rs).
+/// Falls back to `document.querySelector` if the deep search returns nothing.
 pub(crate) fn build_element_js(element_id: u32, body: &str) -> String {
     format!(
         r#"(() => {{
-            const el = document.querySelector('[data-lad-id="{id}"]');
+            // FIX-6: deepQuerySelector — searches shadow roots and iframes
+            function deepQuerySelector(root, sel) {{
+                const found = root.querySelector(sel);
+                if (found) return found;
+                const all = root.querySelectorAll('*');
+                for (const node of all) {{
+                    if (node.shadowRoot) {{
+                        const sr = deepQuerySelector(node.shadowRoot, sel);
+                        if (sr) return sr;
+                    }}
+                }}
+                // Same-origin iframes
+                const iframes = root.querySelectorAll('iframe');
+                for (const iframe of iframes) {{
+                    try {{
+                        if (iframe.contentDocument) {{
+                            const ir = deepQuerySelector(iframe.contentDocument, sel);
+                            if (ir) return ir;
+                        }}
+                    }} catch(_) {{}}
+                }}
+                return null;
+            }}
+            const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
             if (!el) return JSON.stringify({{ error: "element {id} not found" }});
             {body}
             return JSON.stringify({{ ok: true }});
@@ -114,9 +138,4 @@ pub(crate) fn build_element_js(element_id: u32, body: &str) -> String {
         id = element_id,
         body = body,
     )
-}
-
-/// Default network filter value ("all").
-pub(crate) fn default_network_filter() -> String {
-    "all".to_string()
 }

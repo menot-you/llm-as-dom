@@ -44,6 +44,14 @@ impl LadServer {
         let url = p.url.as_deref().unwrap_or("about:blank");
         let interval_ms = p.interval_ms.unwrap_or(1000);
 
+        // FIX-12: Reject zero or sub-100ms interval to prevent tight-loop CPU burn.
+        if interval_ms < 100 {
+            return Err(rmcp::ErrorData::invalid_params(
+                format!("interval_ms must be >= 100 (got {interval_ms})"),
+                None,
+            ));
+        }
+
         // Navigate and capture the initial semantic view
         let (page, initial_view) = self.navigate_and_extract(url).await?;
 
