@@ -7,7 +7,7 @@
 use llm_as_dom::engine::chromium::ChromiumEngine;
 use llm_as_dom::engine::webkit::WebKitEngine;
 use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
-use llm_as_dom::{a11y, audit, backend, locate, pilot, semantic};
+use llm_as_dom::{a11y, audit, backend, locate, pilot, semantic, watch};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -17,7 +17,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
-use rmcp::service::ServiceExt;
+use rmcp::service::{RequestContext, ServiceExt};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 
@@ -91,14 +91,14 @@ struct SessionParams {
 /// Parameters for the `lad_watch` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct WatchParams {
-    /// Action: "start" or "stop".
+    /// Action: "start", "stop", or "events".
     action: String,
     /// URL to watch (only needed for start).
     url: Option<String>,
     /// Polling interval in ms (default: 1000).
     interval_ms: Option<u32>,
-    /// JavaScript to evaluate periodically.
-    script: Option<String>,
+    /// For "events" action: return only events with seq > since_seq.
+    since_seq: Option<u64>,
 }
 
 /// Parameters for the `lad_snapshot` tool.
@@ -196,6 +196,10 @@ struct LadServer {
     interactive: bool,
     /// Persistent page from `lad_snapshot`, reused by click/type/select.
     active_page: Arc<Mutex<Option<ActivePage>>>,
+    /// Active watch state (at most one watch at a time).
+    watch_state: Arc<Mutex<Option<watch::WatchState>>>,
+    /// MCP peer for server-initiated push notifications.
+    peer: Arc<Mutex<Option<rmcp::Peer<rmcp::service::RoleServer>>>>,
 }
 
 impl LadServer {
@@ -215,6 +219,8 @@ impl LadServer {
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
             active_page: Arc::new(Mutex::new(None)),
+            watch_state: Arc::new(Mutex::new(None)),
+            peer: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -348,6 +354,88 @@ impl LadServer {
             }
             Err(e) => tracing::warn!(error = %e, "failed to load Chrome profile cookies"),
         }
+    }
+
+    // ── Watch helpers ────────────────────────────────────────────────
+
+    /// Start watching a URL: navigate, extract initial view, spawn polling loop.
+    async fn watch_start(&self, p: WatchParams) -> Result<CallToolResult, rmcp::ErrorData> {
+        // Reject if already watching
+        if self.watch_state.lock().await.is_some() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "a watch is already active — stop it first",
+                None,
+            ));
+        }
+
+        let url = p.url.as_deref().unwrap_or("about:blank");
+        let interval_ms = p.interval_ms.unwrap_or(1000);
+
+        // Navigate and capture the initial semantic view
+        let (page, initial_view) = self.navigate_and_extract(url).await?;
+
+        // Build extract closure: captures the page handle so the polling
+        // loop can re-extract semantic views without dropping the page.
+        let page: Arc<dyn PageHandle> = Arc::from(page);
+        let page_clone = Arc::clone(&page);
+        let extract_fn = move || {
+            let p = Arc::clone(&page_clone);
+            async move { a11y::extract_semantic_view(p.as_ref()).await.ok() }
+        };
+
+        let watch = watch::start_watch(
+            watch::WatchConfig {
+                url: url.to_owned(),
+                interval_ms,
+                initial_view,
+            },
+            extract_fn,
+        );
+
+        let resource_uri = watch.resource_uri();
+        *self.watch_state.lock().await = Some(watch);
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Watching {url} every {interval_ms}ms. Use lad_watch(action=\"events\") to retrieve diffs. Resource URI: {resource_uri}"
+        ))]))
+    }
+
+    /// Return buffered watch events since an optional cursor.
+    async fn watch_events(&self, p: WatchParams) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = self.watch_state.lock().await;
+        let watch = guard.as_ref().ok_or_else(|| {
+            rmcp::ErrorData::invalid_params("no active watch — start one first", None)
+        })?;
+
+        let events = watch.events.events_since(p.since_seq).await;
+        let output = serde_json::json!({
+            "url": watch.url,
+            "event_count": events.len(),
+            "current_seq": watch.events.current_seq(),
+            "events": events,
+        });
+
+        Ok(CallToolResult::success(vec![Content::text(
+            to_pretty_json(&output),
+        )]))
+    }
+
+    /// Stop an active watch and return summary.
+    async fn watch_stop(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let watch = self
+            .watch_state
+            .lock()
+            .await
+            .take()
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("no active watch to stop", None))?;
+
+        let url = watch.url.clone();
+        let buf = watch.stop();
+        let total = buf.current_seq();
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Stopped watching {url}. Total events captured: {total}"
+        ))]))
     }
 
     /// Auto-detect which LLM backend to use based on env/URL.
@@ -775,7 +863,7 @@ impl LadServer {
 
     /// Manage monitoring and watching of a web page
     #[tool(
-        description = "Watch page state over time: start polling a URL with interval_ms and optional JS script, or stop watching. Pushes events to log."
+        description = "Watch page state over time. Actions: 'start' begins polling a URL at interval_ms, diffing semantic views each cycle. 'events' returns captured diffs (pass since_seq for cursor-based pagination). 'stop' ends the watch."
     )]
     async fn lad_watch(
         &self,
@@ -784,37 +872,14 @@ impl LadServer {
         let p = params.0;
         tracing::info!(action = %p.action, "lad_watch");
 
-        if p.action == "start" {
-            let url = p.url.as_deref().unwrap_or("about:blank");
-            let (page, _view) = self.navigate_and_extract(url).await?;
-            let _ = page.enable_network_monitoring().await;
-
-            let interval = p.interval_ms.unwrap_or(1000);
-            let script = p.script.as_deref().unwrap_or(
-                "return { w: window.innerWidth, h: window.innerHeight, title: document.title, location: window.location.href };"
-            );
-
-            page.start_monitoring(interval, script)
-                .await
-                .map_err(mcp_err)?;
-
-            Ok(CallToolResult::success(vec![Content::text(format!(
-                "Started watching {} every {}ms. Check sidecar terminal for push events.",
-                url, interval
-            ))]))
-        } else if p.action == "stop" {
-            if let Some(engine) = self.engine.lock().await.as_ref() {
-                let page = engine.new_page("about:blank").await.map_err(mcp_err)?;
-                page.stop_monitoring().await.map_err(mcp_err)?;
-            }
-            Ok(CallToolResult::success(vec![Content::text(
-                "Stopped monitoring".to_string(),
-            )]))
-        } else {
-            Err(rmcp::ErrorData::invalid_params(
-                "action must be start or stop",
+        match p.action.as_str() {
+            "start" => self.watch_start(p).await,
+            "events" => self.watch_events(p).await,
+            "stop" => self.watch_stop().await,
+            other => Err(rmcp::ErrorData::invalid_params(
+                format!("action must be start, events, or stop (got '{other}')"),
                 None,
-            ))
+            )),
         }
     }
 
@@ -1228,8 +1293,75 @@ fn fuzzy_label_match(element_label: &str, target: &str) -> bool {
 #[tool_handler]
 impl ServerHandler for LadServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_resources_subscribe()
+                .build(),
+        )
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+    }
+
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<InitializeResult, rmcp::ErrorData> {
+        // Capture the peer so the watch polling loop can push notifications.
+        *self.peer.lock().await = Some(context.peer.clone());
+        if context.peer.peer_info().is_none() {
+            context.peer.set_peer_info(request);
+        }
+        Ok(self.get_info())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<ListResourcesResult, rmcp::ErrorData> {
+        let guard = self.watch_state.lock().await;
+        let resources = match guard.as_ref() {
+            Some(ws) => {
+                let r = Resource {
+                    raw: RawResource::new(ws.resource_uri(), format!("Watch: {}", ws.url))
+                        .with_description("Live semantic diff stream from page watch")
+                        .with_mime_type("application/json"),
+                    annotations: None,
+                };
+                vec![r]
+            }
+            None => vec![],
+        };
+        Ok(ListResourcesResult {
+            resources,
+            ..Default::default()
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<ReadResourceResult, rmcp::ErrorData> {
+        let guard = self.watch_state.lock().await;
+        let ws = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::resource_not_found("no active watch", None))?;
+
+        if request.uri != ws.resource_uri() {
+            return Err(rmcp::ErrorData::resource_not_found(
+                format!("unknown resource: {}", request.uri),
+                None,
+            ));
+        }
+
+        let events = ws.events.events_since(None).await;
+        let json = serde_json::to_string_pretty(&events).unwrap_or_default();
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(json, &request.uri).with_mime_type("application/json"),
+        ]))
     }
 }
 

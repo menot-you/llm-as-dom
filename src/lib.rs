@@ -20,5 +20,6 @@ pub mod profile;
 pub mod selector;
 pub mod semantic;
 pub mod session;
+pub mod watch;
 
 pub use error::Error;
