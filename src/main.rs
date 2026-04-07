@@ -35,7 +35,7 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     interactive: bool,
 
-    /// LLM backend: "ollama" or "zai" (auto-detected when LAD_LLM_API_KEY is set).
+    /// LLM backend: "ollama", "openai", or "anthropic" (auto-detected when LAD_LLM_API_KEY is set).
     #[arg(long, default_value = "auto")]
     backend: String,
 
