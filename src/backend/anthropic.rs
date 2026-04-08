@@ -39,8 +39,15 @@ impl AnthropicBackend {
                 k
             }
         };
+        // CHAOS-13: Apply connect + total request timeouts to prevent
+        // infinite hangs when the LLM server is slow or unreachable.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key: cred,
             model: model.into(),
             max_prompt_length,

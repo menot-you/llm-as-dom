@@ -24,8 +24,15 @@ impl GenericLlmBackend {
         model: impl Into<String>,
         max_prompt_length: Option<usize>,
     ) -> Self {
+        // CHAOS-13: Apply connect + total request timeouts to prevent
+        // infinite hangs when the LLM server is slow or unreachable.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            client: reqwest::Client::new(),
+            client,
             base_url: base_url.into(),
             model: model.into(),
             max_prompt_length: max_prompt_length.unwrap_or(40000),
@@ -423,17 +430,39 @@ pub fn extract_json(s: &str) -> Option<&str> {
     None
 }
 
+/// CHAOS-06: String-aware balanced brace extraction.
+///
+/// Tracks `in_string` and `escape_next` state so that braces inside
+/// JSON string values (e.g. `"val": "a}b"`) do not break the parser.
 pub fn extract_balanced(s: &str, open: u8, close: u8) -> Option<&str> {
-    let start = s.as_bytes().iter().position(|&b| b == open)?;
-    let mut depth = 0;
-    for (i, &b) in s.as_bytes().iter().enumerate().skip(start) {
-        if b == open {
-            depth += 1;
-        } else if b == close {
-            depth -= 1;
-            if depth == 0 {
-                return Some(&s[start..=i]);
+    let bytes = s.as_bytes();
+    let start = bytes.iter().position(|&b| b == open)?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_string => {
+                escape_next = true;
             }
+            b'"' => {
+                in_string = !in_string;
+            }
+            _ if b == open && !in_string => {
+                depth += 1;
+            }
+            _ if b == close && !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&s[start..=i]);
+                }
+            }
+            _ => {}
         }
     }
     None
@@ -759,5 +788,47 @@ mod tests {
         // z.ai URLs should also route to Anthropic backend (same API).
         let backend = crate::backend::create_backend("https://api.z.ai/v1", "claude-3-haiku", None);
         let _ = &backend; // ensure not optimized away
+    }
+
+    // ── CHAOS-06: JSON parser string awareness ──────────────
+
+    #[test]
+    fn extract_balanced_handles_braces_in_strings() {
+        // A `}` inside a JSON string value should NOT close the object.
+        let input = r#"{"action":"click","value":"a}b","reasoning":"test"}"#;
+        let result = extract_balanced(input, b'{', b'}');
+        assert_eq!(result, Some(input));
+    }
+
+    #[test]
+    fn extract_balanced_handles_escaped_quotes_in_strings() {
+        // An escaped quote inside a string should not toggle string state.
+        let input = r#"{"action":"click","value":"say \"hello\"","reasoning":"ok"}"#;
+        let result = extract_balanced(input, b'{', b'}');
+        assert_eq!(result, Some(input));
+    }
+
+    #[test]
+    fn extract_balanced_nested_braces_in_strings() {
+        // Nested braces inside string values — should still extract correctly.
+        let input = r#"{"result":"{\"nested\": true}","done":true}"#;
+        let result = extract_balanced(input, b'{', b'}');
+        assert_eq!(result, Some(input));
+    }
+
+    #[test]
+    fn extract_balanced_simple_still_works() {
+        let input = r#"text before {"action":"click"} after"#;
+        let result = extract_balanced(input, b'{', b'}');
+        assert_eq!(result, Some(r#"{"action":"click"}"#));
+    }
+
+    #[test]
+    fn extract_json_with_brace_in_string_value() {
+        // End-to-end: parse_action should handle `}` inside string values.
+        let input = r#"Here: {"action":"done","result":{"data":"x}y"},"reasoning":"ok"}"#;
+        let json = extract_json(input).unwrap();
+        let action = parse_action(json).unwrap();
+        assert!(matches!(action, Action::Done { .. }));
     }
 }
