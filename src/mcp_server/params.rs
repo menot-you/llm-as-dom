@@ -26,8 +26,11 @@ fn default_max_steps() -> u32 {
 /// Parameters for the `lad_extract` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct ExtractParams {
-    /// URL to navigate to and extract from.
-    pub url: String,
+    /// URL to navigate to and extract from. If omitted and there is an active page
+    /// (from a prior `lad_browse` or `lad_snapshot`), re-extracts from the current
+    /// page without navigating — preserving session state (logged-in pages, etc.).
+    #[serde(default)]
+    pub url: Option<String>,
     /// What to extract (e.g. "product prices", "form fields", "navigation links").
     pub what: String,
     /// Optional maximum length of the HTML/DOM text embedded into the prompt.
@@ -37,8 +40,11 @@ pub(crate) struct ExtractParams {
 /// Parameters for the `lad_assert` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct AssertParams {
-    /// URL to navigate to and check.
-    pub url: String,
+    /// URL to navigate to and check. If omitted and there is an active page
+    /// (from a prior `lad_browse` or `lad_snapshot`), asserts against the current
+    /// page without navigating — preserving session state.
+    #[serde(default)]
+    pub url: Option<String>,
     /// Assertions to verify (e.g. ["has login form", "title contains Dashboard"]).
     pub assertions: Vec<String>,
 }
@@ -213,6 +219,21 @@ pub(crate) struct ScrollParams {
     /// Custom scroll amount in pixels (only for "up"/"down"). Default: 600.
     #[serde(default = "default_scroll_pixels")]
     pub pixels: u32,
+}
+
+/// Parameters for the `lad_fill_form` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct FillFormParams {
+    /// Field-value pairs. Keys match element labels, names, or placeholders
+    /// (case-insensitive). Example: `{"Email": "user@test.com", "Password": "secret"}`.
+    pub fields: std::collections::HashMap<String, String>,
+    /// Submit the form after filling (clicks the submit button).
+    #[serde(default)]
+    pub submit: bool,
+    /// Optional form index (for pages with multiple forms). Matches `form_index`
+    /// from the semantic view. When omitted, searches all elements.
+    #[serde(default)]
+    pub form_index: Option<u32>,
 }
 
 /// Parameters for the `lad_upload` tool.

@@ -48,6 +48,8 @@ fn input_element(
         form_index: form,
         context: None,
         hint: None,
+        checked: None,
+        options: None,
         frame_index: None,
     }
 }
@@ -66,6 +68,8 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         form_index: form,
         context: None,
         hint: None,
+        checked: None,
+        options: None,
         frame_index: None,
     }
 }
@@ -85,6 +89,8 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         form_index: None,
         context: None,
         hint: None,
+        checked: None,
+        options: None,
         frame_index: None,
     }
 }
@@ -666,6 +672,8 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "field".into(),
                     value: "email".into(),
                 }),
+                checked: None,
+                options: None,
                 frame_index: None,
             },
             Element {
@@ -684,6 +692,8 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "field".into(),
                     value: "password".into(),
                 }),
+                checked: None,
+                options: None,
                 frame_index: None,
             },
             Element {
@@ -702,6 +712,8 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "action".into(),
                     value: "submit".into(),
                 }),
+                checked: None,
+                options: None,
                 frame_index: None,
             },
         ],
@@ -1143,6 +1155,8 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 form_index: None,
                 context: None,
                 hint: None,
+                checked: None,
+                options: None,
                 frame_index: None,
             },
             Element {
@@ -1158,6 +1172,8 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 form_index: None,
                 context: None,
                 hint: None,
+                checked: None,
+                options: None,
                 frame_index: None,
             },
         ],
@@ -1220,6 +1236,8 @@ fn test_hints_active_when_heuristics_disabled() {
                 hint_type: "field".into(),
                 value: "email".into(),
             }),
+            checked: None,
+            options: None,
             frame_index: None,
         }],
         forms: vec![],

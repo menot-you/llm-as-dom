@@ -3,7 +3,8 @@
 //! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
 //! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
 //! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`, `lad_screenshot`,
-//! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`, `lad_scroll`.
+//! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`, `lad_scroll`,
+//! `lad_fill_form`.
 
 mod assertions;
 mod helpers;
@@ -357,7 +358,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Extract structured info from a URL: interactive elements, text, page type. Never returns raw HTML."
+        description = "Extract structured info from a page: interactive elements, text, page type. Never returns raw HTML. URL is optional — omit to extract from current page without navigating (preserves session state)."
     )]
     async fn lad_extract(
         &self,
@@ -367,7 +368,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Check assertions on a URL. Returns pass/fail for each. Supports: has login form, title contains X, has button Y, url contains Z."
+        description = "Check assertions on a page. Returns pass/fail for each. URL is optional — omit to assert against the current page without navigating (preserves session state). Supports: has login form, title contains X, has button Y, url contains Z."
     )]
     async fn lad_assert(
         &self,
@@ -447,7 +448,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Select an option in a dropdown by element ID from lad_snapshot. Set wait_for_navigation=true if the dropdown auto-submits. Requires a prior lad_snapshot or lad_browse call."
+        description = "Select an option in a dropdown by element ID from lad_snapshot. Matches by visible label text first, falls back to value attribute. Set wait_for_navigation=true if the dropdown auto-submits. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_select(
         &self,
@@ -548,6 +549,16 @@ impl LadServer {
     }
 
     #[tool(
+        description = "Fill multiple form fields at once and optionally submit. Fields are matched by label, name, or placeholder (case-insensitive). Use for login forms, registration, checkout, etc. Example: fields={\"Email\":\"user@test.com\",\"Password\":\"secret\"}, submit=true. Requires a prior lad_snapshot or lad_browse call."
+    )]
+    async fn lad_fill_form(
+        &self,
+        params: Parameters<FillFormParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_fill_form(params).await
+    }
+
+    #[tool(
         description = "Scroll the page or scroll to a specific element. Directions: down, up, bottom, top. Optionally scroll to an element by ID. Useful for lazy-loaded content and infinite scroll pages. Returns updated semantic view after scrolling. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_scroll(
@@ -570,7 +581,7 @@ impl ServerHandler for LadServer {
                 .enable_resources_subscribe()
                 .build(),
         )
-        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation (returns semantic view), lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional — omit to re-read current page), lad_click/lad_type/lad_select for element interaction, lad_scroll for scrolling (down/up/bottom/top or to element), lad_hover for hover states/tooltips/dropdowns, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection, lad_dialog for JS alert/confirm/prompt handling, lad_upload for file input uploads (Chromium only). Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation (returns semantic view), lad_extract for page analysis (URL optional — omit to use current page), lad_assert for verification (URL optional), lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional — omit to re-read current page), lad_click/lad_type/lad_select for element interaction (lad_select matches by visible label first, then value), lad_fill_form to fill multiple fields + submit in one call, lad_scroll for scrolling (down/up/bottom/top or to element), lad_hover for hover states/tooltips/dropdowns, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection, lad_dialog for JS alert/confirm/prompt handling, lad_upload for file input uploads (Chromium only). Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 
     async fn initialize(
@@ -697,6 +708,8 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            checked: None,
+            options: None,
             frame_index: None,
         }
     }
@@ -1144,5 +1157,181 @@ mod tests {
         let p: ScrollParams = serde_json::from_str(json).unwrap();
         assert_eq!(p.direction, "up");
         assert_eq!(p.pixels, 300);
+    }
+
+    // ── DX-W2-1: assert/extract optional URL ──────────────────
+
+    #[test]
+    fn assert_params_with_url() {
+        let json = r#"{"url":"https://example.com","assertions":["has button"]}"#;
+        let p: AssertParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://example.com"));
+        assert_eq!(p.assertions.len(), 1);
+    }
+
+    #[test]
+    fn assert_params_without_url() {
+        let json = r#"{"assertions":["has button"]}"#;
+        let p: AssertParams = serde_json::from_str(json).unwrap();
+        assert!(p.url.is_none());
+    }
+
+    #[test]
+    fn assert_params_null_url() {
+        let json = r#"{"url":null,"assertions":["title contains X"]}"#;
+        let p: AssertParams = serde_json::from_str(json).unwrap();
+        assert!(p.url.is_none());
+    }
+
+    #[test]
+    fn extract_params_with_url() {
+        let json = r#"{"url":"https://example.com","what":"links"}"#;
+        let p: ExtractParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn extract_params_without_url() {
+        let json = r#"{"what":"form fields"}"#;
+        let p: ExtractParams = serde_json::from_str(json).unwrap();
+        assert!(p.url.is_none());
+        assert_eq!(p.what, "form fields");
+    }
+
+    #[test]
+    fn extract_params_null_url() {
+        let json = r#"{"url":null,"what":"prices"}"#;
+        let p: ExtractParams = serde_json::from_str(json).unwrap();
+        assert!(p.url.is_none());
+    }
+
+    // ── DX-W2-2: checked + options in to_prompt ────────────────
+
+    #[test]
+    fn to_prompt_renders_checked_state() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Checkbox, "Remember me");
+        el.checked = Some(true);
+        view.elements.push(el);
+
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains("checked=true"),
+            "prompt should contain checked=true: {prompt}"
+        );
+    }
+
+    #[test]
+    fn to_prompt_renders_unchecked_state() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Checkbox, "Agree to terms");
+        el.checked = Some(false);
+        view.elements.push(el);
+
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains("checked=false"),
+            "prompt should contain checked=false: {prompt}"
+        );
+    }
+
+    #[test]
+    fn to_prompt_renders_select_options() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Select, "Country");
+        el.options = Some(vec!["US".into(), "BR".into(), "DE".into()]);
+        view.elements.push(el);
+
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains(r#"options=["US", "BR", "DE"]"#),
+            "prompt should contain options list: {prompt}"
+        );
+    }
+
+    #[test]
+    fn to_prompt_skips_none_checked_and_options() {
+        let mut view = empty_view();
+        let el = make_element(semantic::ElementKind::Input, "Email");
+        view.elements.push(el);
+
+        let prompt = view.to_prompt();
+        assert!(
+            !prompt.contains("checked="),
+            "should not render checked for non-checkbox"
+        );
+        assert!(
+            !prompt.contains("options="),
+            "should not render options for non-select"
+        );
+    }
+
+    // ── DX-W2-3: fill_form params ─────────────────────────────
+
+    #[test]
+    fn fill_form_params_basic() {
+        let json = r#"{"fields":{"Email":"user@test.com","Password":"secret"},"submit":true}"#;
+        let p: FillFormParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.fields.len(), 2);
+        assert_eq!(p.fields["Email"], "user@test.com");
+        assert_eq!(p.fields["Password"], "secret");
+        assert!(p.submit);
+        assert!(p.form_index.is_none());
+    }
+
+    #[test]
+    fn fill_form_params_with_form_index() {
+        let json = r#"{"fields":{"Name":"Alice"},"form_index":1}"#;
+        let p: FillFormParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.form_index, Some(1));
+        assert!(!p.submit);
+    }
+
+    #[test]
+    fn fill_form_params_empty_fields() {
+        let json = r#"{"fields":{}}"#;
+        let p: FillFormParams = serde_json::from_str(json).unwrap();
+        assert!(p.fields.is_empty());
+    }
+
+    // ── DX-W2-4: form_index in to_prompt ──────────────────────
+
+    #[test]
+    fn to_prompt_renders_form_index() {
+        let mut view = empty_view();
+        let mut el = make_element(semantic::ElementKind::Input, "Email");
+        el.input_type = Some("email".into());
+        el.form_index = Some(0);
+        view.elements.push(el);
+
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains("form=0"),
+            "prompt should contain form=0: {prompt}"
+        );
+    }
+
+    #[test]
+    fn to_prompt_skips_form_index_when_none() {
+        let mut view = empty_view();
+        let el = make_element(semantic::ElementKind::Input, "Search");
+        view.elements.push(el);
+
+        let prompt = view.to_prompt();
+        assert!(
+            !prompt.contains("form="),
+            "should not render form= when form_index is None"
+        );
+    }
+
+    // ── DX-W2-5: select params unchanged (label matching is in JS) ──
+
+    #[test]
+    fn select_params_with_label() {
+        let json = r#"{"element":5,"value":"United States"}"#;
+        let p: SelectParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 5);
+        assert_eq!(p.value, "United States");
+        assert!(!p.wait_for_navigation);
     }
 }

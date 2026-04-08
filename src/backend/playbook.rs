@@ -163,6 +163,8 @@ mod tests {
                     form_index: Some(0),
                     context: None,
                     hint: None,
+                    checked: None,
+                    options: None,
                     frame_index: None,
                 },
                 Element {
@@ -178,6 +180,8 @@ mod tests {
                     form_index: Some(0),
                     context: None,
                     hint: None,
+                    checked: None,
+                    options: None,
                     frame_index: None,
                 },
                 Element {
@@ -193,6 +197,8 @@ mod tests {
                     form_index: Some(0),
                     context: None,
                     hint: None,
+                    checked: None,
+                    options: None,
                     frame_index: None,
                 },
             ],

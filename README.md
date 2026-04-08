@@ -231,7 +231,8 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 |------|-------------|
 | `lad_click` | Click an element by its ID from `lad_snapshot` |
 | `lad_type` | Type text into an element by its ID from `lad_snapshot` |
-| `lad_select` | Select a dropdown option by element ID from `lad_snapshot` |
+| `lad_select` | Select a dropdown option by element ID — matches by visible label first, then value |
+| `lad_fill_form` | Fill multiple form fields at once and optionally submit. Keys match by label/name/placeholder |
 | `lad_press_key` | Press a keyboard key (Enter, Tab, Escape, etc.). Optionally focus an element first |
 | `lad_hover` | Hover over an element — triggers dropdown menus, tooltips, hover states |
 | `lad_upload` | Upload file(s) to a `<input type="file">` element (Chromium CDP) |

@@ -143,6 +143,15 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                         }
                     }
 
+                    // DX-W2-2: Extract checked state for checkbox/radio.
+                    const checked = (kind === 'checkbox' || kind === 'radio') ? !!el.checked : null;
+
+                    // DX-W2-2: Extract option labels for <select> elements (top 10).
+                    let options = null;
+                    if (kind === 'select' && el.options) {
+                        options = Array.from(el.options).slice(0, 10).map(o => o.textContent.trim());
+                    }
+
                     rawElements.push({
                         el, kind, label: label.substring(0, 80),
                         name: el.getAttribute('name') || null,
@@ -155,6 +164,8 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                         hint_type: hintType,
                         hint_value: hintValue,
                         frame_index: frameIdx,
+                        checked: checked,
+                        options: options,
                         score,
                         isActionable: kind !== 'link' && kind !== 'other',
                     });
@@ -217,6 +228,8 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                     hint_type: raw.hint_type,
                     hint_value: raw.hint_value,
                     frame_index: raw.frame_index,
+                    checked: raw.checked,
+                    options: raw.options,
                 });
                 id++;
             }
@@ -288,6 +301,8 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 form_index: e.form_index,
                 context: None,
                 hint,
+                checked: e.checked,
+                options: e.options,
                 frame_index: e.frame_index,
             }
         })
@@ -380,6 +395,12 @@ struct JsElement {
     /// Index of the iframe this element belongs to (`null` if in the main document).
     #[serde(default)]
     frame_index: Option<u32>,
+    /// Whether checkbox/radio is checked (`null` for other element types).
+    #[serde(default)]
+    checked: Option<bool>,
+    /// Visible option labels for `<select>` elements (top 10).
+    #[serde(default)]
+    options: Option<Vec<String>>,
 }
 
 /// Map a JS kind string to the strongly-typed [`ElementKind`].
@@ -622,6 +643,10 @@ fn sanitize_view(view: &mut SemanticView) {
         if let Some(ref itype) = el.input_type {
             el.input_type = Some(sanitize_text(itype));
         }
+        // DX-W2-2: Sanitize select option labels.
+        if let Some(ref opts) = el.options {
+            el.options = Some(opts.iter().map(|o| sanitize_text(o)).collect());
+        }
         // FIX-10: Mask sensitive values by type AND name
         el.value = mask_sensitive_value(
             el.input_type.as_deref(),
@@ -724,6 +749,8 @@ mod tests {
                 form_index: None,
                 context: Some("ctx\u{200C}val".into()),
                 hint: None,
+                checked: None,
+                options: None,
                 frame_index: None,
             }],
             forms: vec![],
