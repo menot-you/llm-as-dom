@@ -19,6 +19,10 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
 
     let js = r#"
         (() => {
+            // CHAOS-C3: Override window.close() to prevent hostile pages from
+            // killing the browser tab/handle during extraction or navigation.
+            try { window.close = function(){}; } catch(_) {}
+
             const MAX_ELEMENTS = 300;
             const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [onclick]';
             const rawElements = [];
@@ -568,6 +572,16 @@ pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
         }
     }
 
+    // 6. CHAOS-C6: CSS cloaking detection — zero interactive elements but
+    //    visible text is present. The page may be hiding interactive content
+    //    behind CSS (display:none on the container, visible text via
+    //    pseudo-elements or aria-hidden tricks).
+    if view.elements.is_empty() && !view.visible_text.trim().is_empty() {
+        return Some(
+            "possible CSS cloaking: no interactive elements but text is visible".to_string(),
+        );
+    }
+
     None
 }
 
@@ -671,7 +685,20 @@ fn sanitize_view(view: &mut SemanticView) {
 // ── SPA wait strategy ──────────────────────────────────────────────
 
 /// Default SPA wait timeout in seconds.
-pub const DEFAULT_WAIT_TIMEOUT: u64 = 5;
+///
+/// CHAOS-C5: Increased from 5s to 15s for SPAs that hydrate slowly.
+/// Callers that need env-var configurability should use [`configured_wait_timeout`].
+pub const DEFAULT_WAIT_TIMEOUT: u64 = 15;
+
+/// SPA wait timeout in seconds, configurable via `LAD_WAIT_TIMEOUT` env var.
+///
+/// Falls back to [`DEFAULT_WAIT_TIMEOUT`] (15s) when the env var is unset or invalid.
+pub fn configured_wait_timeout() -> u64 {
+    std::env::var("LAD_WAIT_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_WAIT_TIMEOUT)
+}
 
 /// Wait for interactive content to appear and stabilise on a page.
 ///
@@ -854,5 +881,86 @@ mod tests {
             classify_challenge("something unknown happened"),
             ChallengeKind::Captcha,
         );
+    }
+
+    // ── CHAOS-C6: CSS cloaking detection ──────────────────────
+
+    #[test]
+    fn detect_css_cloaking_no_elements_with_text() {
+        let view = SemanticView {
+            url: "https://example.com".into(),
+            title: "Normal Page".into(),
+            page_hint: "".into(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: "Some visible content here".into(),
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        let reason = detect_bot_challenge(&view);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("CSS cloaking"));
+    }
+
+    #[test]
+    fn no_css_cloaking_when_elements_present() {
+        let view = SemanticView {
+            url: "https://example.com".into(),
+            title: "Normal Page".into(),
+            page_hint: "".into(),
+            elements: vec![Element {
+                id: 0,
+                kind: ElementKind::Button,
+                label: "Click me".into(),
+                name: None,
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: None,
+                disabled: false,
+                form_index: None,
+                context: None,
+                hint: None,
+                checked: None,
+                options: None,
+                frame_index: None,
+            }],
+            forms: vec![],
+            visible_text: "Some text".into(),
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        // Has elements, so no cloaking detection
+        assert!(detect_bot_challenge(&view).is_none());
+    }
+
+    #[test]
+    fn no_css_cloaking_when_no_text() {
+        let view = SemanticView {
+            url: "https://example.com".into(),
+            title: "Empty Page".into(),
+            page_hint: "".into(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: String::new(),
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        // No elements AND no text — not cloaking, just empty
+        assert!(detect_bot_challenge(&view).is_none());
+    }
+
+    // ── CHAOS-C5: Configurable wait timeout ──────────────────
+
+    #[test]
+    fn default_wait_timeout_is_15() {
+        // Without env var, should be 15 seconds.
+        assert_eq!(DEFAULT_WAIT_TIMEOUT, 15);
     }
 }
