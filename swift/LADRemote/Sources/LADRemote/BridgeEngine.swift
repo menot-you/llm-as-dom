@@ -16,7 +16,13 @@ public final class BridgeEngine: NSObject {
     public weak var connection: RelayConnection?
 
     private var navDelegate: BridgeNavDelegate!
+    private var uiDelegate: BridgeUIDelegate!
     private var monitoringTimer: Timer?
+
+    deinit {
+        // FIX-G4: Prevent timer leak if engine is destroyed without stop_monitoring.
+        monitoringTimer?.invalidate()
+    }
 
     public override init() {
         let config = WKWebViewConfiguration()
@@ -65,6 +71,10 @@ public final class BridgeEngine: NSObject {
         // Navigation delegate.
         navDelegate = BridgeNavDelegate(engine: self)
         webView.navigationDelegate = navDelegate
+
+        // FIX-G5: UI delegate handles alert/confirm/prompt and target="_blank".
+        uiDelegate = BridgeUIDelegate(engine: self)
+        webView.uiDelegate = uiDelegate
     }
 
     // MARK: - Command Dispatch
@@ -359,5 +369,73 @@ final class BridgeNavDelegate: NSObject, WKNavigationDelegate {
             engine?.resolveNavigation(id: waitId, ok: false, error: error.localizedDescription)
         }
         pendingWaits.removeAll()
+    }
+}
+
+// MARK: - UI Delegate (FIX-G5)
+
+/// Handles JS dialogs (alert/confirm/prompt) and target="_blank" links.
+@MainActor
+final class BridgeUIDelegate: NSObject, WKUIDelegate {
+    private weak var engine: BridgeEngine?
+
+    init(engine: BridgeEngine) {
+        self.engine = engine
+    }
+
+    // Handle target="_blank" by loading in the same webView.
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if navigationAction.targetFrame == nil || navigationAction.targetFrame?.isMainFrame == false {
+            webView.load(navigationAction.request)
+        }
+        return nil
+    }
+
+    // Handle alert().
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        engine?.sendEvent("dialog", extra: [
+            "type": .string("alert"),
+            "message": .string(message),
+        ])
+        completionHandler()
+    }
+
+    // Handle confirm().
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        engine?.sendEvent("dialog", extra: [
+            "type": .string("confirm"),
+            "message": .string(message),
+        ])
+        completionHandler(true) // Auto-accept.
+    }
+
+    // Handle prompt().
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        engine?.sendEvent("dialog", extra: [
+            "type": .string("prompt"),
+            "message": .string(prompt),
+        ])
+        completionHandler(defaultText)
     }
 }
