@@ -23,6 +23,11 @@ const VALUE_SET_DELAY_MS: u64 = 100;
 
 impl LadServer {
     /// Common pattern: execute JS on active page, wait, refresh view, return prompt.
+    ///
+    /// FIX-R6-01: After the interaction delay, checks the current browser URL
+    /// against SSRF rules before refreshing the view. This prevents click/type/
+    /// select/keypress from silently navigating to `localhost` or private IPs
+    /// via page-driven links or form submissions.
     async fn interact_and_refresh(
         &self,
         js: &str,
@@ -35,6 +40,20 @@ impl LadServer {
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+
+        // FIX-R6-01: SSRF gate — verify the browser hasn't navigated to an unsafe URL
+        // as a result of the interaction (e.g. click on a link to localhost).
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let current_url = ap.page.url().await.map_err(mcp_err)?;
+            if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                return Err(mcp_err(format!(
+                    "blocked: interaction navigated to unsafe URL {current_url}"
+                )));
+            }
+        }
+
         let view = self.refresh_active_view().await?;
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),
@@ -47,11 +66,37 @@ impl LadServer {
         params: Parameters<ClickParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(element = p.element, "lad_click");
+        tracing::info!(
+            element = p.element,
+            wait_for_navigation = p.wait_for_navigation,
+            "lad_click"
+        );
 
         let js = build_element_js(p.element, "el.click();");
-        self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS)
-            .await
+
+        if p.wait_for_navigation {
+            {
+                let active = self.active_page.lock().await;
+                let ap = active.as_ref().ok_or_else(no_active_page)?;
+                check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+                ap.page.wait_for_navigation().await.map_err(mcp_err)?;
+
+                // FIX-R6-01: SSRF gate after navigation
+                let current_url = ap.page.url().await.map_err(mcp_err)?;
+                if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                    return Err(mcp_err(format!(
+                        "blocked: click navigated to unsafe URL {current_url}"
+                    )));
+                }
+            }
+            let view = self.refresh_active_view().await?;
+            Ok(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        } else {
+            self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS)
+                .await
+        }
     }
 
     /// Type text into an element by its ID from lad_snapshot.
@@ -112,12 +157,37 @@ impl LadServer {
              el.dispatchEvent(new Event('change', {{ bubbles: true }}));{enter_snippet}"
         );
         let js = build_element_js(p.element, &body);
-        let delay = if p.press_enter {
-            DEFAULT_INTERACT_DELAY_MS
+
+        if p.press_enter {
+            // FIX-R6-05: Form submission via Enter may trigger navigation.
+            // Use wait_for_navigation with a timeout instead of a fixed sleep.
+            {
+                let active = self.active_page.lock().await;
+                let ap = active.as_ref().ok_or_else(no_active_page)?;
+                check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+
+                // Wait up to 5s for potential navigation; timeout is fine (page didn't navigate).
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    ap.page.wait_for_navigation(),
+                )
+                .await;
+
+                // FIX-R6-01: SSRF gate after potential navigation
+                let current_url = ap.page.url().await.map_err(mcp_err)?;
+                if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                    return Err(mcp_err(format!(
+                        "blocked: form submission navigated to unsafe URL {current_url}"
+                    )));
+                }
+            }
+            let view = self.refresh_active_view().await?;
+            Ok(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
         } else {
-            VALUE_SET_DELAY_MS
-        };
-        self.interact_and_refresh(&js, delay).await
+            self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+        }
     }
 
     /// Select an option in a `<select>` element by its ID from lad_snapshot.
@@ -126,7 +196,7 @@ impl LadServer {
         params: Parameters<SelectParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(element = p.element, value = %p.value, "lad_select");
+        tracing::info!(element = p.element, value = %p.value, wait_for_navigation = p.wait_for_navigation, "lad_select");
 
         let escaped = pilot::js_escape(&p.value);
         let body = format!(
@@ -136,7 +206,29 @@ impl LadServer {
             id = p.element,
         );
         let js = build_element_js(p.element, &body);
-        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+
+        if p.wait_for_navigation {
+            {
+                let active = self.active_page.lock().await;
+                let ap = active.as_ref().ok_or_else(no_active_page)?;
+                check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+                ap.page.wait_for_navigation().await.map_err(mcp_err)?;
+
+                // FIX-R6-01: SSRF gate after navigation
+                let current_url = ap.page.url().await.map_err(mcp_err)?;
+                if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                    return Err(mcp_err(format!(
+                        "blocked: select navigated to unsafe URL {current_url}"
+                    )));
+                }
+            }
+            let view = self.refresh_active_view().await?;
+            Ok(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        } else {
+            self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+        }
     }
 
     /// Hover over an element by its ID from lad_snapshot.
@@ -196,6 +288,19 @@ impl LadServer {
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_INTERACT_DELAY_MS)).await;
+
+        // FIX-R6-01: SSRF gate — key presses (e.g. Enter) can trigger navigation
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let current_url = ap.page.url().await.map_err(mcp_err)?;
+            if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                return Err(mcp_err(format!(
+                    "blocked: key press navigated to unsafe URL {current_url}"
+                )));
+            }
+        }
+
         let view = self.refresh_active_view().await?;
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),
@@ -277,11 +382,11 @@ impl LadServer {
                 .await
                 .map_err(mcp_err)?;
 
-            // Dispatch change event so frameworks react
-            let change_js = format!(
-                r#"document.querySelector('[data-lad-id="{}"]')
-                    .dispatchEvent(new Event('change', {{ bubbles: true }}))"#,
-                p.element
+            // FIX-R6-04: Use deepQuerySelector for change event dispatch so it
+            // works with elements inside shadow DOM and iframes.
+            let change_js = build_element_js(
+                p.element,
+                "el.dispatchEvent(new Event('change', { bubbles: true }));",
             );
             ap.page.eval_js(&change_js).await.map_err(mcp_err)?;
         }
@@ -305,15 +410,10 @@ impl LadServer {
         tracing::info!(direction = %p.direction, element = ?p.element, pixels = p.pixels, "lad_scroll");
 
         let js = if let Some(el_id) = p.element {
-            // Scroll to a specific element by data-lad-id
-            format!(
-                r#"(() => {{
-                    const el = document.querySelector('[data-lad-id="{}"]');
-                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
-                    el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                    return JSON.stringify({{ ok: true }});
-                }})()"#,
-                el_id, el_id
+            // FIX-R6-04: Use deepQuerySelector to find elements in shadow DOM/iframes.
+            build_element_js(
+                el_id,
+                "el.scrollIntoView({ behavior: 'smooth', block: 'center' });",
             )
         } else {
             // Directional scroll

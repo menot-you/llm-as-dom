@@ -8,6 +8,7 @@ use crate::helpers::to_pretty_json;
 use crate::params::WatchParams;
 
 use llm_as_dom::engine::PageHandle;
+use llm_as_dom::sanitize::redact_url_secrets;
 use llm_as_dom::{a11y, watch};
 
 use std::sync::Arc;
@@ -77,8 +78,10 @@ impl LadServer {
         let resource_uri = ws.resource_uri();
         *self.watch_state.lock().await = Some(ws);
 
+        // FIX-R6-03: Redact secrets from watch URL in user-facing messages and URI.
+        let safe_url = redact_url_secrets(url);
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Watching {url} every {interval_ms}ms. Use lad_watch(action=\"events\") to retrieve diffs. Resource URI: {resource_uri}"
+            "Watching {safe_url} every {interval_ms}ms. Use lad_watch(action=\"events\") to retrieve diffs. Resource URI: {resource_uri}"
         ))]))
     }
 
@@ -91,7 +94,7 @@ impl LadServer {
 
         let events = ws.events.events_since(p.since_seq).await;
         let output = serde_json::json!({
-            "url": ws.url,
+            "url": llm_as_dom::sanitize::redact_url_secrets(&ws.url),
             "event_count": events.len(),
             "current_seq": ws.events.current_seq(),
             "events": events,
@@ -115,8 +118,10 @@ impl LadServer {
         let buf = ws.stop();
         let total = buf.current_seq();
 
+        // FIX-R6-03: Redact secrets from URL in stop message.
+        let safe_url = redact_url_secrets(&url);
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Stopped watching {url}. Total events captured: {total}"
+            "Stopped watching {safe_url}. Total events captured: {total}"
         ))]))
     }
 }

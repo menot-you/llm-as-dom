@@ -126,8 +126,12 @@ impl WatchState {
     }
 
     /// Build a `watch://` URI for MCP resource notifications.
+    ///
+    /// FIX-R6-03: Redact secrets before embedding in the URI to prevent
+    /// tokens/codes from leaking through MCP resource notification URIs.
     pub fn resource_uri(&self) -> String {
-        format!("watch://{}", sanitize_uri(&self.url))
+        let safe = crate::sanitize::redact_url_secrets(&self.url);
+        format!("watch://{}", sanitize_uri(&safe))
     }
 }
 
@@ -200,10 +204,12 @@ where
                 tracing::debug!(url = %url_for_task, seq, "watch: diff captured");
 
                 // Push MCP resource notification if peer is available.
+                // FIX-R6-03: Redact secrets from watch:// notification URI.
                 if let Some(ref peer_mutex) = peer_arc
                     && let Some(ref peer) = *peer_mutex.lock().await
                 {
-                    let uri = format!("watch://{}", sanitize_uri(&url_for_task));
+                    let safe = crate::sanitize::redact_url_secrets(&url_for_task);
+                    let uri = format!("watch://{}", sanitize_uri(&safe));
                     let _ = peer
                         .notify_resource_updated(ResourceUpdatedNotificationParam::new(uri))
                         .await;
