@@ -193,6 +193,16 @@ where
                 }
             };
 
+            // FIX-R9-02: SSRF check on each poll tick. A delayed redirect
+            // could move the page to a private IP after initial safe navigation.
+            if !crate::sanitize::is_safe_url(&current_view.url) {
+                tracing::warn!(
+                    url = %crate::sanitize::redact_url_secrets(&current_view.url),
+                    "watch: page navigated to unsafe URL — aborting watch"
+                );
+                break;
+            }
+
             let diff = observer::diff(&last_view, &current_view);
 
             if !diff.added.is_empty()

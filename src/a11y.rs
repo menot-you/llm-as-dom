@@ -20,7 +20,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
     let js = r#"
         (() => {
             const MAX_ELEMENTS = 300;
-            const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"]';
+            const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [onclick]';
             const rawElements = [];
             let id = 0;
 
