@@ -34,12 +34,22 @@ impl LadServer {
 
     /// Start watching a URL: navigate, extract initial view, spawn polling loop.
     async fn watch_start(&self, p: WatchParams) -> Result<CallToolResult, rmcp::ErrorData> {
-        // Reject if already watching
-        if self.watch_state.lock().await.is_some() {
-            return Err(rmcp::ErrorData::invalid_params(
-                "a watch is already active — stop it first",
-                None,
-            ));
+        // Reject if already watching — but auto-clear zombie watches
+        // FIX-R10-02: If the polling task finished (e.g. SSRF auto-abort),
+        // the WatchState is still Some but the task is done. Clear it.
+        {
+            let mut ws = self.watch_state.lock().await;
+            if let Some(ref state) = *ws {
+                if state.task_handle_finished() {
+                    tracing::info!("clearing zombie watch (task already finished)");
+                    *ws = None;
+                } else {
+                    return Err(rmcp::ErrorData::invalid_params(
+                        "a watch is already active — stop it first",
+                        None,
+                    ));
+                }
+            }
         }
 
         let url = p.url.as_deref().unwrap_or("about:blank");

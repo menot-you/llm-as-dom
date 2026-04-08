@@ -131,7 +131,9 @@ impl LadServer {
                     url = %llm_as_dom::sanitize::redact_url_secrets(&browse_final_url),
                     "lad_browse ended on unsafe URL — NOT persisting active_page"
                 );
-                // Don't persist — let the page drop
+                // FIX-R10-01: ALSO clear any previous active_page — prevent
+                // stale page from being used by follow-up tools.
+                *self.active_page.lock().await = None;
             } else {
                 let final_view = a11y::extract_semantic_view(page.as_ref())
                     .await
