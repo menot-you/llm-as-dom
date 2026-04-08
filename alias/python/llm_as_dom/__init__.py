@@ -1,6 +1,6 @@
 """llm-as-dom — alias for example-org-mcp-lad."""
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 
 def main():

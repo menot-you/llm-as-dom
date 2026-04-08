@@ -7,7 +7,7 @@ import subprocess
 import sys
 import urllib.request
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 BINARY = "llm-as-dom-mcp"
 REPO = "example-org/llm-as-dom"
