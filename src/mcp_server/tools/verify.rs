@@ -34,7 +34,7 @@ impl LadServer {
         let all_pass = results.iter().all(|r| r["pass"].as_bool().unwrap_or(false));
 
         let output = serde_json::json!({
-            "url": view.url,
+            "url": llm_as_dom::sanitize::redact_url_secrets(&view.url),
             "title": view.title,
             "all_pass": all_pass,
             "results": results,
@@ -60,7 +60,9 @@ impl LadServer {
         let raw: Vec<audit::RawAuditIssue> = serde_json::from_value(raw_value)
             .map_err(|e| mcp_err(format!("audit JS parse failed: {e:?}")))?;
 
-        let audit_result = audit::parse_audit_result(&p.url, raw);
+        // FIX-5: Redact URL secrets from audit result.
+        let safe_url = llm_as_dom::sanitize::redact_url_secrets(&p.url);
+        let audit_result = audit::parse_audit_result(&safe_url, raw);
         let output = serde_json::to_value(&audit_result)
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 

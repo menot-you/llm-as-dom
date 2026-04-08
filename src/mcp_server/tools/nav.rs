@@ -26,6 +26,15 @@ impl LadServer {
         // Wait for navigation to settle
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
+        // FIX-1: Check URL safety after history.back() navigation settles.
+        if let Ok(ref back_url) = ap.page.url().await
+            && !llm_as_dom::sanitize::is_safe_url(back_url)
+        {
+            return Err(mcp_err(format!(
+                "blocked: history.back() navigated to unsafe URL {back_url}"
+            )));
+        }
+
         // Refresh view and URL while still holding the lock
         let view = llm_as_dom::a11y::extract_semantic_view(ap.page.as_ref())
             .await

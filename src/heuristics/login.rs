@@ -249,7 +249,8 @@ pub fn try_detect_done(view: &SemanticView, goal: &str) -> Option<super::Heurist
             action: Some(Action::Done {
                 result: serde_json::json!({
                     "success": true,
-                    "url": view.url,
+                    // FIX-5: Redact URL secrets from login result.
+                    "url": crate::sanitize::redact_url_secrets(&view.url),
                     "title": view.title,
                     "signal": "success text in page",
                 }),
@@ -275,7 +276,7 @@ pub fn try_detect_done(view: &SemanticView, goal: &str) -> Option<super::Heurist
             action: Some(Action::Done {
                 result: serde_json::json!({
                     "success": true,
-                    "url": view.url,
+                    "url": crate::sanitize::redact_url_secrets(&view.url),
                     "title": view.title,
                 }),
                 reasoning: "heuristic: URL no longer contains login and page has content — navigation succeeded".into(),

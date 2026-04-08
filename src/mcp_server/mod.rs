@@ -545,8 +545,10 @@ impl ServerHandler for LadServer {
         let guard = self.watch_state.lock().await;
         let resources = match guard.as_ref() {
             Some(ws) => {
+                // FIX-4: Redact URL secrets from resource listing.
+                let safe_url = llm_as_dom::sanitize::redact_url_secrets(&ws.url);
                 let r = Resource {
-                    raw: RawResource::new(ws.resource_uri(), format!("Watch: {}", ws.url))
+                    raw: RawResource::new(ws.resource_uri(), format!("Watch: {}", safe_url))
                         .with_description("Live semantic diff stream from page watch")
                         .with_mime_type("application/json"),
                     annotations: None,
