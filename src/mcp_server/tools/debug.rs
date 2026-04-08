@@ -150,7 +150,7 @@ impl LadServer {
             "filter": p.filter,
             "count": filtered.len(),
             "requests": filtered.iter().map(|r| serde_json::json!({
-                "url": r.url,
+                "url": llm_as_dom::sanitize::redact_url_secrets(&r.url),
                 "kind": r.kind,
                 "method": r.method,
                 "timestamp_ms": r.timestamp_ms,

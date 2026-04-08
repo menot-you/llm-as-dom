@@ -122,28 +122,38 @@ impl LadServer {
         // FIX-5: Persist the page and final view into active_page so follow-up
         // tools (click, type, eval, screenshot) work after lad_browse.
         // FIX-R6-02: Use actual browser URL (not requested URL) to handle redirects.
+        // FIX-R9-01: Check SSRF BEFORE persisting — if pilot ended on unsafe URL,
+        // do NOT store the page (prevents follow-up tools from operating on it).
         {
             let browse_final_url = page.url().await.unwrap_or_else(|_| p.url.clone());
-            let final_view = a11y::extract_semantic_view(page.as_ref())
-                .await
-                .unwrap_or_else(|_| llm_as_dom::semantic::SemanticView {
-                    url: browse_final_url.clone(),
-                    title: String::new(),
-                    page_hint: String::new(),
-                    elements: vec![],
-                    forms: vec![],
-                    visible_text: String::new(),
-                    state: llm_as_dom::semantic::PageState::Ready,
-                    element_cap: None,
-                    blocked_reason: None,
-                    session_context: None,
+            if !llm_as_dom::sanitize::is_safe_url(&browse_final_url) {
+                tracing::warn!(
+                    url = %llm_as_dom::sanitize::redact_url_secrets(&browse_final_url),
+                    "lad_browse ended on unsafe URL — NOT persisting active_page"
+                );
+                // Don't persist — let the page drop
+            } else {
+                let final_view = a11y::extract_semantic_view(page.as_ref())
+                    .await
+                    .unwrap_or_else(|_| llm_as_dom::semantic::SemanticView {
+                        url: browse_final_url.clone(),
+                        title: String::new(),
+                        page_hint: String::new(),
+                        elements: vec![],
+                        forms: vec![],
+                        visible_text: String::new(),
+                        state: llm_as_dom::semantic::PageState::Ready,
+                        element_cap: None,
+                        blocked_reason: None,
+                        session_context: None,
+                    });
+                let mut active = self.active_page.lock().await;
+                *active = Some(crate::state::ActivePage {
+                    page,
+                    url: browse_final_url,
+                    view: final_view,
                 });
-            let mut active = self.active_page.lock().await;
-            *active = Some(crate::state::ActivePage {
-                page,
-                url: browse_final_url,
-                view: final_view,
-            });
+            }
         }
 
         // Always capture a final screenshot for visual verification.

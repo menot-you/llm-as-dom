@@ -96,6 +96,9 @@ pub(crate) struct SnapshotParams {
 pub(crate) struct ClickParams {
     /// Element ID from snapshot.
     pub element: u32,
+    /// If true, wait for the page to navigate after clicking before taking a new snapshot. Useful for links and submit buttons.
+    #[serde(default)]
+    pub wait_for_navigation: bool,
 }
 
 /// Parameters for the `lad_type` tool.
@@ -117,6 +120,9 @@ pub(crate) struct SelectParams {
     pub element: u32,
     /// Value to select.
     pub value: String,
+    /// If true, wait for the page to navigate after selecting before taking a new snapshot. Useful for dropdowns that auto-submit.
+    #[serde(default)]
+    pub wait_for_navigation: bool,
 }
 
 /// Parameters for the `lad_eval` tool.

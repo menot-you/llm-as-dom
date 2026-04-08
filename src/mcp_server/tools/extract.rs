@@ -68,7 +68,7 @@ impl LadServer {
             .count();
 
         let output = serde_json::json!({
-            "url": view.url,
+            "url": llm_as_dom::sanitize::redact_url_secrets(&view.url),
             "title": view.title,
             "page_type": view.page_hint,
             "elements_count": view.elements.len(),
