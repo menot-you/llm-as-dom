@@ -606,7 +606,9 @@ fn sanitize_view(view: &mut SemanticView) {
             el.name = Some(sanitize_text(name));
         }
         if let Some(ref href) = el.href {
-            el.href = Some(sanitize_text(href));
+            // FIX-3: Redact URL secrets from hrefs (tokens in query params).
+            let cleaned = sanitize_text(href);
+            el.href = Some(crate::sanitize::redact_url_secrets(&cleaned));
         }
         if let Some(ref ph) = el.placeholder {
             el.placeholder = Some(sanitize_text(ph));
@@ -730,7 +732,8 @@ mod tests {
         };
         sanitize_view(&mut view);
         assert_eq!(view.elements[0].name.as_deref(), Some("myname"));
-        assert_eq!(view.elements[0].href.as_deref(), Some("https://evil.com"));
+        // URL normalization by redact_url_secrets adds trailing slash.
+        assert_eq!(view.elements[0].href.as_deref(), Some("https://evil.com/"));
         assert_eq!(view.elements[0].input_type.as_deref(), Some("text"));
         assert_eq!(view.elements[0].context.as_deref(), Some("ctxval"));
     }

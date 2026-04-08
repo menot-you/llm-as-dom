@@ -297,6 +297,27 @@ pub fn redact_url_secrets(url: &str) -> String {
     }
 }
 
+/// FIX-2: Redact `Action::Type` values in serialized output.
+///
+/// When rendering pilot actions for the MCP response, masks the typed
+/// value so passwords and secrets are not leaked to the caller.
+pub fn redact_action_debug(action_debug: &str) -> String {
+    let re = regex::Regex::new(r#"Type \{ element: (\d+), value: "[^"]*""#).expect("valid regex");
+    re.replace_all(action_debug, r#"Type { element: $1, value: "[REDACTED]""#)
+        .into_owned()
+}
+
+/// FIX-6: Redact credential values from goal strings before storage.
+///
+/// Replaces values following credential keywords (password, passwd, secret,
+/// token, otp, pin, key) with `[REDACTED]`. Handles both quoted and unquoted values.
+pub fn redact_credentials_from_goal(goal: &str) -> String {
+    // Pattern: keyword followed by optional whitespace and either a quoted or unquoted value.
+    let re = regex::Regex::new(r"(?i)(password|passwd|secret|token|otp|pin|key|pass|pw)\s+(\S+)")
+        .expect("valid regex");
+    re.replace_all(goal, "$1 [REDACTED]").into_owned()
+}
+
 /// Generate a cryptographically random 32-character hex string for prompt boundaries.
 ///
 /// FIX-R3-06: Uses `getrandom` (CSPRNG) instead of `RandomState` + system time,
@@ -775,5 +796,56 @@ mod tests {
             mask_sensitive_value(None, Some("auth_token"), Some("xyz")),
             Some("[filled]".to_string()),
         );
+    }
+
+    // -- FIX-2: redact_action_debug --
+
+    #[test]
+    fn redact_action_debug_masks_type_value() {
+        let input = r#"Type { element: 3, value: "s3cret_password", reasoning: "fill pw" }"#;
+        let redacted = redact_action_debug(input);
+        assert!(!redacted.contains("s3cret_password"));
+        assert!(redacted.contains("[REDACTED]"));
+        assert!(redacted.contains("element: 3"));
+    }
+
+    #[test]
+    fn redact_action_debug_preserves_click() {
+        let input = r#"Click { element: 5, reasoning: "click submit" }"#;
+        let redacted = redact_action_debug(input);
+        assert_eq!(redacted, input);
+    }
+
+    // -- FIX-6: redact_credentials_from_goal --
+
+    #[test]
+    fn redact_goal_password() {
+        let goal = "login as admin password secret123";
+        let redacted = redact_credentials_from_goal(goal);
+        assert!(!redacted.contains("secret123"));
+        assert!(redacted.contains("password [REDACTED]"));
+    }
+
+    #[test]
+    fn redact_goal_pw() {
+        let goal = "login as testuser pw hunter2";
+        let redacted = redact_credentials_from_goal(goal);
+        assert!(!redacted.contains("hunter2"));
+        assert!(redacted.contains("pw [REDACTED]"));
+    }
+
+    #[test]
+    fn redact_goal_token() {
+        let goal = "authenticate with token abc123def";
+        let redacted = redact_credentials_from_goal(goal);
+        assert!(!redacted.contains("abc123def"));
+        assert!(redacted.contains("token [REDACTED]"));
+    }
+
+    #[test]
+    fn redact_goal_no_credentials() {
+        let goal = "navigate to the dashboard page";
+        let redacted = redact_credentials_from_goal(goal);
+        assert_eq!(redacted, goal);
     }
 }

@@ -62,12 +62,14 @@ impl EventBuffer {
     }
 
     /// Push a new event, trimming the oldest if at capacity.
+    ///
+    /// FIX-4: URL is redacted to strip tokens/secrets from watch events.
     pub async fn push(&self, url: &str, diff: SemanticDiff) -> u64 {
         let seq = self.seq.fetch_add(1, Ordering::SeqCst);
         let event = WatchEvent {
             seq,
             timestamp_ms: now_ms(),
-            url: url.to_owned(),
+            url: crate::sanitize::redact_url_secrets(url),
             diff,
         };
         let mut buf = self.inner.lock().await;
@@ -290,7 +292,8 @@ mod tests {
         let events = buf.events_since(None).await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].seq, 0);
-        assert_eq!(events[0].url, "http://test");
+        // URL normalized by redact_url_secrets (adds trailing slash).
+        assert_eq!(events[0].url, "http://test/");
     }
 
     #[tokio::test]

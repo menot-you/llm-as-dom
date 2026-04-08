@@ -52,8 +52,15 @@ impl LadServer {
         if has_cookies {
             tracing::info!("injecting profile cookies and reloading");
             self.inject_profile_cookies(page.as_ref()).await;
-            page.navigate(&p.url).await.map_err(mcp_err)?;
+            page.navigate(&final_url).await.map_err(mcp_err)?;
             page.wait_for_navigation().await.map_err(mcp_err)?;
+
+            let reloaded_url = page.url().await.map_err(mcp_err)?;
+            if !llm_as_dom::sanitize::is_safe_url(&reloaded_url) {
+                return Err(mcp_err(format!(
+                    "blocked: redirected to unsafe URL {reloaded_url}"
+                )));
+            }
         }
 
         tracing::info!("waiting for content to stabilise");
@@ -101,7 +108,9 @@ impl LadServer {
                 session.visited_urls.remove(0);
             }
             if result.success {
-                session.last_success_goal = Some(p.goal.clone());
+                // FIX-6: Redact credentials from goal before storage.
+                session.last_success_goal =
+                    Some(llm_as_dom::sanitize::redact_credentials_from_goal(&p.goal));
                 // Detect if login was the goal
                 let goal_lower = p.goal.to_lowercase();
                 if goal_lower.contains("login") || goal_lower.contains("sign in") {
@@ -154,19 +163,20 @@ impl LadServer {
             })
         };
 
+        // FIX-2: Redact Action::Type values so passwords don't leak to caller.
         let output = serde_json::json!({
             "success": result.success,
             "steps": result.steps.len(),
             "heuristic_steps": result.heuristic_hits,
             "llm_steps": result.llm_hits,
             "duration_secs": result.total_duration.as_secs_f64(),
-            "final_action": format!("{:?}", result.final_action),
+            "final_action": llm_as_dom::sanitize::redact_action_debug(&format!("{:?}", result.final_action)),
             "session": session_snapshot,
             "actions": result.steps.iter().map(|s| {
                 serde_json::json!({
                     "step": s.index,
                     "source": format!("{:?}", s.source),
-                    "action": format!("{:?}", s.action),
+                    "action": llm_as_dom::sanitize::redact_action_debug(&format!("{:?}", s.action)),
                     "duration_ms": s.duration.as_millis() as u64,
                 })
             }).collect::<Vec<_>>(),

@@ -259,6 +259,35 @@ pub async fn run_pilot(
             );
         }
 
+        // 4b. FIX-1: Post-action SSRF check — Click can trigger navigation
+        // (e.g. clicking a link), so verify the current URL is safe after
+        // EVERY action, not just Navigate.
+        if let Ok(current_url) = page.url().await
+            && !crate::sanitize::is_safe_url(&current_url)
+        {
+            let final_action = Action::Escalate {
+                reason: format!("redirected to unsafe URL after action: {current_url}"),
+            };
+            history.push(step);
+            let session_snapshot = match &session {
+                Some(s) => Some(s.lock().await.clone()),
+                None => None,
+            };
+            return Ok(PilotResult {
+                success: false,
+                steps: history,
+                final_action,
+                total_duration: run_start.elapsed(),
+                playbook_hits,
+                hints_hits,
+                heuristic_hits,
+                llm_hits,
+                retry_count: total_retries,
+                screenshots,
+                session_snapshot,
+            });
+        }
+
         // 5. Session tracking: extract cookies and record navigation.
         if let Some(ref session_arc) = session {
             track_session(session_arc, page, &step, &action).await;
