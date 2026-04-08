@@ -3,7 +3,7 @@
 //! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
 //! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
 //! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`, `lad_screenshot`,
-//! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`.
+//! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`, `lad_scroll`.
 
 mod assertions;
 mod helpers;
@@ -378,7 +378,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Get a structured semantic snapshot of the current page. Returns elements with IDs that can be used with lad_click/lad_type. Like Playwright's browser_snapshot but 10-60x fewer tokens."
+        description = "Get a structured semantic snapshot of the current page. Returns elements with IDs that can be used with lad_click/lad_type. URL is optional — omit it to re-read the current page without navigating (avoids accidentally undoing clicks). Like Playwright's browser_snapshot but 10-60x fewer tokens."
     )]
     async fn lad_snapshot(
         &self,
@@ -388,7 +388,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Click an element by its ID from lad_snapshot. Requires a prior lad_snapshot call."
+        description = "Click an element by its ID from lad_snapshot. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_click(
         &self,
@@ -398,7 +398,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Type text into an element by its ID from lad_snapshot. Requires a prior lad_snapshot call."
+        description = "Type text into an element by its ID from lad_snapshot. Set press_enter=true to submit after typing (saves a lad_press_key call). Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_type(
         &self,
@@ -408,7 +408,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Select an option in a dropdown by element ID from lad_snapshot. Requires a prior lad_snapshot call."
+        description = "Select an option in a dropdown by element ID from lad_snapshot. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_select(
         &self,
@@ -479,7 +479,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Hover over an element by its ID from lad_snapshot. Triggers mouseenter, mouseover, and mousemove events. Useful for dropdown menus, tooltips, and hover states. Requires a prior lad_snapshot call."
+        description = "Hover over an element by its ID from lad_snapshot. Triggers mouseenter, mouseover, and mousemove events. Useful for dropdown menus, tooltips, and hover states. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_hover(
         &self,
@@ -499,13 +499,23 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. Requires a prior lad_snapshot call."
+        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_upload(
         &self,
         params: Parameters<UploadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.tool_lad_upload(params).await
+    }
+
+    #[tool(
+        description = "Scroll the page or scroll to a specific element. Directions: down, up, bottom, top. Optionally scroll to an element by ID. Useful for lazy-loaded content and infinite scroll pages. Returns updated semantic view after scrolling. Requires a prior lad_snapshot or lad_browse call."
+    )]
+    async fn lad_scroll(
+        &self,
+        params: Parameters<ScrollParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_scroll(params).await
     }
 }
 
@@ -521,7 +531,7 @@ impl ServerHandler for LadServer {
                 .enable_resources_subscribe()
                 .build(),
         )
-        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots, lad_click/lad_type/lad_select for element interaction, lad_hover for hover states/tooltips/dropdowns, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection, lad_dialog for JS alert/confirm/prompt handling, lad_upload for file input uploads (Chromium only). Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation (returns semantic view), lad_extract for page analysis, lad_assert for verification, lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional — omit to re-read current page), lad_click/lad_type/lad_select for element interaction, lad_scroll for scrolling (down/up/bottom/top or to element), lad_hover for hover states/tooltips/dropdowns, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection, lad_dialog for JS alert/confirm/prompt handling, lad_upload for file input uploads (Chromium only). Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 
     async fn initialize(
@@ -1019,5 +1029,81 @@ mod tests {
         let json = r#"{"element":1,"files":["/tmp/file.txt"]}"#;
         let p: UploadParams = serde_json::from_str(json).unwrap();
         assert!(std::path::Path::new(&p.files[0]).is_absolute());
+    }
+
+    // ── DX-1: snapshot optional URL ─────────────────────────
+
+    #[test]
+    fn snapshot_params_with_url() {
+        let json = r#"{"url":"https://example.com"}"#;
+        let p: SnapshotParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.url.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn snapshot_params_without_url() {
+        let json = r#"{}"#;
+        let p: SnapshotParams = serde_json::from_str(json).unwrap();
+        assert!(p.url.is_none());
+    }
+
+    #[test]
+    fn snapshot_params_null_url() {
+        let json = r#"{"url":null}"#;
+        let p: SnapshotParams = serde_json::from_str(json).unwrap();
+        assert!(p.url.is_none());
+    }
+
+    // ── DX-4: type with press_enter ─────────────────────────
+
+    #[test]
+    fn type_params_default_no_enter() {
+        let json = r#"{"element":1,"text":"hello"}"#;
+        let p: TypeParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 1);
+        assert_eq!(p.text, "hello");
+        assert!(!p.press_enter);
+    }
+
+    #[test]
+    fn type_params_with_press_enter() {
+        let json = r#"{"element":5,"text":"search query","press_enter":true}"#;
+        let p: TypeParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 5);
+        assert_eq!(p.text, "search query");
+        assert!(p.press_enter);
+    }
+
+    // ── DX-5: scroll params ─────────────────────────────────
+
+    #[test]
+    fn scroll_params_defaults() {
+        let json = r#"{}"#;
+        let p: ScrollParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.direction, "down");
+        assert!(p.element.is_none());
+        assert_eq!(p.pixels, 600);
+    }
+
+    #[test]
+    fn scroll_params_custom_direction() {
+        let json = r#"{"direction":"bottom"}"#;
+        let p: ScrollParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.direction, "bottom");
+    }
+
+    #[test]
+    fn scroll_params_to_element() {
+        let json = r#"{"element":42}"#;
+        let p: ScrollParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, Some(42));
+    }
+
+    #[test]
+    fn scroll_params_custom_pixels() {
+        let json = r#"{"direction":"up","pixels":300}"#;
+        let p: ScrollParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.direction, "up");
+        assert_eq!(p.pixels, 300);
     }
 }
