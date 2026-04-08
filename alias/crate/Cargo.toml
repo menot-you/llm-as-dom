@@ -1,6 +1,6 @@
 [package]
 name = "llm-as-dom"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 description = "AI browser pilot — test your app 60x cheaper. Heuristics + cheap LLM navigate so expensive models never parse HTML. (Alias for menot-you-mcp-lad)"
 license = "AGPL-3.0-or-later"
@@ -14,4 +14,4 @@ categories = ["development-tools::testing", "web-programming"]
 name = "llm_as_dom_alias"
 
 [dependencies]
-menot-you-mcp-lad = { version = "=0.9.0", package = "menot-you-mcp-lad" }
+menot-you-mcp-lad = { version = "=0.10.0", package = "menot-you-mcp-lad" }
