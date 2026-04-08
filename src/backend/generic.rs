@@ -744,15 +744,20 @@ mod tests {
 
     #[test]
     fn backend_url_anthropic_detected() {
-        // When URL contains "anthropic", should pick Anthropic backend
-        // We just test the factory doesn't panic
-        let _backend =
+        // When URL contains "anthropic", should pick Anthropic backend.
+        // PilotBackend is not Debug, so we can only verify the factory returns
+        // without panicking. The URL dispatch logic is in backend::create_backend.
+        let backend =
             crate::backend::create_backend("https://api.anthropic.com/v1", "claude-3-haiku", None);
+        // Verify we got a backend (not a panic) — Box<dyn PilotBackend> is always Some.
+        // The real proof is that it uses AnthropicBackend internally.
+        let _ = &backend; // ensure not optimized away
     }
 
     #[test]
     fn backend_url_z_ai_detected() {
-        let _backend =
-            crate::backend::create_backend("https://api.z.ai/v1", "claude-3-haiku", None);
+        // z.ai URLs should also route to Anthropic backend (same API).
+        let backend = crate::backend::create_backend("https://api.z.ai/v1", "claude-3-haiku", None);
+        let _ = &backend; // ensure not optimized away
     }
 }

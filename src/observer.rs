@@ -137,4 +137,63 @@ mod tests {
         assert_eq!(d.removed.len(), 0);
         assert_eq!(d.notifications.len(), 2);
     }
+
+    #[test]
+    fn test_diff_removal_only() {
+        let old = make_view(vec![
+            make_element(1, "E-mail", None),
+            make_element(2, "Submit", None),
+        ]);
+        let new = make_view(vec![make_element(1, "E-mail", None)]);
+
+        let d = diff(&old, &new);
+        assert_eq!(d.added.len(), 0, "nothing added");
+        assert_eq!(d.changed.len(), 0, "nothing changed");
+        assert_eq!(d.removed.len(), 1, "one element removed");
+        assert_eq!(d.removed[0].id, 2, "removed element should be Submit");
+        assert!(
+            d.notifications.iter().any(|n| n.contains("removed")),
+            "should notify about removal"
+        );
+    }
+
+    #[test]
+    fn test_diff_empty_to_empty() {
+        let old = make_view(vec![]);
+        let new = make_view(vec![]);
+
+        let d = diff(&old, &new);
+        assert_eq!(d.added.len(), 0);
+        assert_eq!(d.changed.len(), 0);
+        assert_eq!(d.removed.len(), 0);
+        assert!(
+            d.notifications.is_empty(),
+            "empty→empty should have no notifications"
+        );
+    }
+
+    #[test]
+    fn test_diff_same_to_same() {
+        let old = make_view(vec![
+            make_element(1, "E-mail", Some("test@example.com")),
+            make_element(2, "Submit", None),
+        ]);
+        let new = make_view(vec![
+            make_element(1, "E-mail", Some("test@example.com")),
+            make_element(2, "Submit", None),
+        ]);
+
+        let d = diff(&old, &new);
+        assert_eq!(d.added.len(), 0, "identical views should have no additions");
+        assert_eq!(d.changed.len(), 0, "identical views should have no changes");
+        assert_eq!(
+            d.removed.len(),
+            0,
+            "identical views should have no removals"
+        );
+        assert!(
+            d.notifications.is_empty(),
+            "identical views should have no notifications"
+        );
+    }
 }

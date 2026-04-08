@@ -167,8 +167,15 @@ impl LadServer {
         let has_cookies = self.has_profile_cookies();
         if has_cookies {
             self.inject_profile_cookies(page.as_ref()).await;
-            page.navigate(url).await.map_err(mcp_err)?;
+            page.navigate(&final_url).await.map_err(mcp_err)?;
             page.wait_for_navigation().await.map_err(mcp_err)?;
+
+            let reloaded_url = page.url().await.map_err(mcp_err)?;
+            if !llm_as_dom::sanitize::is_safe_url(&reloaded_url) {
+                return Err(mcp_err(format!(
+                    "blocked: redirected to unsafe URL {reloaded_url}"
+                )));
+            }
         }
 
         a11y::wait_for_content(page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
@@ -206,6 +213,14 @@ impl LadServer {
             if ap.url != url {
                 ap.page.navigate(url).await.map_err(mcp_err)?;
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
+
+                let final_url = ap.page.url().await.map_err(mcp_err)?;
+                if !llm_as_dom::sanitize::is_safe_url(&final_url) {
+                    return Err(mcp_err(format!(
+                        "blocked: redirected to unsafe URL {final_url}"
+                    )));
+                }
+
                 a11y::wait_for_content(ap.page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
                     .await
                     .map_err(mcp_err)?;
@@ -784,14 +799,30 @@ mod tests {
 
     #[test]
     fn check_js_result_ok() {
+        // check_js_result expects a Value::String wrapping serialized JSON.
+        // This is the format returned by browser JS eval (JSON stringified result).
         let ok = serde_json::json!(r#"{"ok":true}"#);
         assert!(check_js_result(&ok).is_ok());
     }
 
     #[test]
     fn check_js_result_err() {
+        // Error case: stringified JSON containing an "error" key.
         let err = serde_json::json!(r#"{"error":"element 5 not found"}"#);
-        assert!(check_js_result(&err).is_err());
+        let result = check_js_result(&err);
+        assert!(result.is_err(), "should detect error in stringified JSON");
+    }
+
+    #[test]
+    fn check_js_result_object_passthrough() {
+        // NOTE: If the value is a raw JSON object (not a string), check_js_result
+        // skips the check (as_str() returns None) and returns Ok.
+        // This is intentional — browser eval returns stringified JSON.
+        let obj = serde_json::json!({"error": "this is an object, not a string"});
+        assert!(
+            check_js_result(&obj).is_ok(),
+            "raw JSON objects bypass the string-parse check — by design"
+        );
     }
 
     // ── Escape hatch helper tests ────────────────────────────────

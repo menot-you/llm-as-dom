@@ -410,6 +410,15 @@ mod tests {
     }
 
     #[test]
+    fn masks_by_name_passwd_confirm() {
+        // Edge case: password confirmation field with type="text" and name containing "passwd"
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("passwd_confirm"), Some("s3cret")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
     fn masks_by_name_secret() {
         assert_eq!(
             mask_sensitive_value(None, Some("api_secret"), Some("s3cret")),

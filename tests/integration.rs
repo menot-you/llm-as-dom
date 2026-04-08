@@ -92,7 +92,7 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
 // ── Browser tests (#[ignore]) ────────────────────────────────────────
 
 /// Launches a real browser, extracts example.com, asserts elements > 0.
-#[ignore]
+#[ignore = "requires Chrome + network — run with `cargo test -- --ignored`"]
 #[tokio::test]
 async fn test_extract_example_com() {
     use llm_as_dom::engine::chromium::ChromiumEngine;
@@ -122,7 +122,7 @@ async fn test_extract_example_com() {
 }
 
 /// Extracts HN login page, asserts page_hint == "login page".
-#[ignore]
+#[ignore = "requires Chrome + network — run with `cargo test -- --ignored`"]
 #[tokio::test]
 async fn test_extract_classifies_login_page() {
     use llm_as_dom::engine::chromium::ChromiumEngine;
@@ -1252,7 +1252,22 @@ fn test_both_disabled_falls_to_llm() {
     assert!(!config.use_hints);
     assert!(!config.use_heuristics);
     // With both disabled, only Tier 0 (playbook) and Tier 3 (LLM) remain.
-    // Since playbook_dir is None, only LLM would fire in a real run.
+    // Verify that try_resolve returns no action (confidence below threshold)
+    // when heuristics are conceptually disabled.
+    // We simulate by calling try_hints with a view that has no hints,
+    // confirming the hint path also returns nothing.
+    use llm_as_dom::heuristics::hints::try_hints;
+    let view = mock_view(
+        vec![input_element(0, "Email", "email", Some("email"), None)],
+        "login page",
+    );
+    let hint_result = try_hints(&view, "click something", &[]);
+    // No hints on elements → no resolution from hint tier
+    assert!(
+        hint_result.action.is_none(),
+        "with no hints, try_hints should return None, got {:?}",
+        hint_result.action
+    );
 }
 
 /// Default PilotConfig has both hints and heuristics enabled.
@@ -1487,12 +1502,27 @@ fn multistep_form_waits_when_unfilled() {
     // Only one field filled — should NOT advance
     let r = heuristics::try_resolve(&view, "fill wizard form", &[0]);
     // The multi-step heuristic should not fire; other heuristics might match
-    // but the key assertion is that "Continue" button is NOT the result
-    if let Some(Action::Click { element, .. }) = &r.action {
-        assert_ne!(
-            *element, 2,
-            "should NOT click Continue with unfilled fields"
-        );
+    // but the key assertion is that "Continue" button (element 2) is NOT clicked.
+    match &r.action {
+        Some(Action::Click { element, .. }) => {
+            assert_ne!(
+                *element, 2,
+                "should NOT click Continue with unfilled fields"
+            );
+        }
+        Some(Action::Type { .. }) => {
+            // Filling another field is acceptable
+        }
+        None => {
+            // No action is acceptable — heuristic defers to LLM
+        }
+        Some(other) => {
+            // Any other action that isn't clicking Continue is fine
+            assert!(
+                !matches!(other, Action::Click { element: 2, .. }),
+                "should NOT advance with unfilled fields, got {other:?}"
+            );
+        }
     }
 }
 
@@ -1550,12 +1580,11 @@ fn non_mfa_page_does_not_escalate() {
 
     let r = heuristics::try_resolve(&view, "view dashboard", &[]);
     // Should not produce an MFA escalation
-    if let Some(Action::Escalate { reason }) = &r.action {
-        assert!(
-            !reason.contains("MFA") && !reason.contains("2FA"),
-            "normal page should not trigger MFA escalation"
-        );
-    }
+    assert!(
+        !matches!(&r.action, Some(Action::Escalate { reason }) if reason.contains("MFA") || reason.contains("2FA")),
+        "normal dashboard page should not trigger MFA escalation, got {:?}",
+        r.action
+    );
 }
 
 // ── E-commerce tests ───────────────────────────────────────────────
@@ -1663,13 +1692,12 @@ fn clean_form_no_validation_escalation() {
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
-    // Should not escalate on a clean form
-    if let Some(Action::Escalate { reason }) = &r.action {
-        assert!(
-            !reason.contains("validation"),
-            "clean form should not trigger validation escalation"
-        );
-    }
+    // Should not escalate on a clean form (no validation errors in visible_text)
+    assert!(
+        !matches!(&r.action, Some(Action::Escalate { reason }) if reason.contains("validation")),
+        "clean form should not trigger validation escalation, got {:?}",
+        r.action
+    );
 }
 
 // ── Heuristic wiring order tests ───────────────────────────────────
@@ -1880,7 +1908,7 @@ fn multistep_module_direct_advance() {
 ///   (outer button, deep input, deep button)
 ///
 /// Total: at least 9 interactive elements should be found.
-#[ignore]
+#[ignore = "requires Chrome + local HTML fixture"]
 #[tokio::test]
 async fn test_extract_shadow_dom_elements() {
     use llm_as_dom::engine::chromium::ChromiumEngine;
@@ -2010,7 +2038,7 @@ async fn test_extract_shadow_dom_elements() {
 /// - 1 cross-origin iframe (should be silently skipped)
 ///
 /// Total: at least 6 interactive elements should be found.
-#[ignore]
+#[ignore = "requires Chrome + local HTML fixture"]
 #[tokio::test]
 async fn test_extract_iframe_elements() {
     use llm_as_dom::engine::chromium::ChromiumEngine;
