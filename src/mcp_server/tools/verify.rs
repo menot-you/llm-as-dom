@@ -12,14 +12,28 @@ use llm_as_dom::audit;
 
 impl LadServer {
     /// Assert conditions about a web page and return pass/fail results.
+    ///
+    /// DX-W2-1: `url` is now optional. When omitted, asserts against the
+    /// current active page without navigating — preserving session state.
     pub(crate) async fn tool_lad_assert(
         &self,
         params: Parameters<AssertParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(url = %p.url, assertions = ?p.assertions, "lad_assert");
+        tracing::info!(url = ?p.url, assertions = ?p.assertions, "lad_assert");
 
-        let (_page, view) = self.navigate_and_extract(&p.url).await?;
+        let view = if let Some(ref url) = p.url {
+            let (_page, view) = self.navigate_and_extract(url).await?;
+            view
+        } else {
+            self.refresh_active_view().await.map_err(|_| {
+                rmcp::ErrorData::invalid_params(
+                    "no active page — provide a URL or call lad_browse/lad_snapshot first"
+                        .to_string(),
+                    None,
+                )
+            })?
+        };
         let prompt_text = view.to_prompt();
 
         let mut results = Vec::new();
@@ -33,8 +47,9 @@ impl LadServer {
 
         let all_pass = results.iter().all(|r| r["pass"].as_bool().unwrap_or(false));
 
+        let safe_url = llm_as_dom::sanitize::redact_url_secrets(&view.url);
         let output = serde_json::json!({
-            "url": llm_as_dom::sanitize::redact_url_secrets(&view.url),
+            "url": safe_url,
             "title": view.title,
             "all_pass": all_pass,
             "results": results,

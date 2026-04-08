@@ -71,6 +71,12 @@ pub struct Element {
     /// Semantic hint from `@lad/hints` (`data-lad="field:email"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<ElementHint>,
+    /// Whether a checkbox/radio is checked (`None` for non-checkbox/radio elements).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    /// Visible option labels for `<select>` elements (top 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
     /// Index of the iframe this element belongs to (`None` if in the main document).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame_index: Option<u32>,
@@ -186,6 +192,18 @@ impl SemanticView {
             }
             if let Some(href) = &el.href {
                 let _ = write!(out, " href=\"{href}\"");
+            }
+            // DX-W2-4: Show form membership so agents can scope interactions.
+            if let Some(fi) = el.form_index {
+                let _ = write!(out, " form={fi}");
+            }
+            // DX-W2-2: Show checkbox/radio checked state.
+            if let Some(checked) = el.checked {
+                let _ = write!(out, " checked={checked}");
+            }
+            // DX-W2-2: Show select options.
+            if let Some(ref opts) = el.options {
+                let _ = write!(out, " options={opts:?}");
             }
             if let Some(hint) = &el.hint {
                 let _ = write!(out, " [hint:{}:{}]", hint.hint_type, hint.value);

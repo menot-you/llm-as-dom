@@ -9,7 +9,8 @@ use rmcp::model::*;
 use crate::LadServer;
 use crate::helpers::{build_element_js, check_js_result, key_to_code, mcp_err, no_active_page};
 use crate::params::{
-    ClickParams, HoverParams, PressKeyParams, ScrollParams, SelectParams, TypeParams, UploadParams,
+    ClickParams, FillFormParams, HoverParams, PressKeyParams, ScrollParams, SelectParams,
+    TypeParams, UploadParams,
 };
 
 use llm_as_dom::pilot;
@@ -205,10 +206,15 @@ impl LadServer {
         let p = params.0;
         tracing::info!(element = p.element, value = %p.value, wait_for_navigation = p.wait_for_navigation, "lad_select");
 
+        // DX-W2-5: Match by visible label text first, then fall back to value.
         let escaped = pilot::js_escape(&p.value);
         let body = format!(
             "if (el.tagName !== 'SELECT') return JSON.stringify({{ error: \"element {id} is not a <select>\" }});\n\
-             el.value = '{escaped}';\n\
+             const options = Array.from(el.options);\n\
+             let opt = options.find(o => o.textContent.trim().toLowerCase() === '{escaped}'.toLowerCase());\n\
+             if (!opt) opt = options.find(o => o.value === '{escaped}');\n\
+             if (!opt) return JSON.stringify({{ error: \"no option matching '{escaped}' in element {id}\" }});\n\
+             el.value = opt.value;\n\
              el.dispatchEvent(new Event('change', {{ bubbles: true }}));",
             id = p.element,
         );
@@ -428,6 +434,165 @@ impl LadServer {
                 "files": file_count,
                 "element": element_id,
             }),
+            view.to_prompt(),
+        ))]))
+    }
+
+    /// Fill multiple form fields at once and optionally submit.
+    ///
+    /// DX-W2-3: Batch form-fill reduces 3+ tool calls (type email, type password,
+    /// click submit) down to 1. Fields are matched by label, name, or placeholder
+    /// (case-insensitive) against the current semantic view.
+    pub(crate) async fn tool_lad_fill_form(
+        &self,
+        params: Parameters<FillFormParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(
+            fields = p.fields.len(),
+            submit = p.submit,
+            form_index = ?p.form_index,
+            "lad_fill_form"
+        );
+
+        if p.fields.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "fields must not be empty",
+                None,
+            ));
+        }
+
+        // Snapshot current view to find matching elements.
+        let view = {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            ap.view.clone()
+        };
+
+        // Build JS to fill each field in one eval call.
+        let mut fill_js = String::new();
+        let mut matched = 0u32;
+
+        for (field_key, field_value) in &p.fields {
+            let key_lower = field_key.to_lowercase();
+            let escaped_val = pilot::js_escape(field_value);
+
+            // Find matching element in the semantic view.
+            let matched_el = view.elements.iter().find(|el| {
+                // Scope to form_index if specified.
+                if let Some(fi) = p.form_index
+                    && el.form_index != Some(fi)
+                {
+                    return false;
+                }
+                // Match by label, name, or placeholder (case-insensitive).
+                let label_match = el.label.to_lowercase().contains(&key_lower);
+                let name_match = el
+                    .name
+                    .as_deref()
+                    .is_some_and(|n| n.to_lowercase().contains(&key_lower));
+                let ph_match = el
+                    .placeholder
+                    .as_deref()
+                    .is_some_and(|p| p.to_lowercase().contains(&key_lower));
+                label_match || name_match || ph_match
+            });
+
+            if let Some(el) = matched_el {
+                let body = format!(
+                    "el.focus();\n\
+                     el.value = '{escaped_val}';\n\
+                     el.dispatchEvent(new Event('input', {{ bubbles: true }}));\n\
+                     el.dispatchEvent(new Event('change', {{ bubbles: true }}));"
+                );
+                fill_js.push_str(&build_element_js(el.id, &body));
+                fill_js.push('\n');
+                matched += 1;
+            } else {
+                tracing::warn!(field = %field_key, "lad_fill_form: no matching element");
+            }
+        }
+
+        if matched == 0 {
+            return Err(rmcp::ErrorData::invalid_params(
+                format!(
+                    "no form elements matched any field key: {:?}",
+                    p.fields.keys().collect::<Vec<_>>()
+                ),
+                None,
+            ));
+        }
+
+        // Execute all field fills.
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            ap.page.eval_js(&fill_js).await.map_err(mcp_err)?;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(VALUE_SET_DELAY_MS)).await;
+
+        // Submit if requested.
+        if p.submit {
+            let submit_el = view.elements.iter().find(|el| {
+                if let Some(fi) = p.form_index
+                    && el.form_index != Some(fi)
+                {
+                    return false;
+                }
+                if el.kind != llm_as_dom::semantic::ElementKind::Button {
+                    return false;
+                }
+                let label_lower = el.label.to_lowercase();
+                let is_submit_type = el
+                    .input_type
+                    .as_deref()
+                    .is_some_and(|t| t.eq_ignore_ascii_case("submit"));
+                is_submit_type
+                    || label_lower.contains("submit")
+                    || label_lower.contains("login")
+                    || label_lower.contains("log in")
+                    || label_lower.contains("sign in")
+                    || label_lower.contains("sign up")
+                    || label_lower.contains("register")
+                    || label_lower.contains("continue")
+                    || label_lower.contains("send")
+                    || label_lower.contains("save")
+            });
+
+            if let Some(btn) = submit_el {
+                let click_js = build_element_js(btn.id, "el.click();");
+                {
+                    let mut active = self.active_page.lock().await;
+                    let ap = active.as_ref().ok_or_else(no_active_page)?;
+                    check_js_result(&ap.page.eval_js(&click_js).await.map_err(mcp_err)?)?;
+
+                    // Wait for potential navigation after submit.
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        ap.page.wait_for_navigation(),
+                    )
+                    .await;
+
+                    // SSRF gate after navigation.
+                    let current_url = ap.page.url().await.map_err(mcp_err)?;
+                    if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                        *active = None;
+                        return Err(mcp_err(format!(
+                            "blocked: form submission navigated to unsafe URL {current_url}"
+                        )));
+                    }
+                }
+            } else {
+                tracing::warn!("lad_fill_form: submit=true but no submit button found");
+            }
+        }
+
+        let view = self.refresh_active_view().await?;
+        let total = p.fields.len();
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Filled {matched}/{total} fields{}\n\n{}",
+            if p.submit { " + submitted" } else { "" },
             view.to_prompt(),
         ))]))
     }

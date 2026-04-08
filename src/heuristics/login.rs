@@ -509,6 +509,8 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            checked: None,
+            options: None,
             frame_index: None,
         });
         let result = try_detect_done(&view, "login as user pw pass").unwrap();
@@ -590,6 +592,8 @@ mod tests {
                 form_index: None,
                 context: None,
                 hint: None,
+                checked: None,
+                options: None,
                 frame_index: None,
             });
             v

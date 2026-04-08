@@ -16,12 +16,26 @@ impl LadServer {
     /// Elements whose label, name, placeholder, or href contain any word
     /// from `what` are promoted to the front; all elements are still
     /// returned but `relevant_count` tells the caller how many matched.
+    ///
+    /// DX-W2-1: `url` is now optional. When omitted, extracts from the
+    /// current active page without navigating — preserving session state.
     pub(crate) async fn tool_lad_extract(
         &self,
         params: Parameters<ExtractParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        let (_page, mut view) = self.navigate_and_extract(&p.url).await?;
+        let mut view = if let Some(ref url) = p.url {
+            let (_page, view) = self.navigate_and_extract(url).await?;
+            view
+        } else {
+            self.refresh_active_view().await.map_err(|_| {
+                rmcp::ErrorData::invalid_params(
+                    "no active page — provide a URL or call lad_browse/lad_snapshot first"
+                        .to_string(),
+                    None,
+                )
+            })?
+        };
 
         if let Some(max_len) = p.max_length
             && view.visible_text.len() > max_len

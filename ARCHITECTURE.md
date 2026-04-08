@@ -220,7 +220,7 @@ The MCP server (`llm-as-dom-mcp`) uses `rmcp 1.3` with stdio transport. Exposes 
 Client (Claude)                    llm-as-dom-mcp
     │                                 │
     ├─ initialize ───────────────────►│
-    │◄──── capabilities (22 tools) ───┤
+    │◄──── capabilities (23 tools) ───┤
     │                                 │
     │  ── Autonomous ──────────────── │
     ├─ lad_browse { url, goal } ─────►│── pilot loop (heuristics → LLM)
