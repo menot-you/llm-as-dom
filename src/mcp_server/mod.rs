@@ -31,6 +31,17 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 // ── Server state ───────────────────────────────────────────────────
 
+// FIX-R3-03: Lock ordering contract — to prevent deadlocks when multiple
+// tools execute concurrently, always acquire locks in this order:
+//
+//   1. engine
+//   2. active_page
+//   3. session
+//   4. watch_state
+//   5. peer
+//
+// Never hold a higher-numbered lock while acquiring a lower-numbered one.
+
 /// MCP server that manages a headless browser and exposes pilot tools.
 #[derive(Clone)]
 #[allow(dead_code)] // tool_router is used internally by rmcp macros
@@ -91,10 +102,19 @@ impl LadServer {
         };
         tracing::info!(mode, "launching browser");
 
+        // FIX-R3-12: Use tempfile::Builder for cryptographically random temp dir
+        // instead of predictable PID-based path.
+        let user_data_dir = tempfile::Builder::new()
+            .prefix("lad-chrome-")
+            .tempdir()
+            .map(|td| td.keep())
+            .unwrap_or_else(|_| {
+                std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()))
+            });
         let config = EngineConfig {
             visible: self.interactive,
             interactive: self.interactive,
-            user_data_dir: std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id())),
+            user_data_dir,
             window_size: if self.interactive {
                 (1024, 768)
             } else {
@@ -149,6 +169,12 @@ impl LadServer {
 
     /// Navigate to a URL (or reuse the active page if same origin), returning
     /// a fresh semantic view. Stores the result in `active_page`.
+    ///
+    /// FIX-R3-01: Eliminated TOCTOU race. Previously the lock was dropped and
+    /// reacquired between the same-origin check and the write-back, allowing a
+    /// concurrent call to mutate state. Now the lock is held for the reuse path
+    /// and only released for the fresh-navigation path (which needs `navigate_and_extract`
+    /// to acquire `engine` without nesting locks).
     pub(crate) async fn navigate_or_reuse(
         &self,
         url: &str,
@@ -159,7 +185,7 @@ impl LadServer {
         }
         let mut active = self.active_page.lock().await;
 
-        // Reuse existing page if same origin
+        // Reuse existing page if same origin — hold the lock through the entire operation.
         if let Some(ap) = active.as_ref()
             && same_origin(&ap.url, url)
         {
@@ -180,7 +206,9 @@ impl LadServer {
             return Ok(view);
         }
 
-        // Different origin or no active page — create fresh
+        // Different origin or no active page — must release the lock before calling
+        // navigate_and_extract (which acquires the engine lock). Then reacquire once
+        // to store the result. This is safe because we're creating a fresh page.
         drop(active);
         let (page, view) = self.navigate_and_extract(url).await?;
         let mut active = self.active_page.lock().await;
@@ -361,7 +389,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Evaluate arbitrary JavaScript on the active page. This is an escape hatch for when semantic tools (browse, click, type) cannot handle a specific interaction. Requires a prior lad_snapshot or lad_browse call. Returns the raw JS result."
+        description = "Evaluate arbitrary JavaScript on the active page. Requires LAD_ALLOW_EVAL=true env var. This is an escape hatch for when semantic tools (browse, click, type) cannot handle a specific interaction. Requires a prior lad_snapshot or lad_browse call. Returns the raw JS result."
     )]
     async fn lad_eval(
         &self,

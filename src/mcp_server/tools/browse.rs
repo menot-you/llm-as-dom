@@ -47,10 +47,13 @@ impl LadServer {
         // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
         self.inject_profile_cookies(page.as_ref()).await;
 
+        // FIX-R3-04: Clamp max_steps to prevent resource exhaustion.
+        let max_steps = p.max_steps.min(50);
+
         let backend = Self::create_backend(&self.llm_url, &self.llm_model, p.max_length);
         let config = pilot::PilotConfig {
             goal: p.goal.clone(),
-            max_steps: p.max_steps,
+            max_steps,
             use_hints: true,
             use_heuristics: true,
             playbook_dir: None,
@@ -74,7 +77,11 @@ impl LadServer {
         {
             let mut session = self.session.lock().await;
             session.browse_count += 1;
+            // FIX-R3-11: Cap visited_urls to prevent unbounded memory growth.
             session.visited_urls.push(p.url.clone());
+            if session.visited_urls.len() > 100 {
+                session.visited_urls.remove(0);
+            }
             if result.success {
                 session.last_success_goal = Some(p.goal.clone());
                 // Detect if login was the goal

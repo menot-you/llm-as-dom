@@ -19,10 +19,24 @@ fn sha256_prefix(data: &str) -> String {
 
 impl LadServer {
     /// Evaluate arbitrary JavaScript on the active page.
+    ///
+    /// FIX-R3-07: Gated behind `LAD_ALLOW_EVAL=true|1`. Returns an error
+    /// when the env var is absent or any other value, preventing accidental
+    /// arbitrary JS execution in production.
     pub(crate) async fn tool_lad_eval(
         &self,
         params: Parameters<EvalParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        // FIX-R3-07: Environment gate — reject if not explicitly enabled.
+        let eval_allowed = std::env::var("LAD_ALLOW_EVAL")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+        if !eval_allowed {
+            return Err(mcp_err(
+                "lad_eval disabled — set LAD_ALLOW_EVAL=true to enable arbitrary JS execution",
+            ));
+        }
+
         let p = params.0;
         // FIX-13: Log SHA256 hash of the script for audit trail, NOT the content.
         // Prevents secrets from leaking into tracing output.
