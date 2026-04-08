@@ -90,8 +90,12 @@ const BLOCKED_SCHEMES: &[&str] = &["file:", "javascript:", "data:", "blob:", "vb
 /// and documents the limitation that async DNS resolution is needed for
 /// full rebinding protection in production deployments.
 pub fn is_safe_url(url: &str) -> bool {
-    // Strip control chars for scheme check (catches java\x0Bscript: etc.)
-    let cleaned: String = url.chars().filter(|c| !c.is_control()).collect();
+    // PERF-P5: Use Cow — avoid allocation when URL has no control chars (common case).
+    let cleaned: std::borrow::Cow<'_, str> = if url.chars().any(|c| c.is_control()) {
+        std::borrow::Cow::Owned(url.chars().filter(|c| !c.is_control()).collect())
+    } else {
+        std::borrow::Cow::Borrowed(url)
+    };
     let lower = cleaned.trim().to_lowercase();
 
     // Block dangerous schemes even on raw string (before parsing).
@@ -297,13 +301,25 @@ pub fn redact_url_secrets(url: &str) -> String {
     }
 }
 
+/// PERF-P1: Compiled regex for redacting Type action values.
+static RE_ACTION_DEBUG: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r#"Type \{ element: (\d+), value: "[^"]*""#).expect("valid regex")
+});
+
+/// PERF-P1: Compiled regex for redacting credentials from goal strings.
+static RE_CREDENTIALS_GOAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)(password|passwd|secret|token|otp|pin|key|pass|pw)\s+(\S+)")
+        .expect("valid regex")
+});
+
 /// FIX-2: Redact `Action::Type` values in serialized output.
 ///
 /// When rendering pilot actions for the MCP response, masks the typed
 /// value so passwords and secrets are not leaked to the caller.
+/// PERF-P1: Uses pre-compiled regex via LazyLock.
 pub fn redact_action_debug(action_debug: &str) -> String {
-    let re = regex::Regex::new(r#"Type \{ element: (\d+), value: "[^"]*""#).expect("valid regex");
-    re.replace_all(action_debug, r#"Type { element: $1, value: "[REDACTED]""#)
+    RE_ACTION_DEBUG
+        .replace_all(action_debug, r#"Type { element: $1, value: "[REDACTED]""#)
         .into_owned()
 }
 
@@ -311,11 +327,11 @@ pub fn redact_action_debug(action_debug: &str) -> String {
 ///
 /// Replaces values following credential keywords (password, passwd, secret,
 /// token, otp, pin, key) with `[REDACTED]`. Handles both quoted and unquoted values.
+/// PERF-P1: Uses pre-compiled regex via LazyLock.
 pub fn redact_credentials_from_goal(goal: &str) -> String {
-    // Pattern: keyword followed by optional whitespace and either a quoted or unquoted value.
-    let re = regex::Regex::new(r"(?i)(password|passwd|secret|token|otp|pin|key|pass|pw)\s+(\S+)")
-        .expect("valid regex");
-    re.replace_all(goal, "$1 [REDACTED]").into_owned()
+    RE_CREDENTIALS_GOAL
+        .replace_all(goal, "$1 [REDACTED]")
+        .into_owned()
 }
 
 /// Generate a cryptographically random 32-character hex string for prompt boundaries.
