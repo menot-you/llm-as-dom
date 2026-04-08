@@ -101,6 +101,7 @@ lad is **browser-agnostic**. The pilot, heuristics, and LLM reasoning never touc
 |--------|------|---------|-----------|
 | **Chromium** | `--engine chromium` (default) | Chrome/Chromium install | Linux, macOS, Windows |
 | **WebKit** | `--engine webkit` | Native WKWebView | macOS (zero install) |
+| **Remote (iOS)** | `LAD_WEBKIT_BRIDGE=lad-relay` | iPhone WKWebView | iOS 17+ (via Nott app) |
 
 ```bash
 # Chromium (default)
@@ -117,6 +118,26 @@ lad --url "https://example.com" --engine webkit --extract-only
 3. **System proxy** — WKWebView respects macOS proxy/VPN settings automatically.
 4. **Your protocol** — the WebKit adapter uses a simple stdin/stdout JSON protocol. Adding new engines (Firefox, Electron) means writing a ~300 line bridge app.
 
+### Remote Control (iOS)
+
+Pilot your iPhone's real Safari engine from your desktop. LAD sends commands, your phone executes them on WKWebView, you watch it happen live.
+
+```bash
+# 1. Start the relay (shows QR code in terminal)
+LAD_WEBKIT_BRIDGE=lad-relay lad --url "https://example.com" --engine webkit
+
+# 2. Open the Nott iOS app → Settings → Connect to LAD
+# 3. Scan the QR code (or paste the ws:// URL)
+# 4. Your iPhone is now a remote browser engine
+```
+
+**Why Remote Control?**
+- **Real Safari** — test on actual iOS WKWebView, not emulated
+- **Device features** — touch events, Safe Area, real viewport
+- **Token auth** — one-time 6-digit PIN, secure even on public Wi-Fi
+- **Auto-reconnect** — exponential backoff if connection drops
+- **Same API** — all 25 LAD tools work identically over Remote Control
+
 ### Architecture
 
 ```
@@ -129,17 +150,17 @@ lad --url "https://example.com" --engine webkit --extract-only
 │       │                                        │
 │  BrowserEngine trait ── PageHandle trait        │
 │       │                        │               │
-│  ┌────┴────┐            ┌─────┴─────┐         │
-│  │Chromium │            │  WebKit   │         │
-│  │Adapter  │            │  Adapter  │         │
-│  └────┬────┘            └─────┬─────┘         │
-└───────┼───────────────────────┼────────────────┘
-        │ CDP (WebSocket)       │ stdin/stdout JSON
-        ▼                       ▼
-   ┌─────────┐          ┌──────────────┐
-   │ Chrome  │          │ Swift macOS  │
-   │ process │          │ WKWebView    │
-   └─────────┘          └──────────────┘
+│  ┌────┴────┐     ┌─────┴─────┐     ┌──────┴──────┐  │
+│  │Chromium │     │  WebKit   │     │   Remote    │  │
+│  │Adapter  │     │  Adapter  │     │  (Relay)    │  │
+│  └────┬────┘     └─────┬─────┘     └──────┬──────┘  │
+└───────┼────────────────┼──────────────────┼─────────┘
+        │ CDP            │ stdin/stdout      │ stdin → WS
+        ▼                ▼                   ▼
+   ┌─────────┐    ┌──────────────┐   ┌──────────────┐
+   │ Chrome  │    │ Swift macOS  │   │ iPhone Nott  │
+   │ process │    │ WKWebView    │   │ WKWebView    │
+   └─────────┘    └──────────────┘   └──────────────┘
 ```
 
 The `PageHandle` trait has 9 methods. That's the entire browser API surface:
