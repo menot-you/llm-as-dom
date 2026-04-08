@@ -39,6 +39,9 @@ impl LadServer {
         tracing::info!("waiting for initial navigation");
         page.wait_for_navigation().await.map_err(mcp_err)?;
 
+        // Inject dialog overrides on the browse page (same as navigate_and_extract).
+        LadServer::inject_dialog_overrides(page.as_ref()).await;
+
         // FIX-R4-01: Post-redirect SSRF validation.
         let final_url = page.url().await.map_err(mcp_err)?;
         if !llm_as_dom::sanitize::is_safe_url(&final_url) {

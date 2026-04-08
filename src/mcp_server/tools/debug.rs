@@ -144,27 +144,30 @@ impl LadServer {
             _ => None,
         };
 
-        let filtered: Vec<(usize, &network::CapturedRequest)> = if let Some(kind) = filter_kind {
+        let filtered: Vec<&network::CapturedRequest> = if let Some(kind) = filter_kind {
             capture
                 .requests
                 .values()
-                .enumerate()
-                .filter(|(_, r)| r.kind == kind)
+                .filter(|r| r.kind == kind)
                 .collect()
         } else {
-            capture.requests.values().enumerate().collect()
+            capture.requests.values().collect()
         };
 
         let output = serde_json::json!({
             "summary": summary,
             "filter": p.filter,
             "count": filtered.len(),
-            "requests": filtered.iter().map(|(i, r)| {
-                let status = entries.get(*i)
-                    .and_then(|e| e["response_status"].as_u64())
-                    .unwrap_or(0);
-                let initiator = entries.get(*i)
-                    .and_then(|e| e["type"].as_str())
+            "requests": filtered.iter().map(|r| {
+                // Match by URL to correlate with performance entries (HashMap has no order)
+                let entry = entries.iter().find(|e| {
+                    e["name"].as_str().is_some_and(|name| name == r.url)
+                });
+                let status = entry
+                    .and_then(|e| e["responseStatus"].as_u64())
+                    .unwrap_or(r.status as u64);
+                let initiator = entry
+                    .and_then(|e| e["initiatorType"].as_str())
                     .unwrap_or("unknown");
                 serde_json::json!({
                     "url": llm_as_dom::sanitize::redact_url_secrets(&r.url),
