@@ -215,7 +215,9 @@ impl LadServer {
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
 
                 let final_url = ap.page.url().await.map_err(mcp_err)?;
+                // FIX-R8-01: Invalidate active_page on SSRF detection.
                 if !llm_as_dom::sanitize::is_safe_url(&final_url) {
+                    *active = None;
                     return Err(mcp_err(format!(
                         "blocked: redirected to unsafe URL {final_url}"
                     )));
@@ -279,10 +281,14 @@ impl LadServer {
 
         // FIX-R7-01: SSRF gate on EVERY refresh — catches delayed navigations
         // that evade per-tool checks (e.g. setTimeout-based location changes).
+        // FIX-R8-01: Invalidate active_page BEFORE returning the SSRF error.
+        // Without this, subsequent tools (screenshot, eval) still operate on
+        // the unsafe page because `active_page` remains populated.
         if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+            let redacted = llm_as_dom::sanitize::redact_url_secrets(&current_url);
+            *active = None;
             return Err(mcp_err(format!(
-                "blocked: page navigated to unsafe URL {}",
-                llm_as_dom::sanitize::redact_url_secrets(&current_url),
+                "blocked: page navigated to unsafe URL {redacted}",
             )));
         }
 
@@ -532,7 +538,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. File inputs inside shadow DOM or cross-origin iframes are not supported for upload (the CDP set_input_files call uses flat CSS selectors). Requires a prior lad_snapshot or lad_browse call."
+        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. File inputs inside shadow DOM or iframes (including same-origin) are not supported for upload due to Chromium CDP limitations. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_upload(
         &self,
