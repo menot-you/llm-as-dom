@@ -36,16 +36,31 @@ impl LadServer {
         tracing::info!(url = %p.url, "launching page");
         let engine = self.ensure_engine().await.map_err(mcp_err)?;
         let page = engine.new_page(&p.url).await.map_err(mcp_err)?;
-        tracing::info!("waiting for navigation");
+        tracing::info!("waiting for initial navigation");
         page.wait_for_navigation().await.map_err(mcp_err)?;
+
+        // FIX-R4-01: Post-redirect SSRF validation.
+        let final_url = page.url().await.map_err(mcp_err)?;
+        if !llm_as_dom::sanitize::is_safe_url(&final_url) {
+            return Err(mcp_err(format!(
+                "blocked: redirected to unsafe URL {final_url}"
+            )));
+        }
+
+        // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
+        let has_cookies = self.has_profile_cookies();
+        if has_cookies {
+            tracing::info!("injecting profile cookies and reloading");
+            self.inject_profile_cookies(page.as_ref()).await;
+            page.navigate(&p.url).await.map_err(mcp_err)?;
+            page.wait_for_navigation().await.map_err(mcp_err)?;
+        }
+
         tracing::info!("waiting for content to stabilise");
         a11y::wait_for_content(page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
             .await
             .map_err(mcp_err)?;
         tracing::info!("page ready, initialising pilot");
-
-        // Inject Chrome profile cookies if LAD_CHROME_PROFILE is set
-        self.inject_profile_cookies(page.as_ref()).await;
 
         // FIX-R3-04: Clamp max_steps to prevent resource exhaustion.
         let max_steps = p.max_steps.min(50);
@@ -78,7 +93,10 @@ impl LadServer {
             let mut session = self.session.lock().await;
             session.browse_count += 1;
             // FIX-R3-11: Cap visited_urls to prevent unbounded memory growth.
-            session.visited_urls.push(p.url.clone());
+            // FIX-R4-02: Redact secrets from stored URLs.
+            session
+                .visited_urls
+                .push(llm_as_dom::sanitize::redact_url_secrets(&p.url));
             if session.visited_urls.len() > 100 {
                 session.visited_urls.remove(0);
             }

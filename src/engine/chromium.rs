@@ -12,6 +12,7 @@ use super::{BrowserEngine, EngineConfig, PageHandle};
 pub struct ChromiumEngine {
     browser: Arc<chromiumoxide::Browser>,
     _handler: tokio::task::JoinHandle<()>,
+    _temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
 }
 
 impl ChromiumEngine {
@@ -76,6 +77,7 @@ impl ChromiumEngine {
         Ok(Self {
             browser: Arc::new(browser),
             _handler: handle,
+            _temp_dir: config.temp_dir,
         })
     }
 

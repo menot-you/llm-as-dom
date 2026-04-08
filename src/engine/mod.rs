@@ -19,6 +19,8 @@ pub struct EngineConfig {
     pub interactive: bool,
     /// User data directory for browser profile isolation.
     pub user_data_dir: std::path::PathBuf,
+    /// Handle to the temporary directory to ensure it is dropped when the engine is dropped.
+    pub temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
     /// Browser window dimensions (width, height).
     pub window_size: (u32, u32),
 }
@@ -27,17 +29,21 @@ impl Default for EngineConfig {
     fn default() -> Self {
         // FIX-R3-12: Use tempfile::Builder for cryptographically random directory
         // names with 0o700 permissions, replacing the predictable PID-based path.
-        let user_data_dir = tempfile::Builder::new()
+        let td = tempfile::Builder::new()
             .prefix("lad-browser-")
             .tempdir()
-            .map(|td| td.keep())
-            .unwrap_or_else(|_| {
+            .ok();
+        let user_data_dir = td
+            .as_ref()
+            .map(|t| t.path().to_path_buf())
+            .unwrap_or_else(|| {
                 std::env::temp_dir().join(format!("lad-browser-{}", std::process::id()))
             });
         Self {
             visible: false,
             interactive: false,
             user_data_dir,
+            temp_dir: td.map(std::sync::Arc::new),
             window_size: (1280, 800),
         }
     }

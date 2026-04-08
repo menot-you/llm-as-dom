@@ -142,6 +142,15 @@ pub async fn execute_action(
             }
             page.navigate(url).await?;
             tokio::time::sleep(Duration::from_millis(1000)).await;
+            // FIX-R4-01: Post-redirect SSRF validation. The browser may have
+            // followed redirects to a private IP via an open redirect.
+            if let Ok(final_url) = page.url().await
+                && !crate::sanitize::is_safe_url(&final_url)
+            {
+                return Err(crate::Error::ActionFailed(format!(
+                    "blocked: redirected to unsafe URL {final_url}"
+                )));
+            }
         }
         Action::Done { .. } | Action::Escalate { .. } => {}
     }

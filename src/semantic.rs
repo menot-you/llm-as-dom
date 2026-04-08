@@ -149,9 +149,15 @@ pub enum PageState {
 
 impl SemanticView {
     /// Format as compact text for an LLM prompt (not JSON -- saves tokens).
+    ///
+    /// FIX-R4-02: URL is redacted to strip OAuth codes, tokens, magic links.
     pub fn to_prompt(&self) -> String {
         let mut out = String::with_capacity(512);
-        let _ = writeln!(out, "URL: {}", self.url);
+        let _ = writeln!(
+            out,
+            "URL: {}",
+            crate::sanitize::redact_url_secrets(&self.url)
+        );
         let _ = writeln!(out, "TITLE: {}", self.title);
         let _ = writeln!(out, "HINT: {}", self.page_hint);
         let _ = writeln!(out, "STATE: {:?}", self.state);
@@ -226,7 +232,9 @@ pub fn format_session_context(session: &crate::session::SessionState) -> String 
     if !session.navigation_history.is_empty() {
         out.push_str("SESSION CONTEXT:\n");
         for entry in session.navigation_history.iter().rev().take(3) {
-            let _ = writeln!(out, "  - visited: {} ({})", entry.url, entry.title);
+            // FIX-R4-02: Redact secrets from URLs in session context.
+            let safe_url = crate::sanitize::redact_url_secrets(&entry.url);
+            let _ = writeln!(out, "  - visited: {} ({})", safe_url, entry.title);
             for action in &entry.actions_taken {
                 let _ = writeln!(out, "    action: {}", action);
             }
