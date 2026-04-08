@@ -218,29 +218,14 @@ pub fn is_safe_upload_path(path: &std::path::Path) -> bool {
     false
 }
 
-/// Generate a random 16-character hex string for prompt boundaries.
+/// Generate a cryptographically random 32-character hex string for prompt boundaries.
 ///
-/// Uses `std::collections::hash_map::RandomState` as an entropy source
-/// to avoid adding `uuid` or `rand` as dependencies.
+/// FIX-R3-06: Uses `getrandom` (CSPRNG) instead of `RandomState` + system time,
+/// which was not cryptographically secure and could be predicted.
 pub fn random_boundary() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-
-    let state = RandomState::new();
-    let mut h1 = state.build_hasher();
-    h1.write_u64(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64,
-    );
-    let a = h1.finish();
-
-    let mut h2 = state.build_hasher();
-    h2.write_u64(a.wrapping_mul(0x517cc1b727220a95));
-    let b = h2.finish();
-
-    format!("{a:016x}{b:016x}")
+    let mut buf = [0u8; 16];
+    getrandom::getrandom(&mut buf).expect("failed to get random bytes from OS CSPRNG");
+    buf.iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 #[cfg(test)]

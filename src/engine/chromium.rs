@@ -49,12 +49,18 @@ impl ChromiumEngine {
 
         builder = builder
             .arg("--disable-gpu")
-            .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
             .arg(format!(
                 "--user-data-dir={}",
                 config.user_data_dir.display()
             ));
+
+        // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
+        // --no-sandbox is a significant security reduction; only enable when necessary.
+        if should_disable_sandbox() {
+            builder = builder.arg("--no-sandbox");
+            tracing::info!("chromium sandbox disabled (container or LAD_NO_SANDBOX=true)");
+        }
 
         let browser_config = builder.build().map_err(crate::Error::Browser)?;
 
@@ -258,6 +264,11 @@ impl PageHandle for ChromiumPage {
         Ok(cookies)
     }
 
+    /// FIX-R3-13: Cookie values are NEVER logged. We log only the count.
+    /// The JS expression sent to `page.evaluate` contains cookie values but
+    /// chromiumoxide does not log evaluate expressions at info/warn level.
+    /// If RUST_LOG includes chromiumoxide=debug, CDP traffic may expose values —
+    /// avoid debug-level logging for chromiumoxide in production.
     async fn set_cookies(
         &self,
         cookies: &[crate::session::CookieEntry],
@@ -330,6 +341,23 @@ impl PageHandle for ChromiumPage {
         tracing::debug!("network tracking enabled");
         Ok(true)
     }
+}
+
+/// FIX-R3-10: Determine whether `--no-sandbox` should be passed to Chromium.
+///
+/// Returns `true` when the `LAD_NO_SANDBOX` env var is explicitly set to `true`/`1`,
+/// or when running inside a Docker/containerd container (auto-detected via
+/// `/.dockerenv` or `/proc/1/cgroup`).
+fn should_disable_sandbox() -> bool {
+    if std::env::var("LAD_NO_SANDBOX").is_ok_and(|v| v == "true" || v == "1") {
+        return true;
+    }
+    // Auto-detect container environment
+    if std::path::Path::new("/.dockerenv").exists() {
+        return true;
+    }
+    std::fs::read_to_string("/proc/1/cgroup")
+        .is_ok_and(|s| s.contains("docker") || s.contains("containerd"))
 }
 
 /// Convert a CDP error to our unified error type.

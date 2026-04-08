@@ -50,6 +50,12 @@ pub fn derive_key(password: &str) -> [u8; 16] {
 ///
 /// Layout: `v10` | `v11` (3-byte prefix) ++ AES-128-CBC ciphertext.
 /// IV is 16 bytes of `0x20` (space character).
+///
+/// FIX-R3-05: The static IV (`[0x20; 16]`) is intentional and matches Chrome's
+/// own implementation in `os_crypt_async.cc`. Chrome uses a fixed IV because the
+/// encryption key is already derived per-profile via PBKDF2 from the Safe Storage
+/// keychain entry. Changing the IV would break compatibility with Chrome's cookie
+/// database. This is NOT a vulnerability — it's a protocol requirement.
 pub fn decrypt_cookie_value(encrypted: &[u8], key: &[u8; 16]) -> Result<String, crate::Error> {
     if encrypted.len() < 3 {
         return Err(crate::Error::ActionFailed(

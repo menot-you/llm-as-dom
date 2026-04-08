@@ -11,28 +11,29 @@ use llm_as_dom::pilot;
 
 impl LadServer {
     /// Navigate back in browser history.
+    ///
+    /// FIX-R3-02: Hold a single lock through the entire back-navigate-wait-refresh
+    /// cycle to eliminate the stale URL window where concurrent tools could observe
+    /// inconsistent state between the history.back() and the view refresh.
     pub(crate) async fn tool_lad_back(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         tracing::info!("lad_back");
 
-        {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
-            ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
-        }
+        let mut active = self.active_page.lock().await;
+        let ap = active.as_mut().ok_or_else(no_active_page)?;
+
+        ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
 
         // Wait for navigation to settle
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let view = self.refresh_active_view().await?;
 
-        // Update stored URL to match where we ended up
-        {
-            let mut active = self.active_page.lock().await;
-            if let Some(ap) = active.as_mut()
-                && let Ok(url) = ap.page.url().await
-            {
-                ap.url = url;
-            }
+        // Refresh view and URL while still holding the lock
+        let view = llm_as_dom::a11y::extract_semantic_view(ap.page.as_ref())
+            .await
+            .map_err(mcp_err)?;
+        if let Ok(url) = ap.page.url().await {
+            ap.url = url;
         }
+        ap.view = view.clone();
 
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),

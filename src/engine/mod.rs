@@ -25,10 +25,19 @@ pub struct EngineConfig {
 
 impl Default for EngineConfig {
     fn default() -> Self {
+        // FIX-R3-12: Use tempfile::Builder for cryptographically random directory
+        // names with 0o700 permissions, replacing the predictable PID-based path.
+        let user_data_dir = tempfile::Builder::new()
+            .prefix("lad-browser-")
+            .tempdir()
+            .map(|td| td.keep())
+            .unwrap_or_else(|_| {
+                std::env::temp_dir().join(format!("lad-browser-{}", std::process::id()))
+            });
         Self {
             visible: false,
             interactive: false,
-            user_data_dir: std::env::temp_dir().join(format!("lad-browser-{}", std::process::id())),
+            user_data_dir,
             window_size: (1280, 800),
         }
     }

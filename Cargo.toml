@@ -25,6 +25,8 @@ path = "src/mcp_server/mod.rs"
 
 [dependencies]
 # Browser (CDP)
+# NOTE: chromiumoxide pulls async-std transitively (RUSTSEC-2025-0052).
+# Track chromiumoxide releases for an upgrade that drops async-std. (FIX-R3-09)
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
 futures = "0.3"
 
@@ -69,13 +71,18 @@ regex = "1"
 # Cryptographic hashing (FIX-13: audit trail for lad_eval scripts)
 sha2 = "0.10"
 
+# CSPRNG for prompt boundary generation (FIX-R3-06)
+getrandom = "0.2"
+
+# Secure temp directory creation (FIX-R3-12)
+tempfile = "3"
+
 # Misc
 async-trait = "0.1"
 thiserror = "2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-tempfile = "3"
 
 [[bench]]
 name = "core"

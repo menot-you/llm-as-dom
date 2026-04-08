@@ -114,15 +114,27 @@ pub struct WatchState {
 }
 
 impl WatchState {
-    /// Stop the background polling task.
+    /// Stop the background polling task and return the event buffer.
+    ///
+    /// Clones the `EventBuffer` (cheap — it's `Arc`-backed) because the `Drop`
+    /// impl also needs the `task_handle` to abort on implicit drop.
     pub fn stop(self) -> EventBuffer {
-        self.task_handle.abort();
-        self.events
+        // `Drop` will call `self.task_handle.abort()` automatically.
+        self.events.clone()
     }
 
     /// Build a `watch://` URI for MCP resource notifications.
     pub fn resource_uri(&self) -> String {
         format!("watch://{}", sanitize_uri(&self.url))
+    }
+}
+
+/// FIX-R3-08: Auto-abort the watch polling task on drop so it never leaks
+/// when the server disconnects or the WatchState is replaced without
+/// an explicit `stop()` call.
+impl Drop for WatchState {
+    fn drop(&mut self) {
+        self.task_handle.abort();
     }
 }
 
