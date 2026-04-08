@@ -3,9 +3,8 @@
 // The iPhone connects outbound to the desktop's lad-relay WebSocket server.
 // Receives NDJSON commands, dispatches to WKWebView, returns responses.
 //
-// FIX-G1: Removed nonisolated(unsafe), use DispatchQueue for thread safety.
-// FIX-G2: NDJSON framing — append \n to sends, split multi-line receives.
-// FIX-G3: WebSocket keep-alive via periodic ping.
+// Round 1 fixes: G1 (queue), G2 (NDJSON framing), G3 (ping), G4 (deinit leaks)
+// Round 2 fixes: G7 (retain cycle), G8 (DispatchSourceTimer), G9 (receive teardown)
 
 import Foundation
 import os
@@ -39,7 +38,8 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
     private var state: RelayConnectionState = .disconnected
-    private var pingTimer: Timer?
+    // FIX-G8: DispatchSourceTimer instead of Timer to avoid main-thread data race.
+    private var pingTimer: DispatchSourceTimer?
 
     @MainActor public weak var delegate: RelayConnectionDelegate?
 
@@ -50,9 +50,8 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     }
 
     deinit {
-        // FIX-G4: Prevent URLSession delegate retention leak.
         session?.invalidateAndCancel()
-        pingTimer?.invalidate()
+        pingTimer?.cancel()
     }
 
     /// Connect to the lad-relay server.
@@ -77,13 +76,15 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Disconnect gracefully.
+    /// Disconnect gracefully. Breaks URLSession retain cycle.
     public func disconnect() {
         queue.async { [self] in
-            pingTimer?.invalidate()
+            guard !isDisconnected else { return } // Prevent double-disconnect.
+            pingTimer?.cancel()
             pingTimer = nil
             task?.cancel(with: .normalClosure, reason: nil)
             task = nil
+            // FIX-G7: invalidateAndCancel breaks URLSession → delegate retain cycle.
             session?.invalidateAndCancel()
             session = nil
             updateState(.disconnected)
@@ -101,7 +102,6 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
             do {
                 let data = try JSONEncoder().encode(response)
                 guard var text = String(data: data, encoding: .utf8) else { return }
-                // FIX-G2: NDJSON requires trailing newline.
                 if !text.hasSuffix("\n") { text.append("\n") }
                 task.send(.string(text)) { [weak self] error in
                     if let error {
@@ -130,7 +130,6 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     // MARK: - Private
 
     private func receiveLoop() {
-        // dispatchPrecondition(condition: .onQueue(queue)) — can't check, called from callback too.
         task?.receive { [weak self] result in
             guard let self else { return }
             self.queue.async {
@@ -146,6 +145,8 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
                 case .failure(let error):
                     self.logger.error("receive error: \(error.localizedDescription)")
                     self.updateState(.error(error.localizedDescription))
+                    // FIX-G9: Tear down on fatal receive error.
+                    self.disconnect()
                 default:
                     self.receiveLoop()
                 }
@@ -154,7 +155,6 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     }
 
     private func handleMessage(_ text: String) {
-        // FIX-G2: A single WebSocket frame may contain multiple NDJSON lines.
         let lines = text.components(separatedBy: "\n").filter { !$0.isEmpty }
         for line in lines {
             guard let data = line.data(using: .utf8) else { continue }
@@ -169,20 +169,25 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
         }
     }
 
-    /// FIX-G3: Periodic ping to keep WebSocket alive through NAT.
+    /// FIX-G8: DispatchSourceTimer on `queue` — no main-thread data race.
     private func startPingTimer() {
-        DispatchQueue.main.async { [weak self] in
-            self?.pingTimer?.invalidate()
-            self?.pingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-                self?.queue.async {
-                    self?.task?.sendPing { error in
-                        if let error {
-                            self?.logger.warning("ping failed: \(error.localizedDescription)")
-                        }
-                    }
+        pingTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 30, repeating: 30)
+        timer.setEventHandler { [weak self] in
+            self?.task?.sendPing { error in
+                if let error {
+                    self?.logger.warning("ping failed: \(error.localizedDescription)")
                 }
             }
         }
+        timer.resume()
+        pingTimer = timer
+    }
+
+    private var isDisconnected: Bool {
+        if case .disconnected = state { return true }
+        return false
     }
 
     private func updateState(_ newState: RelayConnectionState) {
@@ -216,7 +221,8 @@ extension RelayConnection: URLSessionWebSocketDelegate {
     ) {
         queue.async { [self] in
             logger.info("WebSocket closed: \(closeCode.rawValue)")
-            updateState(.disconnected)
+            // FIX-G7: Break URLSession retain cycle on server-initiated close.
+            disconnect()
         }
     }
 
@@ -229,6 +235,8 @@ extension RelayConnection: URLSessionWebSocketDelegate {
             queue.async { [self] in
                 logger.error("session error: \(error.localizedDescription)")
                 updateState(.error(error.localizedDescription))
+                // FIX-G7: Break URLSession retain cycle on error.
+                disconnect()
             }
         }
     }

@@ -137,9 +137,10 @@ public final class BridgeEngine: NSObject {
                 respond(.ok(cmd.id))
             } else {
                 navDelegate.addPendingWait(cmd.id)
-                // Timeout after 30s.
-                Task { @MainActor in
+                // FIX-G10: weak self prevents 30s artificial retain.
+                Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(30))
+                    guard let self else { return }
                     if self.navDelegate.removePendingWait(cmd.id) {
                         self.respond(.error(cmd.id, "navigation timeout"))
                     }
