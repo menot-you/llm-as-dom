@@ -9,14 +9,12 @@ use crate::params::{EvalParams, LocateParams, NetworkParams};
 
 use llm_as_dom::{locate, network};
 
-/// FIX-13: Truncate a string for safe logging. Avoids leaking secrets,
-/// long scripts, or password-containing goals into tracing output.
-fn redact_for_log(field: &str, max_len: usize) -> String {
-    if field.len() <= max_len {
-        field.to_string()
-    } else {
-        format!("{}...", &field[..field.floor_char_boundary(max_len)])
-    }
+/// FIX-13: Compute SHA256 hash prefix for audit trail logging.
+/// Logs a hash instead of the content to prevent secrets from appearing in logs.
+fn sha256_prefix(data: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(data.as_bytes());
+    format!("{:x}", hash)[..16].to_string()
 }
 
 impl LadServer {
@@ -26,11 +24,11 @@ impl LadServer {
         params: Parameters<EvalParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        // FIX-13+14: Truncate script in info log, add audit warning for
-        // arbitrary JS execution (this is an explicit escape hatch).
-        let truncated = redact_for_log(&p.script, 50);
-        tracing::info!(script = %truncated, "lad_eval");
-        tracing::warn!(script = %truncated, "lad_eval: arbitrary JS execution");
+        // FIX-13: Log SHA256 hash of the script for audit trail, NOT the content.
+        // Prevents secrets from leaking into tracing output.
+        let script_hash = sha256_prefix(&p.script);
+        tracing::info!(script_hash = %script_hash, len = p.script.len(), "lad_eval");
+        tracing::warn!(script_hash = %script_hash, len = p.script.len(), "lad_eval: arbitrary JS execution");
 
         let active = self.active_page.lock().await;
         let ap = active.as_ref().ok_or_else(no_active_page)?;

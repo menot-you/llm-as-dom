@@ -617,15 +617,22 @@ fn sanitize_view(view: &mut SemanticView) {
         if let Some(ref itype) = el.input_type {
             el.input_type = Some(sanitize_text(itype));
         }
-        // Mask passwords, sanitize other values
-        el.value = mask_sensitive_value(el.input_type.as_deref(), el.value.as_deref());
+        // FIX-10: Mask sensitive values by type AND name
+        el.value = mask_sensitive_value(
+            el.input_type.as_deref(),
+            el.name.as_deref(),
+            el.value.as_deref(),
+        );
         // Sanitize remaining non-masked values
-        if !el
+        let is_masked = el
             .input_type
             .as_deref()
             .is_some_and(|t| t.eq_ignore_ascii_case("password"))
-            && let Some(ref v) = el.value
-        {
+            || el.name.as_deref().is_some_and(|n| {
+                let lower = n.to_lowercase();
+                lower.contains("password") || lower.contains("passwd") || lower.contains("secret")
+            });
+        if !is_masked && let Some(ref v) = el.value {
             el.value = Some(sanitize_text(v));
         }
     }

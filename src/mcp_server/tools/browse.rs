@@ -18,6 +18,12 @@ impl LadServer {
         params: Parameters<BrowseParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
+
+        // FIX-1: SSRF gate — block unsafe URLs BEFORE any engine interaction.
+        if !llm_as_dom::sanitize::is_safe_url(&p.url) {
+            return Err(mcp_err(format!("blocked: unsafe URL '{}'", p.url)));
+        }
+
         // FIX-13: Mask anything after "password" keyword in goal for logging.
         let log_goal = if let Some(idx) = p.goal.to_lowercase().find("password") {
             let boundary = p.goal.ceil_char_boundary(idx + "password".len());

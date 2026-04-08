@@ -42,7 +42,36 @@ pub enum Action {
     Escalate { reason: String },
 }
 
+/// JS function for searching shadow roots and iframes recursively.
+/// Shared constant to keep action.rs and helpers.rs in sync (FIX-7).
+pub const DEEP_QUERY_SELECTOR_JS: &str = r#"
+function deepQuerySelector(root, sel) {
+    const found = root.querySelector(sel);
+    if (found) return found;
+    const all = root.querySelectorAll('*');
+    for (const node of all) {
+        if (node.shadowRoot) {
+            const sr = deepQuerySelector(node.shadowRoot, sel);
+            if (sr) return sr;
+        }
+    }
+    const iframes = root.querySelectorAll('iframe');
+    for (const iframe of iframes) {
+        try {
+            if (iframe.contentDocument) {
+                const ir = deepQuerySelector(iframe.contentDocument, sel);
+                if (ir) return ir;
+            }
+        } catch(_) {}
+    }
+    return null;
+}
+"#;
+
 /// Execute an action on the page via the engine-agnostic page handle.
+///
+/// FIX-7: Uses `deepQuerySelector` to search shadow DOM and iframes,
+/// not just `document.querySelector`.
 pub async fn execute_action(
     page: &dyn crate::engine::PageHandle,
     action: &Action,
@@ -50,8 +79,13 @@ pub async fn execute_action(
     match action {
         Action::Click { element, .. } => {
             let js = format!(
-                r#"document.querySelector('[data-lad-id="{}"]')?.click()"#,
-                element
+                r#"(() => {{
+                    {DEEP_QS}
+                    const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
+                    if (el) el.click();
+                }})()"#,
+                DEEP_QS = DEEP_QUERY_SELECTOR_JS,
+                id = element,
             );
             let _ = page.eval_js(&js).await?;
         }
@@ -59,7 +93,8 @@ pub async fn execute_action(
             let escaped = js_escape(value);
             let js = format!(
                 r#"(() => {{
-                    const el = document.querySelector('[data-lad-id="{}"]');
+                    {DEEP_QS}
+                    const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
                     if (el) {{
                         el.focus();
                         el.value = '{escaped}';
@@ -67,7 +102,8 @@ pub async fn execute_action(
                         el.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     }}
                 }})()"#,
-                element,
+                DEEP_QS = DEEP_QUERY_SELECTOR_JS,
+                id = element,
             );
             let _ = page.eval_js(&js).await?;
         }
@@ -75,10 +111,12 @@ pub async fn execute_action(
             let escaped = js_escape(value);
             let js = format!(
                 r#"(() => {{
-                    const el = document.querySelector('[data-lad-id="{}"]');
+                    {DEEP_QS}
+                    const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
                     if (el) {{ el.value = '{escaped}'; el.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
                 }})()"#,
-                element,
+                DEEP_QS = DEEP_QUERY_SELECTOR_JS,
+                id = element,
             );
             let _ = page.eval_js(&js).await?;
         }

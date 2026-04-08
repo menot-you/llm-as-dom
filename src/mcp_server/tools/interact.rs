@@ -60,16 +60,23 @@ impl LadServer {
         params: Parameters<TypeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        // FIX-13: Redact typed text if the target is a sensitive field.
+        // FIX-12+13: Redact typed text if the target is a sensitive field.
+        // Checks both input_type AND name for password/secret patterns.
         let log_text = {
             let active = self.active_page.lock().await;
             let is_sensitive = active.as_ref().is_some_and(|ap| {
                 ap.view.elements.iter().any(|el| {
                     el.id == p.element
-                        && el
+                        && (el
                             .input_type
                             .as_deref()
                             .is_some_and(|t| t.eq_ignore_ascii_case("password"))
+                            || el.name.as_deref().is_some_and(|n| {
+                                let lower = n.to_lowercase();
+                                lower.contains("password")
+                                    || lower.contains("passwd")
+                                    || lower.contains("secret")
+                            }))
                 })
             });
             if is_sensitive {
@@ -179,7 +186,18 @@ impl LadServer {
         params: Parameters<UploadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(element = p.element, files = ?p.files, "lad_upload");
+        // FIX-12: Log only filenames, not full paths (may contain user info).
+        let file_names: Vec<&str> = p
+            .files
+            .iter()
+            .map(|f| {
+                std::path::Path::new(f)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("[invalid]")
+            })
+            .collect();
+        tracing::info!(element = p.element, files = ?file_names, "lad_upload");
 
         if p.files.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
@@ -188,19 +206,29 @@ impl LadServer {
             ));
         }
 
-        // FIX-14: Validate all file paths are absolute (reject relative paths
-        // that could be used for path traversal).
+        // FIX-4: Validate all file paths are absolute AND within allowed roots.
+        // Prevents uploading /etc/passwd, SSH keys, etc. to attacker pages.
         for path in &p.files {
-            let p = std::path::Path::new(path);
-            if !p.is_absolute() {
+            let file_path = std::path::Path::new(path);
+            if !file_path.is_absolute() {
                 return Err(rmcp::ErrorData::invalid_params(
                     format!("file path must be absolute: {path}"),
                     None,
                 ));
             }
-            if !p.exists() {
+            if !file_path.exists() {
                 return Err(rmcp::ErrorData::invalid_params(
                     format!("file not found: {path}"),
+                    None,
+                ));
+            }
+            if !llm_as_dom::sanitize::is_safe_upload_path(file_path) {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!(
+                        "upload blocked: path '{}' is outside allowed roots (cwd, /tmp). \
+                         Set LAD_UPLOAD_ROOT to allow custom directories.",
+                        path
+                    ),
                     None,
                 ));
             }
