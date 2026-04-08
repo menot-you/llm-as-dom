@@ -123,13 +123,20 @@ impl LadServer {
         }
         let engine = self.ensure_engine().await.map_err(mcp_err)?;
 
-        // FIX-10: Inject cookies BEFORE navigating to the target URL so
-        // authenticated sessions are present on the initial request.
-        // Open about:blank first, inject cookies, then navigate.
-        let page = engine.new_page("about:blank").await.map_err(mcp_err)?;
-        self.inject_profile_cookies(page.as_ref()).await;
-        page.navigate(url).await.map_err(mcp_err)?;
+        // FIX-5: Navigate to target URL FIRST, then inject cookies, then reload.
+        // `about:blank` has null origin and cannot set cross-origin cookies via
+        // `document.cookie`. We must be on the target origin for cookie injection.
+        let page = engine.new_page(url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
+
+        // Inject cookies on the correct origin, then reload to apply them.
+        let has_cookies = self.has_profile_cookies();
+        if has_cookies {
+            self.inject_profile_cookies(page.as_ref()).await;
+            page.navigate(url).await.map_err(mcp_err)?;
+            page.wait_for_navigation().await.map_err(mcp_err)?;
+        }
+
         a11y::wait_for_content(page.as_ref(), a11y::DEFAULT_WAIT_TIMEOUT)
             .await
             .map_err(mcp_err)?;
@@ -196,6 +203,13 @@ impl LadServer {
             .map_err(mcp_err)?;
         ap.view = view.clone();
         Ok(view)
+    }
+
+    /// FIX-5: Check if Chrome profile cookies are configured (non-async).
+    pub(crate) fn has_profile_cookies(&self) -> bool {
+        std::env::var("LAD_CHROME_PROFILE")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
     }
 
     /// Inject cookies from the user's Chrome profile if `LAD_CHROME_PROFILE` is set.

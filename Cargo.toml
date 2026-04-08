@@ -63,6 +63,12 @@ sha1 = { version = "0.10", default-features = false }
 # URL parsing (SSRF protection in sanitize module)
 url = "2"
 
+# Regex (case-insensitive injection pattern matching, FIX-6)
+regex = "1"
+
+# Cryptographic hashing (FIX-13: audit trail for lad_eval scripts)
+sha2 = "0.10"
+
 # Misc
 async-trait = "0.1"
 thiserror = "2"
