@@ -29,7 +29,9 @@ pub async fn wait_for_captcha_resolution(
         }
     }
 
-    Err(crate::Error::Timeout)
+    Err(crate::Error::Timeout {
+        timeout_secs: timeout.as_secs(),
+    })
 }
 
 /// Outcome of handling a blocked page.

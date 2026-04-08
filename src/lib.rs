@@ -10,6 +10,7 @@ pub mod crypto;
 pub mod engine;
 pub mod error;
 pub mod heuristics;
+pub mod intent;
 pub mod locate;
 pub mod network;
 pub mod oauth;

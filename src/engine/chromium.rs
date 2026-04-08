@@ -203,7 +203,9 @@ impl PageHandle for ChromiumPage {
                 }
             }
             Ok(Err(e)) => Err(cdp_err(e)),
-            Err(_) => Err(crate::Error::Timeout),
+            Err(_) => Err(crate::Error::Timeout {
+                timeout_secs: EVAL_JS_TIMEOUT_SECS,
+            }),
         }
     }
 
@@ -274,7 +276,9 @@ impl PageHandle for ChromiumPage {
         let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
         let result: String = tokio::time::timeout(timeout, self.page.evaluate(js))
             .await
-            .map_err(|_| crate::Error::Timeout)?
+            .map_err(|_| crate::Error::Timeout {
+                timeout_secs: EVAL_JS_TIMEOUT_SECS,
+            })?
             .map_err(cdp_err)?
             .into_value()
             .map_err(|e| crate::Error::ActionFailed(e.to_string()))?;
@@ -351,7 +355,9 @@ impl PageHandle for ChromiumPage {
             let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
             let _ = tokio::time::timeout(timeout, self.page.evaluate(js))
                 .await
-                .map_err(|_| crate::Error::Timeout)?
+                .map_err(|_| crate::Error::Timeout {
+                    timeout_secs: EVAL_JS_TIMEOUT_SECS,
+                })?
                 .map_err(cdp_err)?;
         }
 

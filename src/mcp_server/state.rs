@@ -5,6 +5,11 @@ use llm_as_dom::semantic;
 use serde::Serialize;
 
 /// A page kept alive between `lad_snapshot` and subsequent interaction tools.
+///
+/// SS-6: `view` is stored as an owned `SemanticView` rather than `Arc<SemanticView>`.
+/// Clone cost is ~20us for a typical page (50 elements). `Arc` would save the
+/// clone but add contention on the refcount and complicate mutation in
+/// `refresh_active_view`. The owned clone is the right trade-off here.
 pub(crate) struct ActivePage {
     pub page: Box<dyn PageHandle>,
     pub url: String,
