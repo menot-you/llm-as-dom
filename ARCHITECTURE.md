@@ -14,7 +14,7 @@
 ```
 src/
 ├── main.rs              CLI binary (lad --engine chromium|webkit)
-├── mcp_server.rs        MCP binary (llm-as-dom-mcp), 21 semantic tools
+├── mcp_server.rs        MCP binary (llm-as-dom-mcp), 22 semantic tools
 ├── lib.rs               Library root
 │
 ├── engine/              Browser engine abstraction
@@ -220,7 +220,7 @@ The MCP server (`llm-as-dom-mcp`) uses `rmcp 1.3` with stdio transport. Exposes 
 Client (Claude)                    llm-as-dom-mcp
     │                                 │
     ├─ initialize ───────────────────►│
-    │◄──── capabilities (21 tools) ───┤
+    │◄──── capabilities (22 tools) ───┤
     │                                 │
     │  ── Autonomous ──────────────── │
     ├─ lad_browse { url, goal } ─────►│── pilot loop (heuristics → LLM)

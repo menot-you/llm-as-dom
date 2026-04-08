@@ -48,7 +48,10 @@ pub(crate) fn same_origin(a: &str, b: &str) -> bool {
 
 /// Build "no active page" error.
 pub(crate) fn no_active_page() -> rmcp::ErrorData {
-    rmcp::ErrorData::invalid_params("no active page — call lad_snapshot first".to_string(), None)
+    rmcp::ErrorData::invalid_params(
+        "no active page — call lad_snapshot or lad_browse first".to_string(),
+        None,
+    )
 }
 
 /// Check JS eval result for `{ error: "..." }` pattern and surface it.
