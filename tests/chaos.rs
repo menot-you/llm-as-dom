@@ -920,12 +920,21 @@ fn build_prompt_empty_goal() {
 /// All error variants format correctly.
 #[test]
 fn error_variants_format() {
-    let errors = vec![
+    let errors: Vec<llm_as_dom::Error> = vec![
         llm_as_dom::Error::Browser("chrome crashed".into()),
         llm_as_dom::Error::Backend("timeout".into()),
-        llm_as_dom::Error::Timeout,
+        llm_as_dom::Error::Timeout { timeout_secs: 30 },
         llm_as_dom::Error::ActionFailed("element not found".into()),
         llm_as_dom::Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
+        // SS-2: new structured variants
+        llm_as_dom::Error::Engine(Box::from("engine fail")),
+        llm_as_dom::Error::Dom("extraction fail".into()),
+        llm_as_dom::Error::Llm("model error".into()),
+        llm_as_dom::Error::Sanitize("bad input".into()),
+        llm_as_dom::Error::Ssrf {
+            url: "http://127.0.0.1".into(),
+        },
+        llm_as_dom::Error::Navigation("redirect loop".into()),
     ];
     for err in &errors {
         let msg = format!("{err}");
@@ -936,7 +945,7 @@ fn error_variants_format() {
 /// Error Debug trait works for all variants.
 #[test]
 fn error_debug_all_variants() {
-    let err = llm_as_dom::Error::Timeout;
+    let err = llm_as_dom::Error::Timeout { timeout_secs: 30 };
     let debug = format!("{err:?}");
     assert!(
         debug.contains("Timeout"),

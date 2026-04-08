@@ -77,7 +77,7 @@ impl BridgeConnection {
             )),
             Err(_) => {
                 self.pending.lock().await.remove(&id);
-                Err(crate::Error::Timeout)
+                Err(crate::Error::Timeout { timeout_secs: 30 })
             }
         }
     }

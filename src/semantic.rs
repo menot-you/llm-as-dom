@@ -306,8 +306,26 @@ impl SemanticView {
     }
 
     /// Rough token estimate (1 token ~ 4 chars).
+    ///
+    /// SS-5: Approximates byte count without generating the full prompt string.
+    /// Avoids the O(elements * label_len) allocation of `to_prompt()`.
     pub fn estimated_tokens(&self) -> usize {
-        self.to_prompt().len() / 4
+        let header = self.url.len() + self.title.len() + self.page_hint.len() + 50;
+        let elements: usize = self
+            .elements
+            .iter()
+            .map(|e| {
+                e.label.len()
+                    + e.name.as_ref().map_or(0, |n| n.len())
+                    + e.value.as_ref().map_or(0, |v| v.len())
+                    + e.placeholder.as_ref().map_or(0, |p| p.len())
+                    + e.href.as_ref().map_or(0, |h| h.len())
+                    + e.input_type.as_ref().map_or(0, |t| t.len())
+                    + 30 // per-element overhead (id, kind, formatting)
+            })
+            .sum();
+        let text = self.visible_text.len();
+        (header + elements + text) / 4
     }
 }
 

@@ -925,4 +925,28 @@ mod tests {
             "view should be truncated by budget accounting"
         );
     }
+
+    // -- SS-1: Property-based tests (proptest) --
+
+    mod prop {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// extract_balanced never panics on arbitrary input.
+            #[test]
+            fn extract_balanced_never_panics(s in "\\PC{0,500}") {
+                let _ = extract_balanced(&s, b'{', b'}');
+            }
+
+            /// extract_balanced: if it returns Some, the result starts with '{' and ends with '}'.
+            #[test]
+            fn extract_balanced_valid_bounds(s in "\\PC{0,300}") {
+                if let Some(result) = extract_balanced(&s, b'{', b'}') {
+                    prop_assert!(result.starts_with('{'), "result doesn't start with '{{': {result}");
+                    prop_assert!(result.ends_with('}'), "result doesn't end with '}}': {result}");
+                }
+            }
+        }
+    }
 }

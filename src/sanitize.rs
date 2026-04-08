@@ -864,4 +864,55 @@ mod tests {
         let redacted = redact_credentials_from_goal(goal);
         assert_eq!(redacted, goal);
     }
+
+    // -- SS-1: Property-based tests (proptest) --
+
+    mod prop {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// sanitize_text never produces steganographic chars.
+            #[test]
+            fn sanitize_text_removes_all_steganographic(s in "\\PC*") {
+                let out = sanitize_text(&s);
+                for ch in out.chars() {
+                    prop_assert!(!is_steganographic(ch), "steganographic char U+{:04X} survived", ch as u32);
+                }
+            }
+
+            /// sanitize_text preserves all non-steganographic chars.
+            #[test]
+            fn sanitize_text_preserves_normal(s in "[a-zA-Z0-9 .,!?@#%^&*()-=+]{0,200}") {
+                prop_assert_eq!(sanitize_text(&s), s);
+            }
+
+            /// is_safe_url never panics on arbitrary input.
+            #[test]
+            fn is_safe_url_never_panics(s in "\\PC{0,500}") {
+                let _ = is_safe_url(&s);
+            }
+
+            /// redact_url_secrets never panics on arbitrary input.
+            #[test]
+            fn redact_url_secrets_never_panics(s in "\\PC{0,500}") {
+                let _ = redact_url_secrets(&s);
+            }
+
+            /// redact_url_secrets: known sensitive param values do not appear in output.
+            /// Uses a fixed safe param name that won't match any SENSITIVE_KEYS substring.
+            #[test]
+            fn redact_url_secrets_hides_token(
+                token_val in "[a-zA-Z0-9]{5,20}",
+                safe_val in "[a-z]{3,8}",
+            ) {
+                let url = format!(
+                    "https://example.com/cb?access_token={token_val}&page={safe_val}"
+                );
+                let redacted = redact_url_secrets(&url);
+                prop_assert!(!redacted.contains(&token_val), "token value leaked: {redacted}");
+                prop_assert!(redacted.contains(&safe_val), "safe value lost: {redacted}");
+            }
+        }
+    }
 }

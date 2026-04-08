@@ -174,4 +174,49 @@ mod tests {
     fn escapes_both_separators_in_same_string() {
         assert_eq!(js_escape("x\u{2028}y\u{2029}z"), "x\\u2028y\\u2029z");
     }
+
+    // -- SS-1: Property-based tests (proptest) --
+
+    mod prop {
+        use super::js_escape;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// js_escape output never contains unescaped single quotes.
+            #[test]
+            fn no_unescaped_single_quotes(s in "\\PC{0,300}") {
+                let escaped = js_escape(&s);
+                // Walk the escaped string: a `'` is only valid if preceded by `\`.
+                let bytes = escaped.as_bytes();
+                for (i, &b) in bytes.iter().enumerate() {
+                    if b == b'\'' {
+                        // Must be preceded by an odd number of backslashes.
+                        let mut bs = 0;
+                        let mut j = i;
+                        while j > 0 && bytes[j - 1] == b'\\' {
+                            bs += 1;
+                            j -= 1;
+                        }
+                        prop_assert!(bs % 2 == 1, "unescaped ' at index {i} in: {escaped}");
+                    }
+                }
+            }
+
+            /// js_escape output never contains raw </script> breakout.
+            #[test]
+            fn no_script_breakout(s in "\\PC{0,300}") {
+                let escaped = js_escape(&s);
+                prop_assert!(
+                    !escaped.contains("</"),
+                    "contains </ which could break out of <script>: {escaped}"
+                );
+            }
+
+            /// js_escape never panics.
+            #[test]
+            fn js_escape_never_panics(s in "\\PC{0,500}") {
+                let _ = js_escape(&s);
+            }
+        }
+    }
 }
