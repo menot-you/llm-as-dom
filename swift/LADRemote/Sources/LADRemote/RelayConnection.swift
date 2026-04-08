@@ -54,9 +54,19 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
         pingTimer?.cancel()
     }
 
-    /// Connect to the lad-relay server.
+    /// Connect to the lad-relay server. Idempotent — tears down existing connection first.
     public func connect() {
         queue.async { [self] in
+            // FIX-C3: Tear down existing connection before creating a new one.
+            if task != nil || session != nil {
+                pingTimer?.cancel()
+                pingTimer = nil
+                task?.cancel(with: .normalClosure, reason: nil)
+                task = nil
+                session?.invalidateAndCancel()
+                session = nil
+            }
+
             let config = URLSessionConfiguration.default
             config.waitsForConnectivity = true
             config.timeoutIntervalForRequest = 300
@@ -212,7 +222,11 @@ extension RelayConnection: URLSessionWebSocketDelegate {
         didOpenWithProtocol protocol: String?
     ) {
         queue.async { [self] in
-            logger.info("WebSocket connected to \(self.url.absoluteString)")
+            // FIX-C4: Redact token from logs.
+            let safeURL = self.url.absoluteString.replacingOccurrences(
+                of: #"token=[^&]*"#, with: "token=***", options: .regularExpression
+            )
+            logger.info("WebSocket connected to \(safeURL)")
             updateState(.connected)
             sendRaw(#"{"event":"ready","version":"0.1.0","engine":"ios-webkit"}"#)
         }

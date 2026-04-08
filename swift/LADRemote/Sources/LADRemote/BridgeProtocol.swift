@@ -27,17 +27,18 @@ public struct BridgeResponse: Codable, Sendable {
     public var event: String?
     public var png_b64: String?
     public var cookies: [CookieData]?
+    // FIX-C1: Event fields that Rust expects (level, message, url, type, method).
+    public var level: String?
+    public var message: String?
+    public var url: String?
+    public var type: String?
+    public var method: String?
+    public var result: AnyCodable?
 
     public init(id: UInt64, ok: Bool, extra: [String: AnyCodable] = [:]) {
         self.id = id
         self.ok = ok
-        for (key, val) in extra {
-            switch key {
-            case "value": self.value = val
-            case "png_b64": if case .string(let s) = val { self.png_b64 = s }
-            default: break
-            }
-        }
+        applyExtra(extra)
     }
 
     public static func ok(_ id: UInt64) -> BridgeResponse {
@@ -50,12 +51,31 @@ public struct BridgeResponse: Codable, Sendable {
         return r
     }
 
+    // FIX-C1: Event factory now passes extra fields through.
     public static func event(_ type: String, extra: [String: AnyCodable] = [:]) -> BridgeResponse {
         var r = BridgeResponse(id: 0, ok: true)
         r.id = nil
         r.ok = nil
         r.event = type
+        r.applyExtra(extra)
         return r
+    }
+
+    /// Map extra dictionary to typed fields for Rust protocol compatibility.
+    private mutating func applyExtra(_ extra: [String: AnyCodable]) {
+        for (key, val) in extra {
+            switch key {
+            case "value": self.value = val
+            case "png_b64": if case .string(let s) = val { self.png_b64 = s }
+            case "level": if case .string(let s) = val { self.level = s }
+            case "message": if case .string(let s) = val { self.message = s }
+            case "url": if case .string(let s) = val { self.url = s }
+            case "type": if case .string(let s) = val { self.type = s }
+            case "method": if case .string(let s) = val { self.method = s }
+            case "result": self.result = val
+            default: break
+            }
+        }
     }
 }
 

@@ -237,13 +237,21 @@ public final class BridgeEngine: NSObject {
             }
 
         case "close":
+            // FIX-C5: Stop monitoring before disconnect to prevent orphaned JS execution.
+            monitoringTimer?.invalidate()
+            monitoringTimer = nil
             respond(.ok(cmd.id))
-            // Don't actually close the app — just disconnect.
             connection?.disconnect()
 
         default:
             respond(.error(cmd.id, "unknown command: \(cmd.cmd)"))
         }
+    }
+
+    /// FIX-C5: Stop monitoring explicitly (called on disconnect/close).
+    public func stopMonitoring() {
+        monitoringTimer?.invalidate()
+        monitoringTimer = nil
     }
 
     // MARK: - Response helpers
