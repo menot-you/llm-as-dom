@@ -1,0 +1,47 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "LADRemote-arm64-apple-macosx-debug.module": ["<LADRemote-arm64-apple-macosx-debug.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<LADRemote-arm64-apple-macosx-debug.module>"]
+  "test": ["<LADRemote-arm64-apple-macosx-debug.module>"]
+default: "main"
+nodes:
+  "/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/BridgeEngine.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/BridgeProtocol.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/RelayConnection.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/RemoteBridgeView.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/RemoteBridgeViewModel.swift"]
+    outputs: ["/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/sources"]
+    description: "Write auxiliary file /Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/sources"
+
+  "/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<LADRemote-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/BridgeEngine.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/BridgeProtocol.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/RelayConnection.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/RemoteBridgeView.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/RemoteBridgeViewModel.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/Modules/LADRemote.swiftmodule"]
+    outputs: ["<LADRemote-arm64-apple-macosx-debug.module>"]
+
+  "C.LADRemote-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/BridgeEngine.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/BridgeProtocol.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/RelayConnection.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/RemoteBridgeView.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/RemoteBridgeViewModel.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/sources"]
+    outputs: ["/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/BridgeEngine.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/BridgeProtocol.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/RelayConnection.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/RemoteBridgeView.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/RemoteBridgeViewModel.swift.o","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/Modules/LADRemote.swiftmodule"]
+    description: "Compiling Swift Module 'LADRemote' (5 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","LADRemote","-emit-dependencies","-emit-module","-emit-module-path","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/Modules/LADRemote.swiftmodule","-output-file-map","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/sources","-I","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/.build/arm64-apple-macosx/debug/LADRemote.build/include/LADRemote-Swift.h","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","ladremote"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Sources/LADRemote/","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Package.swift","/Users/tiago/Developer/menot-you/nott/mcps/llm-as-dom/swift/LADRemote/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
