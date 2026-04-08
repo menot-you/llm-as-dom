@@ -125,6 +125,11 @@ impl WatchState {
         self.events.clone()
     }
 
+    /// Check if the background polling task has finished (e.g. due to SSRF auto-abort).
+    pub fn task_handle_finished(&self) -> bool {
+        self.task_handle.is_finished()
+    }
+
     /// Build a `watch://` URI for MCP resource notifications.
     ///
     /// FIX-R6-03: Redact secrets before embedding in the URI to prevent
