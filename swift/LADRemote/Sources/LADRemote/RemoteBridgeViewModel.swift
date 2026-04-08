@@ -26,6 +26,7 @@ public final class RemoteBridgeViewModel: ObservableObject {
     }
 
     public func disconnect() {
+        engine.stopMonitoring() // FIX-C5: Stop JS monitoring before teardown.
         connection.disconnect()
     }
 
