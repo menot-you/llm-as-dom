@@ -87,7 +87,12 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
             // FIX-G7: invalidateAndCancel breaks URLSession → delegate retain cycle.
             session?.invalidateAndCancel()
             session = nil
-            updateState(.disconnected)
+            // FIX-G13: Preserve .error state so UI shows the reason, don't overwrite with .disconnected.
+            if case .error = state {
+                // Keep the error message visible.
+            } else {
+                updateState(.disconnected)
+            }
         }
     }
 
