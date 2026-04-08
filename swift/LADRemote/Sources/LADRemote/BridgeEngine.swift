@@ -65,8 +65,8 @@ public final class BridgeEngine: NSObject {
 
         super.init()
 
-        // Console handler.
-        config.userContentController.add(self, name: "ladConsole")
+        // FIX-G11: Use weak proxy to avoid WKUserContentController retain cycle.
+        config.userContentController.add(WeakScriptMessageHandler(self), name: "ladConsole")
 
         // Navigation delegate.
         navDelegate = BridgeNavDelegate(engine: self)
@@ -438,5 +438,25 @@ final class BridgeUIDelegate: NSObject, WKUIDelegate {
             "message": .string(prompt),
         ])
         completionHandler(defaultText)
+    }
+}
+
+// MARK: - WeakScriptMessageHandler (FIX-G11)
+
+/// Weak proxy that breaks WKUserContentController → BridgeEngine retain cycle.
+@MainActor
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    private weak var handler: WKScriptMessageHandler?
+
+    init(_ handler: WKScriptMessageHandler) {
+        self.handler = handler
+        super.init()
+    }
+
+    func userContentController(
+        _ controller: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        handler?.userContentController(controller, didReceive: message)
     }
 }

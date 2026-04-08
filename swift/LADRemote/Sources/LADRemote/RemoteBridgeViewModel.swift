@@ -58,7 +58,11 @@ extension RemoteBridgeViewModel: RelayConnectionDelegate {
     }
 
     public func didReceiveCommand(_ command: BridgeCommand) {
-        guard !isPaused else { return }
+        // FIX-G12: Reply with error when paused so LAD doesn't hang waiting.
+        guard !isPaused else {
+            engine.respond(.error(command.id, "engine paused by user"))
+            return
+        }
 
         // Update UI.
         lastCommand = "\(command.cmd)"
