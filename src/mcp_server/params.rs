@@ -85,8 +85,10 @@ pub(crate) struct WatchParams {
 /// Parameters for the `lad_snapshot` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct SnapshotParams {
-    /// URL to navigate to.
-    pub url: String,
+    /// URL to navigate to. If omitted and there is an active page (from a prior
+    /// `lad_browse` or `lad_snapshot`), re-extracts the current page without navigating.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// Parameters for the `lad_click` tool.
@@ -103,6 +105,9 @@ pub(crate) struct TypeParams {
     pub element: u32,
     /// Text to type into the element.
     pub text: String,
+    /// If true, press Enter after typing (saves a separate `lad_press_key` call).
+    #[serde(default)]
+    pub press_enter: bool,
 }
 
 /// Parameters for the `lad_select` tool.
@@ -178,6 +183,30 @@ pub(crate) struct DialogParams {
     pub action: String,
     /// Optional text to enter for prompt() dialogs (only used with "accept").
     pub text: Option<String>,
+}
+
+/// Default scroll direction.
+fn default_scroll_direction() -> String {
+    "down".to_string()
+}
+
+/// Default scroll pixel amount.
+fn default_scroll_pixels() -> u32 {
+    600
+}
+
+/// Parameters for the `lad_scroll` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ScrollParams {
+    /// Direction: "down", "up", "bottom", "top". Default: "down".
+    #[serde(default = "default_scroll_direction")]
+    pub direction: String,
+    /// Scroll to a specific element by its ID from a prior snapshot.
+    #[serde(default)]
+    pub element: Option<u32>,
+    /// Custom scroll amount in pixels (only for "up"/"down"). Default: 600.
+    #[serde(default = "default_scroll_pixels")]
+    pub pixels: u32,
 }
 
 /// Parameters for the `lad_upload` tool.

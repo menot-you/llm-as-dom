@@ -194,6 +194,20 @@ impl LadServer {
             content_blocks.push(Content::image(b64_png, "image/png"));
         }
 
+        // DX-2: Append the final SemanticView so the agent immediately knows what
+        // elements are available — saves a follow-up lad_snapshot call.
+        {
+            let guard = self.active_page.lock().await;
+            if let Some(ref ap) = *guard {
+                let view_text = ap.view.to_prompt();
+                if !view_text.is_empty() {
+                    content_blocks.push(Content::text(format!(
+                        "\n--- Current Page ---\n{view_text}"
+                    )));
+                }
+            }
+        }
+
         Ok(CallToolResult::success(content_blocks))
     }
 }

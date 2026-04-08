@@ -87,17 +87,34 @@ impl LadServer {
 
     /// Get a structured semantic snapshot of the current page.
     /// Returns elements with IDs usable by lad_click/lad_type/lad_select.
+    ///
+    /// DX-1: `url` is now optional. When omitted, re-extracts the current active
+    /// page without navigating — preventing the footgun where agents accidentally
+    /// undo a click by re-navigating to the old URL.
     pub(crate) async fn tool_lad_snapshot(
         &self,
         params: Parameters<SnapshotParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(url = %p.url, "lad_snapshot");
 
-        let view = self.navigate_or_reuse(&p.url).await?;
-        Ok(CallToolResult::success(vec![Content::text(
-            view.to_prompt(),
-        )]))
+        if let Some(ref url) = p.url {
+            tracing::info!(url = %url, "lad_snapshot (with url)");
+            let view = self.navigate_or_reuse(url).await?;
+            Ok(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        } else {
+            tracing::info!("lad_snapshot (current page)");
+            let view = self.refresh_active_view().await.map_err(|_| {
+                rmcp::ErrorData::invalid_params(
+                    "no active page — provide a URL or call lad_browse first".to_string(),
+                    None,
+                )
+            })?;
+            Ok(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        }
     }
 
     /// Take a screenshot of the active page.
