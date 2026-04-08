@@ -40,6 +40,11 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     private var state: RelayConnectionState = .disconnected
     // FIX-G8: DispatchSourceTimer instead of Timer to avoid main-thread data race.
     private var pingTimer: DispatchSourceTimer?
+    // Exponential backoff reconnect state — protected by `queue`.
+    private var reconnectAttempt: Int = 0
+    private let maxReconnectAttempts: Int = 10
+    private var shouldReconnect: Bool = true
+    private var reconnectWorkItem: DispatchWorkItem?
 
     @MainActor public weak var delegate: RelayConnectionDelegate?
 
@@ -57,6 +62,12 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     /// Connect to the lad-relay server. Idempotent — tears down existing connection first.
     public func connect() {
         queue.async { [self] in
+            // Reset reconnect state on an explicit connect call.
+            shouldReconnect = true
+            reconnectAttempt = 0
+            reconnectWorkItem?.cancel()
+            reconnectWorkItem = nil
+
             // FIX-C3: Tear down existing connection before creating a new one.
             if task != nil || session != nil {
                 pingTimer?.cancel()
@@ -86,23 +97,34 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Disconnect gracefully. Breaks URLSession retain cycle.
+    /// Disconnect gracefully. Breaks URLSession retain cycle and cancels any pending reconnect.
     public func disconnect() {
         queue.async { [self] in
-            guard !isDisconnected else { return } // Prevent double-disconnect.
-            pingTimer?.cancel()
-            pingTimer = nil
-            task?.cancel(with: .normalClosure, reason: nil)
-            task = nil
-            // FIX-G7: invalidateAndCancel breaks URLSession → delegate retain cycle.
-            session?.invalidateAndCancel()
-            session = nil
-            // FIX-G13: Preserve .error state so UI shows the reason, don't overwrite with .disconnected.
-            if case .error = state {
-                // Keep the error message visible.
-            } else {
-                updateState(.disconnected)
-            }
+            teardown(stopReconnect: true)
+        }
+    }
+
+    /// Internal teardown — must be called on `queue`.
+    /// - Parameter stopReconnect: if true, clears shouldReconnect and cancels pending work item.
+    private func teardown(stopReconnect: Bool) {
+        if stopReconnect {
+            shouldReconnect = false
+            reconnectWorkItem?.cancel()
+            reconnectWorkItem = nil
+        }
+        guard !isDisconnected else { return } // Prevent double-disconnect.
+        pingTimer?.cancel()
+        pingTimer = nil
+        task?.cancel(with: .normalClosure, reason: nil)
+        task = nil
+        // FIX-G7: invalidateAndCancel breaks URLSession → delegate retain cycle.
+        session?.invalidateAndCancel()
+        session = nil
+        // FIX-G13: Preserve .error state so UI shows the reason, don't overwrite with .disconnected.
+        if case .error = state {
+            // Keep the error message visible.
+        } else {
+            updateState(.disconnected)
         }
     }
 
@@ -160,8 +182,10 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
                 case .failure(let error):
                     self.logger.error("receive error: \(error.localizedDescription)")
                     self.updateState(.error(error.localizedDescription))
-                    // FIX-G9: Tear down on fatal receive error.
-                    self.disconnect()
+                    // FIX-G9: Tear down on fatal receive error — use teardown() to stay on queue.
+                    let willReconnect = self.shouldReconnect
+                    self.teardown(stopReconnect: false)
+                    if willReconnect { self.scheduleReconnect() }
                 default:
                     self.receiveLoop()
                 }
@@ -205,6 +229,25 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
         return false
     }
 
+    /// Schedule a reconnect attempt with exponential backoff (2^attempt, capped at 60s).
+    /// Must be called from within `queue`.
+    private func scheduleReconnect() {
+        guard shouldReconnect, reconnectAttempt < maxReconnectAttempts else {
+            logger.warning("reconnect exhausted after \(self.reconnectAttempt) attempts — giving up")
+            return
+        }
+        let delay = min(pow(2.0, Double(reconnectAttempt)), 60.0)
+        reconnectAttempt += 1
+        logger.info("scheduling reconnect #\(self.reconnectAttempt) in \(delay)s")
+
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.shouldReconnect else { return }
+            self.connect()
+        }
+        reconnectWorkItem = item
+        queue.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
     private func updateState(_ newState: RelayConnectionState) {
         state = newState
         Task { @MainActor [weak self] in
@@ -227,6 +270,8 @@ extension RelayConnection: URLSessionWebSocketDelegate {
                 of: #"token=[^&]*"#, with: "token=***", options: .regularExpression
             )
             logger.info("WebSocket connected to \(safeURL)")
+            // Reset backoff counter — successful open means we have a good connection.
+            reconnectAttempt = 0
             updateState(.connected)
             sendRaw(#"{"event":"ready","version":"0.1.0","engine":"ios-webkit"}"#)
         }
@@ -241,7 +286,9 @@ extension RelayConnection: URLSessionWebSocketDelegate {
         queue.async { [self] in
             logger.info("WebSocket closed: \(closeCode.rawValue)")
             // FIX-G7: Break URLSession retain cycle on server-initiated close.
-            disconnect()
+            let willReconnect = shouldReconnect
+            teardown(stopReconnect: false)
+            if willReconnect { scheduleReconnect() }
         }
     }
 
@@ -255,7 +302,9 @@ extension RelayConnection: URLSessionWebSocketDelegate {
                 logger.error("session error: \(error.localizedDescription)")
                 updateState(.error(error.localizedDescription))
                 // FIX-G7: Break URLSession retain cycle on error.
-                disconnect()
+                let willReconnect = shouldReconnect
+                teardown(stopReconnect: false)
+                if willReconnect { scheduleReconnect() }
             }
         }
     }
