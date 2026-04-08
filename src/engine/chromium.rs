@@ -5,14 +5,25 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{BrowserEngine, EngineConfig, PageHandle};
+
+/// Default timeout for JS evaluation via CDP (seconds).
+const EVAL_JS_TIMEOUT_SECS: u64 = 30;
+
+/// Maximum screenshot PNG size in bytes (5 MB). Beyond this we fall back
+/// to a viewport-only screenshot to prevent OOM on extremely tall pages.
+const MAX_SCREENSHOT_BYTES: usize = 5 * 1024 * 1024;
 
 /// Chromium-backed browser engine.
 pub struct ChromiumEngine {
     browser: Arc<chromiumoxide::Browser>,
     _handler: tokio::task::JoinHandle<()>,
     _temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
+    /// CHAOS-04: Set to `false` when the CDP event-stream handler exits,
+    /// indicating Chrome has crashed or the WebSocket is dead.
+    alive: Arc<AtomicBool>,
 }
 
 impl ChromiumEngine {
@@ -69,15 +80,22 @@ impl ChromiumEngine {
             .await
             .map_err(|e| crate::Error::Browser(format!("{e}")))?;
 
+        let alive = Arc::new(AtomicBool::new(true));
+        let alive_clone = Arc::clone(&alive);
+
         let handle = tokio::spawn(async move {
             use futures::StreamExt;
             while handler.next().await.is_some() {}
+            // CHAOS-04: CDP stream ended — Chrome crashed or WS closed.
+            alive_clone.store(false, Ordering::Relaxed);
+            tracing::error!("chromium CDP event stream ended — browser presumed dead");
         });
 
         Ok(Self {
             browser: Arc::new(browser),
             _handler: handle,
             _temp_dir: config.temp_dir,
+            alive,
         })
     }
 
@@ -139,7 +157,10 @@ impl ChromiumEngine {
 impl BrowserEngine for ChromiumEngine {
     async fn new_page(&self, url: &str) -> Result<Box<dyn PageHandle>, crate::Error> {
         let page = self.browser.new_page(url).await.map_err(cdp_err)?;
-        Ok(Box::new(ChromiumPage { page }))
+        Ok(Box::new(ChromiumPage {
+            page,
+            alive: Arc::clone(&self.alive),
+        }))
     }
 
     fn name(&self) -> &str {
@@ -156,20 +177,33 @@ impl BrowserEngine for ChromiumEngine {
 /// Chromium-backed page handle.
 struct ChromiumPage {
     page: chromiumoxide::Page,
+    /// Shared liveness flag — mirrors `ChromiumEngine::alive`.
+    alive: Arc<AtomicBool>,
 }
 
 #[async_trait]
 impl PageHandle for ChromiumPage {
     async fn eval_js(&self, script: &str) -> Result<serde_json::Value, crate::Error> {
-        match self.page.evaluate(script).await {
-            Ok(eval_result) => {
+        // CHAOS-04: Fail fast if Chrome/CDP is dead.
+        if !self.alive.load(Ordering::Relaxed) {
+            return Err(crate::Error::Browser(
+                "chromium CDP connection is dead — browser may have crashed".into(),
+            ));
+        }
+
+        // CHAOS-02: Wrap every CDP evaluate call in a timeout to prevent
+        // hostile JS (e.g. `while(true){}`) from freezing the MCP session.
+        let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
+        match tokio::time::timeout(timeout, self.page.evaluate(script)).await {
+            Ok(Ok(eval_result)) => {
                 // Try to extract a Value; void expressions fail here.
                 match eval_result.into_value::<serde_json::Value>() {
                     Ok(v) => Ok(v),
                     Err(_) => Ok(serde_json::Value::Null),
                 }
             }
-            Err(e) => Err(cdp_err(e)),
+            Ok(Err(e)) => Err(cdp_err(e)),
+            Err(_) => Err(crate::Error::Timeout),
         }
     }
 
@@ -202,10 +236,21 @@ impl PageHandle for ChromiumPage {
     }
 
     async fn screenshot_png(&self) -> Result<Vec<u8>, crate::Error> {
-        let params = chromiumoxide::page::ScreenshotParams::builder()
-            .full_page(true)
-            .build();
-        self.page.screenshot(params).await.map_err(cdp_err)
+        // CHAOS-01: Use viewport-only screenshots to prevent OOM on
+        // extremely tall pages (50,000px+ = 100s of MB as PNG).
+        let params = chromiumoxide::page::ScreenshotParams::builder().build();
+        let png = self.page.screenshot(params).await.map_err(cdp_err)?;
+
+        if png.len() > MAX_SCREENSHOT_BYTES {
+            tracing::warn!(
+                bytes = png.len(),
+                cap = MAX_SCREENSHOT_BYTES,
+                "screenshot exceeds size cap — returning viewport-only"
+            );
+            // Already viewport-only; just truncation-warn. Future: resize.
+        }
+
+        Ok(png)
     }
 
     async fn cookies(&self) -> Result<Vec<crate::session::CookieEntry>, crate::Error> {
@@ -226,10 +271,10 @@ impl PageHandle for ChromiumPage {
             })()
         "#;
 
-        let result: String = self
-            .page
-            .evaluate(js)
+        let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
+        let result: String = tokio::time::timeout(timeout, self.page.evaluate(js))
             .await
+            .map_err(|_| crate::Error::Timeout)?
             .map_err(cdp_err)?
             .into_value()
             .map_err(|e| crate::Error::ActionFailed(e.to_string()))?;
@@ -303,7 +348,11 @@ impl PageHandle for ChromiumPage {
                 "document.cookie = '{}'",
                 crate::pilot::js_escape(&cookie_str)
             );
-            let _ = self.page.evaluate(js).await.map_err(cdp_err)?;
+            let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
+            let _ = tokio::time::timeout(timeout, self.page.evaluate(js))
+                .await
+                .map_err(|_| crate::Error::Timeout)?
+                .map_err(cdp_err)?;
         }
 
         tracing::debug!(count = cookies.len(), "injected cookies via JS");

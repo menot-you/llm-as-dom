@@ -23,8 +23,12 @@ impl LadServer {
 
         ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
 
-        // Wait for navigation to settle
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // CHAOS-14: Use wait_for_navigation instead of fixed sleep to eliminate
+        // the SSRF race window where concurrent tools could observe stale state.
+        if let Err(e) = ap.page.wait_for_navigation().await {
+            tracing::warn!(error = %e, "wait_for_navigation after history.back() failed, falling back to sleep");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
 
         // FIX-1: Check URL safety after history.back() navigation settles.
         if let Ok(ref back_url) = ap.page.url().await

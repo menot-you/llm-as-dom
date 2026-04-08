@@ -44,14 +44,19 @@ pub enum Action {
 
 /// JS function for searching shadow roots and iframes recursively.
 /// Shared constant to keep action.rs and helpers.rs in sync (FIX-7).
+///
+/// CHAOS-03: `maxDepth` parameter (default 5) prevents unbounded recursion
+/// on deeply nested shadow DOM / iframe trees.
 pub const DEEP_QUERY_SELECTOR_JS: &str = r#"
-function deepQuerySelector(root, sel) {
+function deepQuerySelector(root, sel, depth) {
+    if (depth === undefined) depth = 0;
+    if (depth > 5) return null;
     const found = root.querySelector(sel);
     if (found) return found;
     const all = root.querySelectorAll('*');
     for (const node of all) {
         if (node.shadowRoot) {
-            const sr = deepQuerySelector(node.shadowRoot, sel);
+            const sr = deepQuerySelector(node.shadowRoot, sel, depth + 1);
             if (sr) return sr;
         }
     }
@@ -59,7 +64,7 @@ function deepQuerySelector(root, sel) {
     for (const iframe of iframes) {
         try {
             if (iframe.contentDocument) {
-                const ir = deepQuerySelector(iframe.contentDocument, sel);
+                const ir = deepQuerySelector(iframe.contentDocument, sel, depth + 1);
                 if (ir) return ir;
             }
         } catch(_) {}

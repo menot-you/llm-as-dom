@@ -107,14 +107,17 @@ pub(crate) fn key_to_code(key: &str) -> &str {
 pub(crate) fn build_element_js(element_id: u32, body: &str) -> String {
     format!(
         r#"(() => {{
-            // FIX-6: deepQuerySelector — searches shadow roots and iframes
-            function deepQuerySelector(root, sel) {{
+            // FIX-6 + CHAOS-03: deepQuerySelector — searches shadow roots and iframes
+            // with maxDepth=5 to prevent unbounded recursion.
+            function deepQuerySelector(root, sel, depth) {{
+                if (depth === undefined) depth = 0;
+                if (depth > 5) return null;
                 const found = root.querySelector(sel);
                 if (found) return found;
                 const all = root.querySelectorAll('*');
                 for (const node of all) {{
                     if (node.shadowRoot) {{
-                        const sr = deepQuerySelector(node.shadowRoot, sel);
+                        const sr = deepQuerySelector(node.shadowRoot, sel, depth + 1);
                         if (sr) return sr;
                     }}
                 }}
@@ -123,7 +126,7 @@ pub(crate) fn build_element_js(element_id: u32, body: &str) -> String {
                 for (const iframe of iframes) {{
                     try {{
                         if (iframe.contentDocument) {{
-                            const ir = deepQuerySelector(iframe.contentDocument, sel);
+                            const ir = deepQuerySelector(iframe.contentDocument, sel, depth + 1);
                             if (ir) return ir;
                         }}
                     }} catch(_) {{}}

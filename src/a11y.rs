@@ -25,14 +25,17 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
             let id = 0;
 
             // ── Shadow DOM + light DOM recursive query ─────────────────
-            function deepQueryAll(root, sel) {
+            // CHAOS-03: maxDepth=5 prevents unbounded recursion.
+            function deepQueryAll(root, sel, depth) {
+                if (depth === undefined) depth = 0;
+                if (depth > 5) return [];
                 const results = [];
                 try { results.push(...root.querySelectorAll(sel)); } catch(_) {}
                 // Walk all elements looking for shadow roots
                 const allEls = root.querySelectorAll('*');
                 for (const el of allEls) {
                     if (el.shadowRoot) {
-                        try { results.push(...deepQueryAll(el.shadowRoot, sel)); } catch(_) {}
+                        try { results.push(...deepQueryAll(el.shadowRoot, sel, depth + 1)); } catch(_) {}
                     }
                 }
                 return results;
