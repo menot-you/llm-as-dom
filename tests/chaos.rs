@@ -398,29 +398,19 @@ fn heuristic_special_chars_in_credential() {
 }
 
 /// Empty elements list: heuristic should not panic.
-/// BUG: "done detection" fires on an empty page because URL doesn't contain "login"
-/// and page_hint != "login page" -- so it concludes login succeeded (false positive).
+/// FIXED: "done detection" no longer fires on an empty page — requires non-empty
+/// elements to claim login success. Previously was a false positive.
 #[test]
 fn heuristic_empty_elements_no_panic() {
     let v = view(vec![], "content page");
     let r = heuristics::try_resolve(&v, "login as admin password secret", &[]);
-    // Done detection triggers: goal contains "login" + page_hint != "login page"
-    // + URL (https://example.com) doesn't contain "login" -> Done(success=true).
-    // This is a false positive on an empty page.
+    // After fix: empty page should NOT trigger done detection.
+    // Heuristic should return no action (no elements to act on, no false done claim).
     assert!(
-        r.action.is_some(),
-        "BUG: done detection fires on empty page"
+        r.action.is_none()
+            || matches!(&r.action, Some(Action::Done { result, .. }) if !result.get("success").and_then(|v| v.as_bool()).unwrap_or(false)),
+        "empty page should not falsely claim login success"
     );
-    match &r.action {
-        Some(Action::Done { result, .. }) => {
-            assert_eq!(
-                result.get("success").and_then(|v| v.as_bool()),
-                Some(true),
-                "BUG: falsely claims login succeeded on empty page"
-            );
-        }
-        other => panic!("expected Done, got {other:?}"),
-    }
 }
 
 /// Very long goal string: should not panic or hang.
