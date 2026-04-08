@@ -376,7 +376,17 @@ impl LadServer {
             let check_js = build_element_js(p.element, &check_body);
             check_js_result(&ap.page.eval_js(&check_js).await.map_err(mcp_err)?)?;
 
-            // Use engine-level file upload (CDP on Chromium)
+            // Use engine-level file upload (CDP on Chromium).
+            //
+            // FIX-R7-03: Known limitation — `set_input_files` uses flat CSS via
+            // chromiumoxide's `find_element(selector)`, which does NOT pierce shadow
+            // DOM or cross-origin iframes. The precheck and change event above use
+            // `build_element_js` (deepQuerySelector) so they DO find elements in
+            // shadow roots, but the actual upload will fail silently for those cases.
+            // A full fix would require resolving the element to a CDP `backendNodeId`
+            // via JS evaluation, then calling `DOM.setFileInputFiles` directly with
+            // that ID. This is deferred because shadow-DOM file inputs are extremely
+            // rare in practice. The tool description documents this limitation.
             ap.page
                 .set_input_files(&selector, &p.files)
                 .await

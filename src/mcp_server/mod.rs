@@ -228,8 +228,13 @@ impl LadServer {
             let view = a11y::extract_semantic_view(ap.page.as_ref())
                 .await
                 .map_err(mcp_err)?;
+            // FIX-R7-02: Store the ACTUAL browser URL, not the requested URL.
+            // After redirects (e.g. http->https), `url` is stale. Using the
+            // browser's real URL prevents same-origin misclassification on the
+            // next call.
+            let actual_url = ap.page.url().await.map_err(mcp_err)?;
             let mut ap_owned = active.take().unwrap();
-            ap_owned.url = url.to_string();
+            ap_owned.url = actual_url;
             ap_owned.view = view.clone();
             *active = Some(ap_owned);
             return Ok(view);
@@ -240,10 +245,12 @@ impl LadServer {
         // to store the result. This is safe because we're creating a fresh page.
         drop(active);
         let (page, view) = self.navigate_and_extract(url).await?;
+        // FIX-R7-02: Store the ACTUAL browser URL after navigation + redirects.
+        let actual_url = page.url().await.map_err(mcp_err)?;
         let mut active = self.active_page.lock().await;
         *active = Some(ActivePage {
             page,
-            url: url.to_string(),
+            url: actual_url,
             view: view.clone(),
         });
         Ok(view)
@@ -255,6 +262,12 @@ impl LadServer {
     /// refresh. Without this, `ActivePage.url` could hold the *requested* URL
     /// while the browser had followed a redirect (e.g. http->https), causing
     /// `navigate_or_reuse` to misclassify same-origin pages and reopen them.
+    ///
+    /// FIX-R7-01: SSRF chokepoint — every tool calls `refresh_active_view` after
+    /// every interaction. By checking the URL here, delayed navigations via
+    /// `setTimeout(() => location = "http://127.0.0.1", 500)` are caught even
+    /// if they slip past the per-tool SSRF checks (which only sample once after
+    /// a short delay). This is the SINGLE defense-in-depth bottleneck.
     pub(crate) async fn refresh_active_view(
         &self,
     ) -> Result<semantic::SemanticView, rmcp::ErrorData> {
@@ -262,9 +275,18 @@ impl LadServer {
         let ap = active.as_mut().ok_or_else(helpers::no_active_page)?;
 
         // Sync URL with actual browser URL (handles redirects, click-driven navs)
-        if let Ok(actual_url) = ap.page.url().await {
-            ap.url = actual_url;
+        let current_url = ap.page.url().await.map_err(mcp_err)?;
+
+        // FIX-R7-01: SSRF gate on EVERY refresh — catches delayed navigations
+        // that evade per-tool checks (e.g. setTimeout-based location changes).
+        if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+            return Err(mcp_err(format!(
+                "blocked: page navigated to unsafe URL {}",
+                llm_as_dom::sanitize::redact_url_secrets(&current_url),
+            )));
         }
+
+        ap.url = current_url;
 
         let view = a11y::extract_semantic_view(ap.page.as_ref())
             .await
@@ -510,7 +532,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. Requires a prior lad_snapshot or lad_browse call."
+        description = "Upload file(s) to a file input element by its ID from lad_snapshot. Provide absolute file paths. Currently supported on Chromium engine only; WebKit will return an error. File inputs inside shadow DOM or cross-origin iframes are not supported for upload (the CDP set_input_files call uses flat CSS selectors). Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_upload(
         &self,
