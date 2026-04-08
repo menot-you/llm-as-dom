@@ -472,6 +472,7 @@ impl LadServer {
         // Build JS to fill each field in one eval call.
         let mut fill_js = String::new();
         let mut matched = 0u32;
+        let mut submitted = false;
 
         for (field_key, field_value) in &p.fields {
             let key_lower = field_key.to_lowercase();
@@ -506,7 +507,7 @@ impl LadServer {
                      el.dispatchEvent(new Event('change', {{ bubbles: true }}));"
                 );
                 fill_js.push_str(&build_element_js(el.id, &body));
-                fill_js.push('\n');
+                fill_js.push_str(";\n");
                 matched += 1;
             } else {
                 tracing::warn!(field = %field_key, "lad_fill_form: no matching element");
@@ -583,6 +584,7 @@ impl LadServer {
                         )));
                     }
                 }
+                submitted = true;
             } else {
                 tracing::warn!("lad_fill_form: submit=true but no submit button found");
             }
@@ -590,9 +592,17 @@ impl LadServer {
 
         let view = self.refresh_active_view().await?;
         let total = p.fields.len();
+        let submit_msg = if p.submit {
+            if submitted {
+                " + submitted"
+            } else {
+                " (submit requested but no button found)"
+            }
+        } else {
+            ""
+        };
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Filled {matched}/{total} fields{}\n\n{}",
-            if p.submit { " + submitted" } else { "" },
+            "Filled {matched}/{total} fields{submit_msg}\n\n{}",
             view.to_prompt(),
         ))]))
     }
