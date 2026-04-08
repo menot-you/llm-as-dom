@@ -32,10 +32,32 @@ fn is_steganographic(c: char) -> bool {
     )
 }
 
+/// FIX-R4-03: Broadened sensitive field name patterns.
+/// Covers OTP, CVV, API key, auth code, MFA, and other credential-adjacent fields.
+const SENSITIVE_NAME_PATTERNS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "otp",
+    "totp",
+    "cvv",
+    "cvc",
+    "pin",
+    "api_key",
+    "apikey",
+    "auth_code",
+    "verification",
+    "security_code",
+    "mfa",
+    "2fa",
+];
+
 /// Mask sensitive field values extracted from the DOM.
 ///
 /// Prevents credentials from leaking into LLM prompts.
 /// FIX-10: Also checks element `name` for sensitive patterns, not just `type`.
+/// FIX-R4-03: Broadened to cover OTP, CVV, API key, MFA, etc.
 pub fn mask_sensitive_value(
     input_type: Option<&str>,
     name: Option<&str>,
@@ -44,7 +66,9 @@ pub fn mask_sensitive_value(
     let is_sensitive = input_type.is_some_and(|t| t.eq_ignore_ascii_case("password"))
         || name.is_some_and(|n| {
             let lower = n.to_lowercase();
-            lower.contains("password") || lower.contains("passwd") || lower.contains("secret")
+            SENSITIVE_NAME_PATTERNS
+                .iter()
+                .any(|pat| lower.contains(pat))
         });
     if is_sensitive {
         value.map(|_| "[filled]".to_string())
@@ -216,6 +240,61 @@ pub fn is_safe_upload_path(path: &std::path::Path) -> bool {
     }
 
     false
+}
+
+/// FIX-R4-02: Redact sensitive query parameters from URLs.
+///
+/// Strips OAuth codes, tokens, magic links, API keys, and other secrets
+/// that would otherwise leak into SemanticView prompts, session history,
+/// and pilot step logs.
+pub fn redact_url_secrets(url: &str) -> String {
+    if let Ok(mut parsed) = url::Url::parse(url) {
+        let has_query = parsed.query().is_some_and(|q| !q.is_empty());
+        if !has_query {
+            // Strip fragment unconditionally (may contain tokens in SPA auth flows)
+            parsed.set_fragment(None);
+            return parsed.to_string();
+        }
+
+        const SENSITIVE_KEYS: &[&str] = &[
+            "token",
+            "code",
+            "key",
+            "secret",
+            "password",
+            "auth",
+            "access_token",
+            "refresh_token",
+            "api_key",
+            "session",
+            "otp",
+            "magic",
+            "reset",
+            "confirm",
+        ];
+
+        let filtered: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(k, v)| {
+                let lower_k = k.to_lowercase();
+                if SENSITIVE_KEYS.iter().any(|s| lower_k.contains(s)) {
+                    (k.into_owned(), "[REDACTED]".to_string())
+                } else {
+                    (k.into_owned(), v.into_owned())
+                }
+            })
+            .collect();
+
+        parsed.query_pairs_mut().clear();
+        for (k, v) in &filtered {
+            parsed.query_pairs_mut().append_pair(k, v);
+        }
+        // Strip fragment (may contain tokens in SPA auth flows)
+        parsed.set_fragment(None);
+        parsed.to_string()
+    } else {
+        url.to_string()
+    }
 }
 
 /// Generate a cryptographically random 32-character hex string for prompt boundaries.
@@ -590,5 +669,102 @@ mod tests {
         assert!(!is_safe_upload_path(std::path::Path::new(
             "/nonexistent/path/file.txt"
         )));
+    }
+
+    // -- FIX-R4-02: redact_url_secrets --
+
+    #[test]
+    fn redact_strips_oauth_code() {
+        let url = "https://example.com/cb?code=abc&state=xyz";
+        let redacted = redact_url_secrets(url);
+        assert!(!redacted.contains("abc"));
+        assert!(redacted.contains("state=xyz"));
+    }
+
+    #[test]
+    fn redact_strips_access_token() {
+        let url = "https://api.example.com/d?access_token=jwt&page=1";
+        let redacted = redact_url_secrets(url);
+        assert!(!redacted.contains("=jwt"));
+        assert!(redacted.contains("page=1"));
+    }
+
+    #[test]
+    fn redact_preserves_safe_url() {
+        let url = "https://example.com/page?q=search&page=2";
+        let redacted = redact_url_secrets(url);
+        assert!(redacted.contains("q=search"));
+        assert!(redacted.contains("page=2"));
+    }
+
+    #[test]
+    fn redact_strips_fragment() {
+        let url = "https://example.com/page#tok";
+        let redacted = redact_url_secrets(url);
+        assert!(!redacted.contains('#'));
+    }
+
+    #[test]
+    fn redact_handles_unparseable_url() {
+        let url = "not-a-url";
+        assert_eq!(redact_url_secrets(url), url);
+    }
+
+    #[test]
+    fn redact_handles_magic_link() {
+        let url = "https://example.com/verify?magic=m1&user=bob";
+        let redacted = redact_url_secrets(url);
+        assert!(!redacted.contains("=m1"));
+        assert!(redacted.contains("user=bob"));
+    }
+
+    // -- FIX-R4-03: broadened sensitive masking --
+
+    #[test]
+    fn masks_by_name_otp() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("otp_code"), Some("123456")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_by_name_cvv() {
+        assert_eq!(
+            mask_sensitive_value(None, Some("card_cvv"), Some("123")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_by_name_mfa() {
+        assert_eq!(
+            mask_sensitive_value(None, Some("mfa_code"), Some("654321")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_by_name_verification() {
+        assert_eq!(
+            mask_sensitive_value(None, Some("verification_code"), Some("ABCDEF")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_by_name_2fa() {
+        assert_eq!(
+            mask_sensitive_value(None, Some("2fa_code"), Some("987654")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_by_name_token_field() {
+        assert_eq!(
+            mask_sensitive_value(None, Some("auth_token"), Some("xyz")),
+            Some("[filled]".to_string()),
+        );
     }
 }

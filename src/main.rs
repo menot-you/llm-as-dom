@@ -95,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         visible,
         interactive: cli.interactive,
         user_data_dir: std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id())),
+        temp_dir: None,
         window_size: if cli.interactive {
             (1024, 768)
         } else {

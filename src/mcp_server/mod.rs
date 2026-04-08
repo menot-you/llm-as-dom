@@ -104,17 +104,22 @@ impl LadServer {
 
         // FIX-R3-12: Use tempfile::Builder for cryptographically random temp dir
         // instead of predictable PID-based path.
-        let user_data_dir = tempfile::Builder::new()
+        let td = tempfile::Builder::new()
             .prefix("lad-chrome-")
             .tempdir()
-            .map(|td| td.keep())
-            .unwrap_or_else(|_| {
+            .ok();
+        let user_data_dir = td
+            .as_ref()
+            .map(|t| t.path().to_path_buf())
+            .unwrap_or_else(|| {
                 std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()))
             });
+
         let config = EngineConfig {
             visible: self.interactive,
             interactive: self.interactive,
             user_data_dir,
+            temp_dir: td.map(std::sync::Arc::new),
             window_size: if self.interactive {
                 (1024, 768)
             } else {
@@ -148,6 +153,15 @@ impl LadServer {
         // `document.cookie`. We must be on the target origin for cookie injection.
         let page = engine.new_page(url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
+
+        // FIX-R4-01: Post-redirect SSRF validation. Check final URL after
+        // the browser may have followed redirects through an open redirect.
+        let final_url = page.url().await.map_err(mcp_err)?;
+        if !llm_as_dom::sanitize::is_safe_url(&final_url) {
+            return Err(mcp_err(format!(
+                "blocked: redirected to unsafe URL {final_url}"
+            )));
+        }
 
         // Inject cookies on the correct origin, then reload to apply them.
         let has_cookies = self.has_profile_cookies();
