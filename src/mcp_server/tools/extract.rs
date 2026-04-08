@@ -81,22 +81,34 @@ impl LadServer {
             .filter(|el| relevance_score(el) > 0)
             .count();
 
-        let output = serde_json::json!({
-            "url": llm_as_dom::sanitize::redact_url_secrets(&view.url),
-            "title": view.title,
-            "page_type": view.page_hint,
-            "elements_count": view.elements.len(),
-            "relevant_count": relevant_count,
-            "estimated_tokens": view.estimated_tokens(),
-            "elements": view.elements,
-            "forms": view.forms,
-            "visible_text": view.visible_text,
-            "query": p.what,
-        });
+        // DX-W3-6: Support format="prompt" for compact text output.
+        let use_prompt = p
+            .format
+            .as_deref()
+            .is_some_and(|f| f.eq_ignore_ascii_case("prompt"));
 
-        Ok(CallToolResult::success(vec![Content::text(
-            to_pretty_json(&output),
-        )]))
+        if use_prompt {
+            Ok(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        } else {
+            let output = serde_json::json!({
+                "url": llm_as_dom::sanitize::redact_url_secrets(&view.url),
+                "title": view.title,
+                "page_type": view.page_hint,
+                "elements_count": view.elements.len(),
+                "relevant_count": relevant_count,
+                "estimated_tokens": view.estimated_tokens(),
+                "elements": view.elements,
+                "forms": view.forms,
+                "visible_text": view.visible_text,
+                "query": p.what,
+            });
+
+            Ok(CallToolResult::success(vec![Content::text(
+                to_pretty_json(&output),
+            )]))
+        }
     }
 
     /// Get a structured semantic snapshot of the current page.

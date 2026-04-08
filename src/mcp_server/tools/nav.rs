@@ -55,6 +55,35 @@ impl LadServer {
         )]))
     }
 
+    /// Reload the current page.
+    ///
+    /// DX-W3-2: Explicit page reload without needing `lad_eval`.
+    pub(crate) async fn tool_lad_refresh(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        tracing::info!("lad_refresh");
+
+        {
+            let mut guard = self.active_page.lock().await;
+            let ap = guard.as_mut().ok_or_else(no_active_page)?;
+            let url = ap.url.clone();
+            ap.page.navigate(&url).await.map_err(mcp_err)?;
+            ap.page.wait_for_navigation().await.map_err(mcp_err)?;
+
+            // SSRF gate after reload (redirects could happen).
+            let final_url = ap.page.url().await.map_err(mcp_err)?;
+            if !llm_as_dom::sanitize::is_safe_url(&final_url) {
+                *guard = None;
+                return Err(mcp_err(format!(
+                    "blocked: reload redirected to unsafe URL {final_url}"
+                )));
+            }
+        }
+
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
+    }
+
     /// Handle JavaScript dialogs (alert, confirm, prompt).
     pub(crate) async fn tool_lad_dialog(
         &self,

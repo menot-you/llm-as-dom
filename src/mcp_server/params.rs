@@ -35,6 +35,9 @@ pub(crate) struct ExtractParams {
     pub what: String,
     /// Optional maximum length of the HTML/DOM text embedded into the prompt.
     pub max_length: Option<usize>,
+    /// Output format: "json" (default, structured JSON) or "prompt" (compact text like lad_snapshot).
+    #[serde(default)]
+    pub format: Option<String>,
 }
 
 /// Parameters for the `lad_assert` tool.
@@ -151,7 +154,15 @@ pub(crate) struct PressKeyParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct WaitParams {
     /// Natural language condition, e.g. "has button Dashboard", "title contains Welcome".
-    pub condition: String,
+    /// Used as a single condition. If `conditions` is also provided, this is prepended.
+    #[serde(default)]
+    pub condition: Option<String>,
+    /// Multiple conditions to wait for. Use with `mode` to control matching.
+    #[serde(default)]
+    pub conditions: Option<Vec<String>>,
+    /// Matching mode: "all" (default) waits for ALL conditions, "any" returns on first match.
+    #[serde(default)]
+    pub mode: Option<String>,
     /// Max wait time in ms (default: 10000).
     #[serde(default = "default_wait_timeout")]
     pub timeout_ms: u64,
@@ -243,4 +254,11 @@ pub(crate) struct UploadParams {
     pub element: u32,
     /// Absolute file paths to upload.
     pub files: Vec<String>,
+}
+
+/// Parameters for the `lad_clear` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ClearParams {
+    /// Element ID from a prior lad_snapshot.
+    pub element: u32,
 }

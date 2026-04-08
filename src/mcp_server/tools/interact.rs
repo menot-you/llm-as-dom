@@ -9,8 +9,8 @@ use rmcp::model::*;
 use crate::LadServer;
 use crate::helpers::{build_element_js, check_js_result, key_to_code, mcp_err, no_active_page};
 use crate::params::{
-    ClickParams, FillFormParams, HoverParams, PressKeyParams, ScrollParams, SelectParams,
-    TypeParams, UploadParams,
+    ClearParams, ClickParams, FillFormParams, HoverParams, PressKeyParams, ScrollParams,
+    SelectParams, TypeParams, UploadParams,
 };
 
 use llm_as_dom::pilot;
@@ -196,6 +196,27 @@ impl LadServer {
         } else {
             self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
         }
+    }
+
+    /// Clear an input field by selecting all content and deleting.
+    ///
+    /// DX-W3-3: Works with React/Vue controlled components that don't respond
+    /// to `el.value = ''`. Uses select-all + delete + input event dispatch.
+    pub(crate) async fn tool_lad_clear(
+        &self,
+        params: Parameters<ClearParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(element = p.element, "lad_clear");
+
+        let body = "\
+            el.focus();\n\
+            el.select();\n\
+            document.execCommand('delete');\n\
+            el.dispatchEvent(new Event('input', { bubbles: true }));\n\
+            el.dispatchEvent(new Event('change', { bubbles: true }));";
+        let js = build_element_js(p.element, body);
+        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
     }
 
     /// Select an option in a `<select>` element by its ID from lad_snapshot.
