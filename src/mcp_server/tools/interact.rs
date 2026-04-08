@@ -9,7 +9,7 @@ use rmcp::model::*;
 use crate::LadServer;
 use crate::helpers::{build_element_js, check_js_result, key_to_code, mcp_err, no_active_page};
 use crate::params::{
-    ClickParams, HoverParams, PressKeyParams, SelectParams, TypeParams, UploadParams,
+    ClickParams, HoverParams, PressKeyParams, ScrollParams, SelectParams, TypeParams, UploadParams,
 };
 
 use llm_as_dom::pilot;
@@ -88,14 +88,36 @@ impl LadServer {
         tracing::info!(element = p.element, text = %log_text, "lad_type");
 
         let escaped = pilot::js_escape(&p.text);
+
+        // DX-4: If press_enter=true, append Enter key events after typing.
+        let enter_snippet = if p.press_enter {
+            let code = key_to_code("Enter");
+            let key_escaped = pilot::js_escape("Enter");
+            let code_escaped = pilot::js_escape(code);
+            format!(
+                "\nfor (const type of ['keydown', 'keypress', 'keyup']) {{\
+                     el.dispatchEvent(new KeyboardEvent(type, {{\
+                         key: '{key_escaped}', code: '{code_escaped}', bubbles: true, cancelable: true\
+                     }}));\
+                 }}"
+            )
+        } else {
+            String::new()
+        };
+
         let body = format!(
             "el.focus();\n\
              el.value = '{escaped}';\n\
              el.dispatchEvent(new Event('input', {{ bubbles: true }}));\n\
-             el.dispatchEvent(new Event('change', {{ bubbles: true }}));"
+             el.dispatchEvent(new Event('change', {{ bubbles: true }}));{enter_snippet}"
         );
         let js = build_element_js(p.element, &body);
-        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+        let delay = if p.press_enter {
+            DEFAULT_INTERACT_DELAY_MS
+        } else {
+            VALUE_SET_DELAY_MS
+        };
+        self.interact_and_refresh(&js, delay).await
     }
 
     /// Select an option in a `<select>` element by its ID from lad_snapshot.
@@ -269,5 +291,58 @@ impl LadServer {
             p.files.len(),
             p.element
         ))]))
+    }
+
+    /// Scroll the page or scroll to a specific element.
+    ///
+    /// DX-5: Dedicated scroll tool so agents don't need `lad_eval` for scrolling.
+    /// After scrolling, waits 200ms for lazy-loaded content, then returns updated view.
+    pub(crate) async fn tool_lad_scroll(
+        &self,
+        params: Parameters<ScrollParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(direction = %p.direction, element = ?p.element, pixels = p.pixels, "lad_scroll");
+
+        let js = if let Some(el_id) = p.element {
+            // Scroll to a specific element by data-lad-id
+            format!(
+                r#"(() => {{
+                    const el = document.querySelector('[data-lad-id="{}"]');
+                    if (!el) return JSON.stringify({{ error: "element {} not found" }});
+                    el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                    return JSON.stringify({{ ok: true }});
+                }})()"#,
+                el_id, el_id
+            )
+        } else {
+            // Directional scroll
+            let scroll_cmd = match p.direction.as_str() {
+                "up" => format!("window.scrollBy(0, -{})", p.pixels),
+                "bottom" => "window.scrollTo(0, document.body.scrollHeight)".to_string(),
+                "top" => "window.scrollTo(0, 0)".to_string(),
+                // "down" is the default
+                _ => format!("window.scrollBy(0, {})", p.pixels),
+            };
+            format!(
+                r#"(() => {{
+                    {scroll_cmd};
+                    return JSON.stringify({{ ok: true }});
+                }})()"#
+            )
+        };
+
+        {
+            let active = self.active_page.lock().await;
+            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+        }
+
+        // Wait for lazy-loaded content to settle
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let view = self.refresh_active_view().await?;
+        Ok(CallToolResult::success(vec![Content::text(
+            view.to_prompt(),
+        )]))
     }
 }
