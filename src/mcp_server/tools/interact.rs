@@ -43,11 +43,14 @@ impl LadServer {
 
         // FIX-R6-01: SSRF gate — verify the browser hasn't navigated to an unsafe URL
         // as a result of the interaction (e.g. click on a link to localhost).
+        // FIX-R8-01: Invalidate active_page on SSRF so subsequent tools can't
+        // operate on the unsafe page.
         {
-            let active = self.active_page.lock().await;
+            let mut active = self.active_page.lock().await;
             let ap = active.as_ref().ok_or_else(no_active_page)?;
             let current_url = ap.page.url().await.map_err(mcp_err)?;
             if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                *active = None;
                 return Err(mcp_err(format!(
                     "blocked: interaction navigated to unsafe URL {current_url}"
                 )));
@@ -76,14 +79,16 @@ impl LadServer {
 
         if p.wait_for_navigation {
             {
-                let active = self.active_page.lock().await;
+                let mut active = self.active_page.lock().await;
                 let ap = active.as_ref().ok_or_else(no_active_page)?;
                 check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
 
                 // FIX-R6-01: SSRF gate after navigation
+                // FIX-R8-01: Invalidate active_page on SSRF detection.
                 let current_url = ap.page.url().await.map_err(mcp_err)?;
                 if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                    *active = None;
                     return Err(mcp_err(format!(
                         "blocked: click navigated to unsafe URL {current_url}"
                     )));
@@ -162,7 +167,7 @@ impl LadServer {
             // FIX-R6-05: Form submission via Enter may trigger navigation.
             // Use wait_for_navigation with a timeout instead of a fixed sleep.
             {
-                let active = self.active_page.lock().await;
+                let mut active = self.active_page.lock().await;
                 let ap = active.as_ref().ok_or_else(no_active_page)?;
                 check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
 
@@ -174,8 +179,10 @@ impl LadServer {
                 .await;
 
                 // FIX-R6-01: SSRF gate after potential navigation
+                // FIX-R8-01: Invalidate active_page on SSRF detection.
                 let current_url = ap.page.url().await.map_err(mcp_err)?;
                 if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                    *active = None;
                     return Err(mcp_err(format!(
                         "blocked: form submission navigated to unsafe URL {current_url}"
                     )));
@@ -209,14 +216,16 @@ impl LadServer {
 
         if p.wait_for_navigation {
             {
-                let active = self.active_page.lock().await;
+                let mut active = self.active_page.lock().await;
                 let ap = active.as_ref().ok_or_else(no_active_page)?;
                 check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
 
                 // FIX-R6-01: SSRF gate after navigation
+                // FIX-R8-01: Invalidate active_page on SSRF detection.
                 let current_url = ap.page.url().await.map_err(mcp_err)?;
                 if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                    *active = None;
                     return Err(mcp_err(format!(
                         "blocked: select navigated to unsafe URL {current_url}"
                     )));
@@ -290,11 +299,13 @@ impl LadServer {
         tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_INTERACT_DELAY_MS)).await;
 
         // FIX-R6-01: SSRF gate — key presses (e.g. Enter) can trigger navigation
+        // FIX-R8-01: Invalidate active_page on SSRF detection.
         {
-            let active = self.active_page.lock().await;
+            let mut active = self.active_page.lock().await;
             let ap = active.as_ref().ok_or_else(no_active_page)?;
             let current_url = ap.page.url().await.map_err(mcp_err)?;
             if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                *active = None;
                 return Err(mcp_err(format!(
                     "blocked: key press navigated to unsafe URL {current_url}"
                 )));
@@ -361,6 +372,8 @@ impl LadServer {
             }
         }
 
+        let file_count = p.files.len();
+        let element_id = p.element;
         let selector = format!(r#"[data-lad-id="{}"]"#, p.element);
 
         {
@@ -380,13 +393,14 @@ impl LadServer {
             //
             // FIX-R7-03: Known limitation — `set_input_files` uses flat CSS via
             // chromiumoxide's `find_element(selector)`, which does NOT pierce shadow
-            // DOM or cross-origin iframes. The precheck and change event above use
-            // `build_element_js` (deepQuerySelector) so they DO find elements in
-            // shadow roots, but the actual upload will fail silently for those cases.
-            // A full fix would require resolving the element to a CDP `backendNodeId`
-            // via JS evaluation, then calling `DOM.setFileInputFiles` directly with
-            // that ID. This is deferred because shadow-DOM file inputs are extremely
-            // rare in practice. The tool description documents this limitation.
+            // DOM or iframes (including same-origin). The precheck and change event
+            // above use `build_element_js` (deepQuerySelector) so they DO find
+            // elements in shadow roots, but the actual upload will fail silently
+            // for those cases. A full fix would require resolving the element to a
+            // CDP `backendNodeId` via JS evaluation, then calling
+            // `DOM.setFileInputFiles` directly with that ID. This is deferred
+            // because shadow-DOM/iframe file inputs are extremely rare in practice.
+            // The tool description documents this limitation.
             ap.page
                 .set_input_files(&selector, &p.files)
                 .await
@@ -401,10 +415,20 @@ impl LadServer {
             ap.page.eval_js(&change_js).await.map_err(mcp_err)?;
         }
 
+        // FIX-R8-02: Route upload through refresh_active_view chokepoint.
+        // A malicious `change` handler could navigate to an internal target;
+        // refresh_active_view includes the SSRF gate and will invalidate
+        // active_page if the URL is unsafe.
+        tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_INTERACT_DELAY_MS)).await;
+        let view = self.refresh_active_view().await?;
         Ok(CallToolResult::success(vec![Content::text(format!(
-            r#"{{"status": "uploaded", "files": {}, "element": {}}}"#,
-            p.files.len(),
-            p.element
+            "{}\n\n--- Updated View ---\n{}",
+            serde_json::json!({
+                "status": "uploaded",
+                "files": file_count,
+                "element": element_id,
+            }),
+            view.to_prompt(),
         ))]))
     }
 

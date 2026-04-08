@@ -31,9 +31,11 @@ impl LadServer {
         }
 
         // FIX-1: Check URL safety after history.back() navigation settles.
+        // FIX-R8-01: Invalidate active_page on SSRF detection.
         if let Ok(ref back_url) = ap.page.url().await
             && !llm_as_dom::sanitize::is_safe_url(back_url)
         {
+            *active = None;
             return Err(mcp_err(format!(
                 "blocked: history.back() navigated to unsafe URL {back_url}"
             )));
