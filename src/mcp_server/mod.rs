@@ -250,11 +250,22 @@ impl LadServer {
     }
 
     /// Re-extract semantic view from the active page and update stored state.
+    ///
+    /// FIX-R6-02: Also syncs `ap.url` with the actual browser URL after every
+    /// refresh. Without this, `ActivePage.url` could hold the *requested* URL
+    /// while the browser had followed a redirect (e.g. http->https), causing
+    /// `navigate_or_reuse` to misclassify same-origin pages and reopen them.
     pub(crate) async fn refresh_active_view(
         &self,
     ) -> Result<semantic::SemanticView, rmcp::ErrorData> {
         let mut active = self.active_page.lock().await;
         let ap = active.as_mut().ok_or_else(helpers::no_active_page)?;
+
+        // Sync URL with actual browser URL (handles redirects, click-driven navs)
+        if let Ok(actual_url) = ap.page.url().await {
+            ap.url = actual_url;
+        }
+
         let view = a11y::extract_semantic_view(ap.page.as_ref())
             .await
             .map_err(mcp_err)?;
@@ -388,7 +399,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Click an element by its ID from lad_snapshot. Requires a prior lad_snapshot or lad_browse call."
+        description = "Click an element by its ID from lad_snapshot. Set wait_for_navigation=true to wait for page load after clicking (useful for links/submit buttons). Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_click(
         &self,
@@ -408,7 +419,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Select an option in a dropdown by element ID from lad_snapshot. Requires a prior lad_snapshot or lad_browse call."
+        description = "Select an option in a dropdown by element ID from lad_snapshot. Set wait_for_navigation=true if the dropdown auto-submits. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_select(
         &self,

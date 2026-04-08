@@ -121,11 +121,13 @@ impl LadServer {
 
         // FIX-5: Persist the page and final view into active_page so follow-up
         // tools (click, type, eval, screenshot) work after lad_browse.
+        // FIX-R6-02: Use actual browser URL (not requested URL) to handle redirects.
         {
+            let browse_final_url = page.url().await.unwrap_or_else(|_| p.url.clone());
             let final_view = a11y::extract_semantic_view(page.as_ref())
                 .await
                 .unwrap_or_else(|_| llm_as_dom::semantic::SemanticView {
-                    url: p.url.clone(),
+                    url: browse_final_url.clone(),
                     title: String::new(),
                     page_hint: String::new(),
                     elements: vec![],
@@ -139,7 +141,7 @@ impl LadServer {
             let mut active = self.active_page.lock().await;
             *active = Some(crate::state::ActivePage {
                 page,
-                url: p.url.clone(),
+                url: browse_final_url,
                 view: final_view,
             });
         }
