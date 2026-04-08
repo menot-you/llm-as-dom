@@ -7,7 +7,7 @@ import subprocess
 import sys
 import urllib.request
 
-__version__ = "0.0.0.dev0"  # Injected by CI from Cargo.toml
+__version__ = "0.9.0"
 
 BINARY = "llm-as-dom-mcp"
 REPO = "menot-you/llm-as-dom"
