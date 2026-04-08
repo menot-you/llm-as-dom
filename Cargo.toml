@@ -23,6 +23,10 @@ path = "src/main.rs"
 name = "llm-as-dom-mcp"
 path = "src/mcp_server/mod.rs"
 
+[[bin]]
+name = "lad-relay"
+path = "src/relay/main.rs"
+
 [dependencies]
 # Browser (CDP)
 # NOTE: chromiumoxide pulls async-std transitively (RUSTSEC-2025-0052).
@@ -76,6 +80,15 @@ getrandom = "0.2"
 
 # Secure temp directory creation (FIX-R3-12)
 tempfile = "3"
+
+# WebSocket (relay transport)
+tokio-tungstenite = "0.26"
+
+# Bonjour/mDNS discovery (relay)
+mdns-sd = "0.12"
+flume = "0.11"
+hostname = "0.4"
+http = "1"
 
 # Misc
 async-trait = "0.1"
