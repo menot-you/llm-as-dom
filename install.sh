@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO="example-org/llm-as-dom"
-BINARIES="lad llm-as-dom-mcp"
+BINARIES="lad llm-as-dom-mcp lad-relay"
 INSTALL_DIR="${HOME}/.local/bin"
 
 detect_platform() {

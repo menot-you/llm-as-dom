@@ -84,6 +84,9 @@ tempfile = "3"
 # WebSocket (relay transport)
 tokio-tungstenite = "0.26"
 
+# QR code rendering (relay terminal output)
+qrcode = "0.14"
+
 # Bonjour/mDNS discovery (relay)
 mdns-sd = "0.12"
 flume = "0.11"
