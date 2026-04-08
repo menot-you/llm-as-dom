@@ -249,10 +249,127 @@ fn bench_parse_action(c: &mut Criterion) {
     });
 }
 
+// ── PERF-P3: Additional benchmarks ──────────────────────────────────
+
+fn bench_sanitize_text(c: &mut Criterion) {
+    // Build a realistic 50-element view prompt string with some stego chars.
+    let view = large_view();
+    let prompt = view.to_prompt();
+    // Sprinkle some steganographic chars.
+    let input = format!(
+        "Title\u{200B}\u{200D} heading\u{FEFF}\n{}",
+        &prompt[..prompt.len().min(2000)]
+    );
+
+    c.bench_function("sanitize_text_50el_view", |b| {
+        b.iter(|| black_box(llm_as_dom::sanitize::sanitize_text(black_box(&input))));
+    });
+}
+
+fn bench_sanitize_view_300el(c: &mut Criterion) {
+    // Build a 300-element view to stress sanitize_for_prompt.
+    let mut elements = Vec::with_capacity(300);
+    for i in 0..200 {
+        elements.push(link_element(
+            i,
+            &format!("Nav Link {i}"),
+            &format!("/page/{i}"),
+        ));
+    }
+    for i in 200..270 {
+        elements.push(input_element(
+            i,
+            &format!("Field {i}"),
+            "text",
+            Some(&format!("field_{i}")),
+            Some(0),
+        ));
+    }
+    for i in 270..300 {
+        elements.push(button_element(i, &format!("Button {i}"), Some(0)));
+    }
+
+    let view = SemanticView {
+        url: "https://example.com/large-page".into(),
+        title: "Large Page With 300 Elements".into(),
+        page_hint: "form page".into(),
+        elements,
+        forms: vec![],
+        visible_text: "A large page with many interactive elements for stress testing.".into(),
+        state: PageState::Ready,
+        element_cap: Some("300/500".into()),
+        blocked_reason: None,
+        session_context: None,
+    };
+
+    let raw = view.to_prompt();
+
+    c.bench_function("sanitize_for_prompt_300el", |b| {
+        b.iter(|| {
+            black_box(llm_as_dom::backend::generic::sanitize_for_prompt(
+                black_box(&raw),
+                40000,
+            ))
+        });
+    });
+
+    c.bench_function("to_prompt_300el", |b| {
+        b.iter(|| black_box(view.to_prompt()));
+    });
+}
+
+fn bench_is_safe_url(c: &mut Criterion) {
+    let safe = "https://example.com/page?q=search&page=2";
+    let private = "http://192.168.1.1/admin";
+    let javascript = "javascript:alert(1)";
+    let relative = "/dashboard";
+
+    c.bench_function("is_safe_url_safe", |b| {
+        b.iter(|| black_box(llm_as_dom::sanitize::is_safe_url(black_box(safe))));
+    });
+
+    c.bench_function("is_safe_url_private", |b| {
+        b.iter(|| black_box(llm_as_dom::sanitize::is_safe_url(black_box(private))));
+    });
+
+    c.bench_function("is_safe_url_javascript", |b| {
+        b.iter(|| black_box(llm_as_dom::sanitize::is_safe_url(black_box(javascript))));
+    });
+
+    c.bench_function("is_safe_url_relative", |b| {
+        b.iter(|| black_box(llm_as_dom::sanitize::is_safe_url(black_box(relative))));
+    });
+}
+
+fn bench_redact_url_secrets(c: &mut Criterion) {
+    let url_with_secrets = "https://example.com/cb?code=abc123&state=xyz&access_token=jwt&page=1";
+    let url_clean = "https://example.com/page?q=search&page=2";
+
+    c.bench_function("redact_url_secrets_with_secrets", |b| {
+        b.iter(|| {
+            black_box(llm_as_dom::sanitize::redact_url_secrets(black_box(
+                url_with_secrets,
+            )))
+        });
+    });
+
+    c.bench_function("redact_url_secrets_clean", |b| {
+        b.iter(|| {
+            black_box(llm_as_dom::sanitize::redact_url_secrets(black_box(
+                url_clean,
+            )))
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_to_prompt,
     bench_try_resolve,
-    bench_parse_action
+    bench_parse_action,
+    bench_sanitize_text,
+    bench_sanitize_view_300el,
+    bench_is_safe_url,
+    bench_redact_url_secrets,
 );
 criterion_main!(benches);
