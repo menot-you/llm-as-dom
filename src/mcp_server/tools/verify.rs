@@ -86,32 +86,90 @@ impl LadServer {
         )]))
     }
 
-    /// Wait for a condition to be true on the active page.
+    /// Wait for condition(s) to be true on the active page.
+    ///
+    /// DX-W3-1: Supports multiple conditions via `conditions` + `mode`.
+    /// - mode="all" (default): wait until ALL conditions pass.
+    /// - mode="any": return as soon as ANY condition passes.
+    ///
+    /// Backward compat: `condition` (singular) works as a single-element list.
     pub(crate) async fn tool_lad_wait(
         &self,
         params: Parameters<WaitParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(condition = %p.condition, timeout_ms = p.timeout_ms, "lad_wait");
+
+        // Build the final conditions list from singular + plural params.
+        let mut all_conditions: Vec<String> = Vec::new();
+        if let Some(c) = &p.condition {
+            all_conditions.push(c.clone());
+        }
+        if let Some(cs) = &p.conditions {
+            all_conditions.extend(cs.iter().cloned());
+        }
+        if all_conditions.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "provide at least one condition via 'condition' or 'conditions'".to_string(),
+                None,
+            ));
+        }
+
+        let mode = p.mode.as_deref().unwrap_or("all");
+        let is_any = mode == "any";
+
+        tracing::info!(
+            conditions = ?all_conditions,
+            mode = mode,
+            timeout_ms = p.timeout_ms,
+            "lad_wait"
+        );
 
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(p.timeout_ms);
         let poll_dur = std::time::Duration::from_millis(p.poll_ms);
-        let cond_lower = p.condition.to_lowercase();
+        let conditions_lower: Vec<String> =
+            all_conditions.iter().map(|c| c.to_lowercase()).collect();
 
         loop {
             let view = self.refresh_active_view().await?;
             let prompt_text = view.to_prompt();
-            if check_assertion(&cond_lower, &view, &prompt_text) {
-                return Ok(CallToolResult::success(vec![Content::text(
-                    view.to_prompt(),
-                )]));
+
+            if is_any {
+                // mode="any": return on first matching condition.
+                if let Some(matched) = conditions_lower
+                    .iter()
+                    .zip(all_conditions.iter())
+                    .find(|(cl, _)| check_assertion(cl, &view, &prompt_text))
+                    .map(|(_, orig)| orig.clone())
+                {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "MATCHED: {matched}\n\n{}",
+                        view.to_prompt()
+                    ))]));
+                }
+            } else {
+                // mode="all": all conditions must pass.
+                let all_pass = conditions_lower
+                    .iter()
+                    .all(|cl| check_assertion(cl, &view, &prompt_text));
+                if all_pass {
+                    return Ok(CallToolResult::success(vec![Content::text(
+                        view.to_prompt(),
+                    )]));
+                }
             }
 
             if tokio::time::Instant::now() >= deadline {
+                // Report which conditions failed for debugging.
+                let failed: Vec<&str> = conditions_lower
+                    .iter()
+                    .zip(all_conditions.iter())
+                    .filter(|(cl, _)| !check_assertion(cl, &view, &prompt_text))
+                    .map(|(_, orig)| orig.as_str())
+                    .collect();
                 return Err(rmcp::ErrorData::internal_error(
                     format!(
-                        "timeout after {}ms waiting for condition: {}",
-                        p.timeout_ms, p.condition
+                        "timeout after {}ms — failed conditions: {:?}",
+                        p.timeout_ms, failed
                     ),
                     None,
                 ));

@@ -173,8 +173,79 @@ impl SemanticView {
         if let Some(reason) = &self.blocked_reason {
             let _ = writeln!(out, "BLOCKED: {reason}");
         }
+        // DX-W3-5: Element count summary by kind.
         out.push('\n');
-        out.push_str("ELEMENTS:\n");
+        {
+            let total = self.elements.len();
+            let mut buttons = 0u32;
+            let mut inputs = 0u32;
+            let mut links = 0u32;
+            let mut selects = 0u32;
+            let mut textareas = 0u32;
+            let mut checkboxes = 0u32;
+            let mut radios = 0u32;
+            let mut other = 0u32;
+            for el in &self.elements {
+                match el.kind {
+                    ElementKind::Button => buttons += 1,
+                    ElementKind::Input => inputs += 1,
+                    ElementKind::Link => links += 1,
+                    ElementKind::Select => selects += 1,
+                    ElementKind::Textarea => textareas += 1,
+                    ElementKind::Checkbox => checkboxes += 1,
+                    ElementKind::Radio => radios += 1,
+                    ElementKind::Other => other += 1,
+                }
+            }
+            let mut parts = Vec::new();
+            if buttons > 0 {
+                parts.push(format!(
+                    "{buttons} button{}",
+                    if buttons == 1 { "" } else { "s" }
+                ));
+            }
+            if inputs > 0 {
+                parts.push(format!(
+                    "{inputs} input{}",
+                    if inputs == 1 { "" } else { "s" }
+                ));
+            }
+            if links > 0 {
+                parts.push(format!("{links} link{}", if links == 1 { "" } else { "s" }));
+            }
+            if selects > 0 {
+                parts.push(format!(
+                    "{selects} select{}",
+                    if selects == 1 { "" } else { "s" }
+                ));
+            }
+            if textareas > 0 {
+                parts.push(format!(
+                    "{textareas} textarea{}",
+                    if textareas == 1 { "" } else { "s" }
+                ));
+            }
+            if checkboxes > 0 {
+                parts.push(format!(
+                    "{checkboxes} checkbox{}",
+                    if checkboxes == 1 { "" } else { "es" }
+                ));
+            }
+            if radios > 0 {
+                parts.push(format!(
+                    "{radios} radio{}",
+                    if radios == 1 { "" } else { "s" }
+                ));
+            }
+            if other > 0 {
+                parts.push(format!("{other} other"));
+            }
+            if parts.is_empty() {
+                let _ = writeln!(out, "ELEMENTS: 0");
+            } else {
+                let _ = writeln!(out, "ELEMENTS: {total} ({parts})", parts = parts.join(", "));
+            }
+        }
         for el in &self.elements {
             let _ = write!(out, "[{}] {:?}", el.id, el.kind);
             if let Some(itype) = &el.input_type {

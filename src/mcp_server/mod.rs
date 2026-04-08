@@ -1,10 +1,10 @@
 //! `llm-as-dom-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
-//! Provides tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
+//! Provides 25 tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
 //! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
 //! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`, `lad_screenshot`,
 //! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`, `lad_scroll`,
-//! `lad_fill_form`.
+//! `lad_fill_form`, `lad_refresh`, `lad_clear`, `lad_watch`.
 
 mod assertions;
 mod helpers;
@@ -183,10 +183,54 @@ impl LadServer {
             .await
             .map_err(mcp_err)?;
 
+        // DX-W3-4: Auto-install dialog overrides on every new page so unexpected
+        // alert/confirm/prompt dialogs don't hang the page. Default: auto-accept.
+        // `lad_dialog(action="dismiss")` can change the behavior at runtime.
+        Self::inject_dialog_overrides(page.as_ref()).await;
+
         let view = a11y::extract_semantic_view(page.as_ref())
             .await
             .map_err(mcp_err)?;
         Ok((page, view))
+    }
+
+    /// DX-W3-4: Inject dialog auto-accept JS on a page.
+    ///
+    /// Overrides `window.alert`, `window.confirm`, `window.prompt` to
+    /// auto-accept by default and capture dialog history. Idempotent.
+    async fn inject_dialog_overrides(page: &dyn PageHandle) {
+        let js = r#"
+            if (!window.__lad_dialogs) {
+                window.__lad_dialogs = [];
+                window.__lad_dialog_auto = 'accept';
+                window.__lad_dialog_response = '';
+
+                window.alert = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'alert', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                };
+                window.confirm = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'confirm', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                    return window.__lad_dialog_auto === 'accept';
+                };
+                window.prompt = function(msg, def) {
+                    window.__lad_dialogs.push({
+                        type: 'prompt', message: String(msg),
+                        default: def || '', timestamp: Date.now()
+                    });
+                    if (window.__lad_dialog_auto !== 'accept') return null;
+                    return window.__lad_dialog_response || def || '';
+                };
+            }
+        "#;
+        if let Err(e) = page.eval_js(js).await {
+            tracing::warn!(error = %e, "failed to inject dialog overrides");
+        }
     }
 
     /// Navigate to a URL (or reuse the active page if same origin), returning
@@ -499,7 +543,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Wait for a condition to be true on the active page. Uses natural language conditions like lad_assert but blocks until satisfied or timeout. Default timeout: 10s, poll interval: 500ms."
+        description = "Wait for condition(s) to be true on the active page. Supports single `condition` or multiple `conditions` with mode='any' (first match wins) or mode='all' (default, all must pass). Example: conditions=['has button Dashboard', 'text contains Invalid password'], mode='any'. Default timeout: 10s, poll interval: 500ms."
     )]
     async fn lad_wait(
         &self,
@@ -567,6 +611,23 @@ impl LadServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.tool_lad_scroll(params).await
     }
+
+    #[tool(
+        description = "Reload the current page. Useful after form submissions or when content needs refreshing. Returns updated semantic view. Requires a prior lad_snapshot or lad_browse call."
+    )]
+    async fn lad_refresh(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_refresh().await
+    }
+
+    #[tool(
+        description = "Clear an input field by selecting all content and deleting. Works with React/Vue controlled components that ignore el.value=''. Requires element ID from a prior lad_snapshot."
+    )]
+    async fn lad_clear(
+        &self,
+        params: Parameters<ClearParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_clear(params).await
+    }
 }
 
 // ── ServerHandler ──────────────────────────────────────────────────
@@ -581,7 +642,7 @@ impl ServerHandler for LadServer {
                 .enable_resources_subscribe()
                 .build(),
         )
-        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation (returns semantic view), lad_extract for page analysis (URL optional — omit to use current page), lad_assert for verification (URL optional), lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional — omit to re-read current page), lad_click/lad_type/lad_select for element interaction (lad_select matches by visible label first, then value), lad_fill_form to fill multiple fields + submit in one call, lad_scroll for scrolling (down/up/bottom/top or to element), lad_hover for hover states/tooltips/dropdowns, lad_screenshot for visual capture, lad_wait for blocking condition checks, lad_network for traffic inspection, lad_dialog for JS alert/confirm/prompt handling, lad_upload for file input uploads (Chromium only). Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis (URL optional, format='prompt' for compact output), lad_assert for verification (URL optional), lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional), lad_click/lad_type/lad_select for element interaction, lad_clear to clear input fields (works with React/Vue controlled components), lad_fill_form to fill multiple fields + submit in one call, lad_scroll for scrolling, lad_hover for hover states, lad_screenshot for visual capture, lad_wait for blocking condition checks (supports multiple conditions with mode='any'/'all'), lad_network for traffic inspection (includes HTTP status codes), lad_dialog for JS alert/confirm/prompt handling (auto-accepts by default), lad_refresh to reload the current page, lad_upload for file input uploads. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 
     async fn initialize(
@@ -1333,5 +1394,132 @@ mod tests {
         assert_eq!(p.element, 5);
         assert_eq!(p.value, "United States");
         assert!(!p.wait_for_navigation);
+    }
+
+    // ── DX-W3-1: wait OR conditions ──────────────────────────────
+
+    #[test]
+    fn wait_params_single_condition_backward_compat() {
+        let json = r#"{"condition":"has button Dashboard"}"#;
+        let p: WaitParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.condition.as_deref(), Some("has button Dashboard"));
+        assert!(p.conditions.is_none());
+        assert!(p.mode.is_none());
+        assert_eq!(p.timeout_ms, 10_000);
+        assert_eq!(p.poll_ms, 500);
+    }
+
+    #[test]
+    fn wait_params_multiple_conditions_any() {
+        let json = r#"{
+            "conditions": ["has button Dashboard", "text contains Invalid password"],
+            "mode": "any",
+            "timeout_ms": 5000
+        }"#;
+        let p: WaitParams = serde_json::from_str(json).unwrap();
+        assert!(p.condition.is_none());
+        let conds = p.conditions.unwrap();
+        assert_eq!(conds.len(), 2);
+        assert_eq!(conds[0], "has button Dashboard");
+        assert_eq!(conds[1], "text contains Invalid password");
+        assert_eq!(p.mode.as_deref(), Some("any"));
+        assert_eq!(p.timeout_ms, 5000);
+    }
+
+    #[test]
+    fn wait_params_both_singular_and_plural() {
+        let json = r#"{
+            "condition": "has form",
+            "conditions": ["has button submit"],
+            "mode": "all"
+        }"#;
+        let p: WaitParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.condition.as_deref(), Some("has form"));
+        assert_eq!(p.conditions.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn wait_params_empty_produces_defaults() {
+        let json = r#"{}"#;
+        let p: WaitParams = serde_json::from_str(json).unwrap();
+        assert!(p.condition.is_none());
+        assert!(p.conditions.is_none());
+        assert!(p.mode.is_none());
+    }
+
+    // ── DX-W3-3: clear params ────────────────────────────────────
+
+    #[test]
+    fn clear_params_parse() {
+        let json = r#"{"element":7}"#;
+        let p: ClearParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.element, 7);
+    }
+
+    // ── DX-W3-5: element count summary in to_prompt ──────────────
+
+    #[test]
+    fn to_prompt_element_summary_empty() {
+        let view = empty_view();
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains("ELEMENTS: 0"),
+            "empty view should show ELEMENTS: 0: {prompt}"
+        );
+    }
+
+    #[test]
+    fn to_prompt_element_summary_mixed() {
+        let mut view = empty_view();
+        view.elements
+            .push(make_element(semantic::ElementKind::Button, "Submit"));
+        view.elements
+            .push(make_element(semantic::ElementKind::Button, "Cancel"));
+        view.elements
+            .push(make_element(semantic::ElementKind::Input, "Email"));
+        view.elements
+            .push(make_element(semantic::ElementKind::Link, "Home"));
+
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains("ELEMENTS: 4 (2 buttons, 1 input, 1 link)"),
+            "should show element summary: {prompt}"
+        );
+    }
+
+    #[test]
+    fn to_prompt_element_summary_single() {
+        let mut view = empty_view();
+        view.elements
+            .push(make_element(semantic::ElementKind::Select, "Country"));
+
+        let prompt = view.to_prompt();
+        assert!(
+            prompt.contains("ELEMENTS: 1 (1 select)"),
+            "should use singular: {prompt}"
+        );
+    }
+
+    // ── DX-W3-6: extract format param ────────────────────────────
+
+    #[test]
+    fn extract_params_format_default() {
+        let json = r#"{"what":"links"}"#;
+        let p: ExtractParams = serde_json::from_str(json).unwrap();
+        assert!(p.format.is_none());
+    }
+
+    #[test]
+    fn extract_params_format_prompt() {
+        let json = r#"{"what":"links","format":"prompt"}"#;
+        let p: ExtractParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.format.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn extract_params_format_json() {
+        let json = r#"{"what":"links","format":"json"}"#;
+        let p: ExtractParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.format.as_deref(), Some("json"));
     }
 }

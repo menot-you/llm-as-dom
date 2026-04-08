@@ -96,7 +96,8 @@ impl LadServer {
         let guard = self.active_page.lock().await;
         let active = guard.as_ref().ok_or_else(no_active_page)?;
 
-        // Use performance.getEntries() to gather network timing data via JS.
+        // DX-W3-7: Extract initiatorType for method heuristic, and responseStatus
+        // (available on Chrome 109+ via PerformanceResourceTiming).
         let js = r#"JSON.stringify(
             performance.getEntriesByType('resource').concat(
                 performance.getEntriesByType('navigation')
@@ -105,7 +106,8 @@ impl LadServer {
                 type: e.initiatorType || e.entryType,
                 duration_ms: Math.round(e.duration),
                 transfer_size: e.transferSize || 0,
-                start_ms: Math.round(e.startTime)
+                start_ms: Math.round(e.startTime),
+                response_status: e.responseStatus || 0
             }))
         )"#;
 
@@ -118,11 +120,18 @@ impl LadServer {
             .map_err(|e| mcp_err(format!("parse performance entries: {e}")))?;
 
         // Build a NetworkCapture from JS entries for classification.
+        // DX-W3-7: Map initiatorType to HTTP method heuristic.
         let mut capture = network::NetworkCapture::new();
         for (i, entry) in entries.iter().enumerate() {
             let url = entry["url"].as_str().unwrap_or("").to_string();
-            // performance entries don't carry HTTP method; default to GET.
-            let method = "GET";
+            let initiator = entry["type"].as_str().unwrap_or("");
+            // Heuristic: xmlhttprequest/fetch/beacon often use POST for APIs,
+            // but we can't know for sure from perf entries alone. Default GET.
+            let method = match initiator {
+                "beacon" => "POST",
+                "navigation" => "GET",
+                _ => "GET",
+            };
             capture.on_request(i.to_string(), url, method.to_string(), None);
         }
 
@@ -135,26 +144,37 @@ impl LadServer {
             _ => None,
         };
 
-        let filtered: Vec<&network::CapturedRequest> = if let Some(kind) = filter_kind {
+        let filtered: Vec<(usize, &network::CapturedRequest)> = if let Some(kind) = filter_kind {
             capture
                 .requests
                 .values()
-                .filter(|r| r.kind == kind)
+                .enumerate()
+                .filter(|(_, r)| r.kind == kind)
                 .collect()
         } else {
-            capture.requests.values().collect()
+            capture.requests.values().enumerate().collect()
         };
 
         let output = serde_json::json!({
             "summary": summary,
             "filter": p.filter,
             "count": filtered.len(),
-            "requests": filtered.iter().map(|r| serde_json::json!({
-                "url": llm_as_dom::sanitize::redact_url_secrets(&r.url),
-                "kind": r.kind,
-                "method": r.method,
-                "timestamp_ms": r.timestamp_ms,
-            })).collect::<Vec<_>>(),
+            "requests": filtered.iter().map(|(i, r)| {
+                let status = entries.get(*i)
+                    .and_then(|e| e["response_status"].as_u64())
+                    .unwrap_or(0);
+                let initiator = entries.get(*i)
+                    .and_then(|e| e["type"].as_str())
+                    .unwrap_or("unknown");
+                serde_json::json!({
+                    "url": llm_as_dom::sanitize::redact_url_secrets(&r.url),
+                    "kind": r.kind,
+                    "method": r.method,
+                    "status": status,
+                    "initiator": initiator,
+                    "timestamp_ms": r.timestamp_ms,
+                })
+            }).collect::<Vec<_>>(),
         });
 
         Ok(CallToolResult::success(vec![Content::text(
