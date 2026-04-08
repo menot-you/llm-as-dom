@@ -198,8 +198,15 @@ async fn accept_one(
                             resp: http::Response<()>|
              -> Result<_, http::Response<Option<String>>> {
                 if let Some(token) = expected_token {
+                    // FIX-CX4: Exact query param parsing instead of substring match.
                     let uri = req.uri().to_string();
-                    if !uri.contains(&format!("token={token}")) {
+                    let has_valid_token = uri
+                        .split('?')
+                        .nth(1)
+                        .unwrap_or("")
+                        .split('&')
+                        .any(|param| param == format!("token={token}"));
+                    if !has_valid_token {
                         warn!("rejected {peer}: invalid token");
                         return Err(http::Response::builder()
                             .status(401)
