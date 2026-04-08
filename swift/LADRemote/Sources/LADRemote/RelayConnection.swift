@@ -38,13 +38,16 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
     private var state: RelayConnectionState = .disconnected
-    // FIX-G8: DispatchSourceTimer instead of Timer to avoid main-thread data race.
     private var pingTimer: DispatchSourceTimer?
+    // FIX-CX1: Connection generation to detect stale callbacks.
+    private var connectionGeneration: UInt64 = 0
     // Exponential backoff reconnect state — protected by `queue`.
     private var reconnectAttempt: Int = 0
     private let maxReconnectAttempts: Int = 10
     private var shouldReconnect: Bool = true
     private var reconnectWorkItem: DispatchWorkItem?
+    // FIX-CX2: Track if connect was user-initiated vs auto-reconnect.
+    private var isAutoReconnect: Bool = false
 
     @MainActor public weak var delegate: RelayConnectionDelegate?
 
@@ -62,13 +65,16 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
     /// Connect to the lad-relay server. Idempotent — tears down existing connection first.
     public func connect() {
         queue.async { [self] in
-            // Reset reconnect state on an explicit connect call.
-            shouldReconnect = true
-            reconnectAttempt = 0
+            // FIX-CX2: Only reset backoff on explicit user-initiated connect, not auto-reconnect.
+            if !isAutoReconnect {
+                shouldReconnect = true
+                reconnectAttempt = 0
+            }
+            isAutoReconnect = false
             reconnectWorkItem?.cancel()
             reconnectWorkItem = nil
 
-            // FIX-C3: Tear down existing connection before creating a new one.
+            // Tear down existing connection before creating a new one.
             if task != nil || session != nil {
                 pingTimer?.cancel()
                 pingTimer = nil
@@ -77,6 +83,10 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
                 session?.invalidateAndCancel()
                 session = nil
             }
+
+            // FIX-CX1: Bump generation so stale callbacks from old sessions are ignored.
+            connectionGeneration &+= 1
+            let myGeneration = connectionGeneration
 
             let config = URLSessionConfiguration.default
             config.waitsForConnectivity = true
@@ -92,7 +102,7 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
 
             updateState(.connecting)
             task.resume()
-            receiveLoop()
+            receiveLoop(generation: myGeneration)
             startPingTimer()
         }
     }
@@ -166,28 +176,31 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
 
     // MARK: - Private
 
-    private func receiveLoop() {
+    /// FIX-CX1: receiveLoop takes a generation to ignore stale callbacks.
+    private func receiveLoop(generation: UInt64) {
         task?.receive { [weak self] result in
             guard let self else { return }
             self.queue.async {
+                // FIX-CX1: Ignore callbacks from old connections.
+                guard generation == self.connectionGeneration else { return }
+
                 switch result {
                 case .success(.string(let text)):
                     self.handleMessage(text)
-                    self.receiveLoop()
+                    self.receiveLoop(generation: generation)
                 case .success(.data(let data)):
                     if let text = String(data: data, encoding: .utf8) {
                         self.handleMessage(text)
                     }
-                    self.receiveLoop()
+                    self.receiveLoop(generation: generation)
                 case .failure(let error):
                     self.logger.error("receive error: \(error.localizedDescription)")
                     self.updateState(.error(error.localizedDescription))
-                    // FIX-G9: Tear down on fatal receive error — use teardown() to stay on queue.
                     let willReconnect = self.shouldReconnect
                     self.teardown(stopReconnect: false)
                     if willReconnect { self.scheduleReconnect() }
                 default:
-                    self.receiveLoop()
+                    self.receiveLoop(generation: generation)
                 }
             }
         }
@@ -242,6 +255,8 @@ public final class RelayConnection: NSObject, @unchecked Sendable {
 
         let item = DispatchWorkItem { [weak self] in
             guard let self, self.shouldReconnect else { return }
+            // FIX-CX2: Mark as auto-reconnect so connect() doesn't reset the attempt counter.
+            self.isAutoReconnect = true
             self.connect()
         }
         reconnectWorkItem = item
@@ -284,8 +299,9 @@ extension RelayConnection: URLSessionWebSocketDelegate {
         reason: Data?
     ) {
         queue.async { [self] in
+            // FIX-CX1: Ignore stale callback from old session.
+            guard webSocketTask === self.task else { return }
             logger.info("WebSocket closed: \(closeCode.rawValue)")
-            // FIX-G7: Break URLSession retain cycle on server-initiated close.
             let willReconnect = shouldReconnect
             teardown(stopReconnect: false)
             if willReconnect { scheduleReconnect() }
@@ -299,9 +315,10 @@ extension RelayConnection: URLSessionWebSocketDelegate {
     ) {
         if let error {
             queue.async { [self] in
+                // FIX-CX1: Ignore stale callback from old session.
+                guard session === self.session else { return }
                 logger.error("session error: \(error.localizedDescription)")
                 updateState(.error(error.localizedDescription))
-                // FIX-G7: Break URLSession retain cycle on error.
                 let willReconnect = shouldReconnect
                 teardown(stopReconnect: false)
                 if willReconnect { scheduleReconnect() }

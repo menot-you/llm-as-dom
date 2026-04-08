@@ -121,7 +121,8 @@ public final class BridgeEngine: NSObject {
                 Task { @MainActor in
                     self.webView.evaluateJavaScript(script) { result, _ in
                         let value = self.serializeJSResult(result)
-                        self.sendEvent("monitor", extra: ["result": value])
+                        // FIX-CX3: Rust reads "value", not "result".
+                        self.sendEvent("monitor", extra: ["value": value])
                     }
                 }
             }
