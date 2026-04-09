@@ -38,6 +38,9 @@ impl ChromiumEngine {
         if config.visible || config.interactive {
             builder = builder
                 .with_head() // Disable chromiumoxide's default --headless flag.
+                // DX-13: Disable viewport emulation in visible mode so the page
+                // renders at the actual window size, not the default 800x600.
+                .viewport(None)
                 .arg("--app=about:blank")
                 .arg("--disable-extensions")
                 .arg("--disable-default-apps")
