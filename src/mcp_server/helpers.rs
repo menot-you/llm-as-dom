@@ -77,10 +77,14 @@ fn detect_screen_size() -> Option<(u32, u32)> {
     }
 
     if let Some((w, h)) = best {
+        // Cap at 1920x1080 — ultrawide/retina resolutions make sites render
+        // tiny modals in a corner. Most web content is designed for ≤1920px.
+        let w = w.min(1920);
+        let h = h.min(1080);
         tracing::info!(
             width = w,
             height = h,
-            "auto-detected screen size (largest display)"
+            "auto-detected screen size (capped at 1920x1080)"
         );
         return Some((w, h));
     }

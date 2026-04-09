@@ -164,9 +164,17 @@ impl LadServer {
             String::new()
         };
 
+        // DX-12 FIX: Use React-compatible native setter to trigger synthetic events.
+        // React overrides el.value setter; using the native HTMLInputElement setter
+        // bypasses React's override and triggers proper change detection.
         let body = format!(
             "el.focus();\n\
-             el.value = '{escaped}';\n\
+             const nativeSetter = Object.getOwnPropertyDescriptor(\n\
+                 el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,\n\
+                 'value'\n\
+             )?.set;\n\
+             if (nativeSetter) {{ nativeSetter.call(el, '{escaped}'); }}\n\
+             else {{ el.value = '{escaped}'; }}\n\
              el.dispatchEvent(new Event('input', {{ bubbles: true }}));\n\
              el.dispatchEvent(new Event('change', {{ bubbles: true }}));{enter_snippet}"
         );
