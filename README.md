@@ -226,7 +226,7 @@ lad --url "https://staging.myapp.com/login" \
 
 ## MCP Server
 
-`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **22 semantic tools** — full Playwright parity with 60x fewer tokens.
+`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **25 semantic tools** — full Playwright parity with 60x fewer tokens.
 
 ```bash
 llm-as-dom-mcp  # starts MCP server (stdio)
@@ -293,11 +293,18 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 | `lad_network` | Inspect network traffic with timing data. Filter by type: auth, api, navigation, asset |
 | `lad_locate` | Map a DOM element back to its source file (React dev source, data-ds, data-lad attributes) |
 
+### Input
+
+| Tool | What it does |
+|------|-------------|
+| `lad_clear` | Clear an input field (works with React/Vue controlled components) |
+
 ### Lifecycle
 
 | Tool | What it does |
 |------|-------------|
 | `lad_close` | Close the browser and release all resources |
+| `lad_refresh` | Reload the current page |
 | `lad_session` | View or reset session state: auth status, visited URLs, browse count |
 
 <details>
@@ -352,12 +359,12 @@ lad matches Playwright's tool surface with fundamentally different economics:
 
 | Dimension | lad | Playwright MCP |
 |-----------|-----|---------------|
-| **Tools** | 22 | 21 |
+| **Tools** | 25 | 21 |
 | **Tokens per login test** | ~300 | ~18,000 |
 | **Cost ratio** | 1x | 60x |
 | **Decision engine** | Heuristics-first (70-90% no LLM) | None — LLM parses every page |
 | **Output format** | Semantic JSON (never raw HTML) | Raw DOM snapshots |
-| **Browser engines** | Chromium + WebKit | Chromium only |
+| **Browser engines** | Chromium + WebKit + iPhone (Remote) | Chromium only |
 | **DOM traversal** | Shadow DOM + same-origin iframes | Standard DOM |
 
 The key architectural difference: Playwright gives the LLM a DOM and asks it to figure out what to do. lad compresses the DOM, runs heuristics, and only calls the LLM when genuinely ambiguous.
@@ -403,10 +410,11 @@ The 3 extra WebKit elements are footer links that GitHub serves differently to S
 
 ## Test Suite
 
-- **387 tests** (unit + chaos + integration + protocol)
+- **374+ tests** (unit + chaos + integration + relay E2E + protocol)
 - **11 heuristic modules** (login, form, search, navigation, OAuth, MFA, ecommerce, validation, multistep, hints, selector)
 - **8 micro-benchmarks** (criterion)
-- **~13,600 lines of Rust** (45 files) + ~576 lines of Swift
+- **~19,000 lines of Rust** (66 files) + ~1,200 lines of Swift
+- **30 findings fixed** via multi-model adversarial review (Gemini + Codex + Opus)
 
 ## Requirements
 
@@ -415,8 +423,24 @@ The 3 extra WebKit elements are footer links that GitHub serves differently to S
 - **LLM fallback** (optional): Ollama with `qwen2.5:7b`
 
 ```bash
-cargo install menot-you-mcp-lad  # installs both lad and llm-as-dom-mcp
+cargo install menot-you-mcp-lad  # installs lad, llm-as-dom-mcp, and lad-relay
+# or: cargo install llm-as-dom
+# or: npx @menot-you/mcp-lad
+# or: pip install menot-you-mcp-lad
 ```
+
+## Security
+
+LAD undergoes multi-model adversarial security review (Claude Opus + Gemini + Codex). v0.10.0 includes 9 security hardening fixes:
+
+- URL scheme allowlist (blocks `file://`, `javascript://`, `data://`)
+- 12-character alphanumeric auth tokens (4.7 x 10^18 entropy)
+- Rate-limited auth with handshake timeout (tarpit protection)
+- Message size caps (20MB)
+- Console capture restricted to main frame
+- Monitoring interval floor (100ms)
+
+**Note**: Remote Control uses `ws://` (plaintext) — suitable for trusted LAN only. `wss://` TLS is planned for v0.11.
 
 ## Architecture
 
