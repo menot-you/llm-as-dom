@@ -62,13 +62,16 @@ impl ChromiumEngine {
             ));
         }
 
+        // DX-SL1 (bug 1): Pass user_data_dir via the builder setter, NOT via
+        // raw .arg(). chromiumoxide 0.7 unconditionally appends its own
+        // `--user-data-dir=$TEMP/chromiumoxide-runner` default whenever
+        // `self.user_data_dir` is None — that duplicates the flag, ignores
+        // our per-launch temp dir, and means the singleton-lock cleanup
+        // code was scrubbing the wrong directory all along.
         builder = builder
+            .user_data_dir(&config.user_data_dir)
             .arg("--disable-gpu")
-            .arg("--disable-dev-shm-usage")
-            .arg(format!(
-                "--user-data-dir={}",
-                config.user_data_dir.display()
-            ));
+            .arg("--disable-dev-shm-usage");
 
         // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
         // --no-sandbox is a significant security reduction; only enable when necessary.
