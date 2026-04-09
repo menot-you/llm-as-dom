@@ -34,7 +34,10 @@ impl LadServer {
         tracing::info!(url = %p.url, goal = %log_goal, "lad_browse");
 
         tracing::info!(url = %p.url, "launching page");
-        let engine = self.ensure_engine().await.map_err(mcp_err)?;
+        let engine = self
+            .ensure_engine_visible(p.visible)
+            .await
+            .map_err(mcp_err)?;
         let page = engine.new_page(&p.url).await.map_err(mcp_err)?;
         tracing::info!("waiting for initial navigation");
         page.wait_for_navigation().await.map_err(mcp_err)?;

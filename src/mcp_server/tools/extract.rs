@@ -123,6 +123,11 @@ impl LadServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
 
+        // Ensure engine matches requested visibility before navigating.
+        self.ensure_engine_visible(p.visible)
+            .await
+            .map_err(mcp_err)?;
+
         if let Some(ref url) = p.url {
             tracing::info!(url = %url, "lad_snapshot (with url)");
             let view = self.navigate_or_reuse(url).await?;

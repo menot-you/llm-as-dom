@@ -90,14 +90,53 @@ impl LadServer {
     }
 
     /// Return an existing engine or launch a new one.
+    /// If `request_visible` differs from the current mode, restart the engine.
+    pub(crate) async fn ensure_engine_visible(
+        &self,
+        request_visible: bool,
+    ) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
+        let mut engine_lock = self.engine.lock().await;
+        let need_restart = if engine_lock.is_some() {
+            request_visible != self.interactive
+        } else {
+            false
+        };
+        if need_restart {
+            tracing::info!(
+                from = self.interactive,
+                to = request_visible,
+                "visibility changed — restarting browser"
+            );
+            // Drop old engine + active page.
+            *engine_lock = None;
+            *self.active_page.lock().await = None;
+        }
+        // SAFETY: we cast away the & to mutate interactive. This is fine because
+        // we hold the engine lock and no other code reads interactive concurrently.
+        #[allow(invalid_reference_casting)]
+        if request_visible != self.interactive {
+            let self_mut = unsafe { &mut *(self as *const Self as *mut Self) };
+            self_mut.interactive = request_visible;
+        }
+        self.ensure_engine_inner(&mut engine_lock).await
+    }
+
+    /// Return an existing engine or launch a new one.
     pub(crate) async fn ensure_engine(&self) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
         let mut engine_lock = self.engine.lock().await;
+        self.ensure_engine_inner(&mut engine_lock).await
+    }
+
+    async fn ensure_engine_inner(
+        &self,
+        engine_lock: &mut tokio::sync::MutexGuard<'_, Option<Arc<dyn BrowserEngine>>>,
+    ) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
         if let Some(e) = engine_lock.as_ref() {
             return Ok(Arc::clone(e));
         }
 
         let mode = if self.interactive {
-            "interactive (--app)"
+            "interactive (visible)"
         } else {
             "headless"
         };
@@ -134,7 +173,7 @@ impl LadServer {
         } else {
             Arc::new(ChromiumEngine::launch(config).await?)
         };
-        *engine_lock = Some(Arc::clone(&e));
+        **engine_lock = Some(Arc::clone(&e));
         Ok(e)
     }
 
