@@ -280,6 +280,8 @@ extension RelayConnection: URLSessionWebSocketDelegate {
         didOpenWithProtocol protocol: String?
     ) {
         queue.async { [self] in
+            // FIX-CX1: Ignore stale didOpen from old session.
+            guard webSocketTask === self.task else { return }
             // FIX-C4: Redact token from logs.
             let safeURL = self.url.absoluteString.replacingOccurrences(
                 of: #"token=[^&]*"#, with: "token=***", options: .regularExpression
