@@ -137,6 +137,21 @@ pub async fn eval_js_into<T: DeserializeOwned>(
     script: &str,
 ) -> Result<T, crate::Error> {
     let value = page.eval_js(script).await?;
-    serde_json::from_value(value)
-        .map_err(|e| crate::Error::Backend(format!("JS result parse failed: {e:?}")))
+    // DX-16 FIX: CDP may return the JSON as a string (from JSON.stringify)
+    // or as an already-parsed object. Try direct deserialization first,
+    // then fall back to parsing the string as JSON.
+    match serde_json::from_value::<T>(value.clone()) {
+        Ok(v) => Ok(v),
+        Err(_) => {
+            // If it's a string containing JSON, parse the string.
+            if let Some(s) = value.as_str() {
+                serde_json::from_str(s)
+                    .map_err(|e| crate::Error::Backend(format!("JS result parse failed: {e:?}")))
+            } else {
+                Err(crate::Error::Backend(format!(
+                    "JS result parse failed: expected string or object, got {value}"
+                )))
+            }
+        }
+    }
 }
