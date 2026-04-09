@@ -36,7 +36,8 @@ pub(crate) fn parse_window_size_env() -> Option<(u32, u32)> {
     detect_screen_size()
 }
 
-/// Detect main screen resolution via macOS `system_profiler` or fallback.
+/// Detect largest screen resolution via macOS `system_profiler`.
+/// Uses the largest display found (external monitor over laptop).
 fn detect_screen_size() -> Option<(u32, u32)> {
     let output = std::process::Command::new("system_profiler")
         .arg("SPDisplaysDataType")
@@ -44,8 +45,10 @@ fn detect_screen_size() -> Option<(u32, u32)> {
         .output()
         .ok()?;
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    // Navigate: SPDisplaysDataType[0].spdisplays_ndrvs[0]._spdisplays_resolution
     let displays = json.get("SPDisplaysDataType")?.as_array()?;
+
+    let mut best: Option<(u32, u32)> = None;
+
     for gpu in displays {
         if let Some(screens) = gpu.get("spdisplays_ndrvs").and_then(|v| v.as_array()) {
             for screen in screens {
@@ -53,22 +56,33 @@ fn detect_screen_size() -> Option<(u32, u32)> {
                     .get("_spdisplays_resolution")
                     .and_then(|v| v.as_str())
                 {
-                    // Format: "3024 x 1964" or "1920 x 1080"
-                    let parts: Vec<&str> = res.split(" x ").collect();
+                    // Format: "3440 x 1440 @ 120.00Hz" or "1352 x 878 @ 120.00Hz"
+                    // Strip everything after " @" before parsing.
+                    let clean = res.split(" @").next().unwrap_or(res);
+                    let parts: Vec<&str> = clean.split(" x ").collect();
                     if parts.len() == 2
                         && let (Ok(w), Ok(h)) = (
                             parts[0].trim().parse::<u32>(),
                             parts[1].trim().parse::<u32>(),
                         )
                     {
-                        let w = (w * 80 / 100).max(1280);
-                        let h = (h * 80 / 100).max(800);
-                        tracing::info!(width = w, height = h, "auto-detected screen size");
-                        return Some((w, h));
+                        // Pick the largest display (external monitor > laptop).
+                        if best.is_none_or(|(bw, bh)| w * h > bw * bh) {
+                            best = Some((w, h));
+                        }
                     }
                 }
             }
         }
+    }
+
+    if let Some((w, h)) = best {
+        tracing::info!(
+            width = w,
+            height = h,
+            "auto-detected screen size (largest display)"
+        );
+        return Some((w, h));
     }
     None
 }
