@@ -18,17 +18,58 @@ pub(crate) fn read_env_with_fallback(new_name: &str, old_name: &str, default: &s
 }
 
 /// Parse LAD_WINDOW_SIZE env var ("WIDTHxHEIGHT", e.g. "1920x1080").
+/// Falls back to detecting screen resolution on macOS via `system_profiler`.
 pub(crate) fn parse_window_size_env() -> Option<(u32, u32)> {
-    let val = std::env::var("LAD_WINDOW_SIZE").ok()?;
-    let parts: Vec<&str> = val.split('x').collect();
-    if parts.len() == 2 {
-        let w = parts[0].parse::<u32>().ok()?;
-        let h = parts[1].parse::<u32>().ok()?;
-        if w >= 320 && h >= 240 {
+    // 1. Explicit env var.
+    if let Ok(val) = std::env::var("LAD_WINDOW_SIZE") {
+        let parts: Vec<&str> = val.split('x').collect();
+        if parts.len() == 2
+            && let (Ok(w), Ok(h)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+            && w >= 320
+            && h >= 240
+        {
             return Some((w, h));
         }
+        tracing::warn!(val = %val, "invalid LAD_WINDOW_SIZE — expected WIDTHxHEIGHT (e.g. 1920x1080)");
     }
-    tracing::warn!(val = %val, "invalid LAD_WINDOW_SIZE — expected WIDTHxHEIGHT (e.g. 1920x1080)");
+    // 2. Auto-detect screen resolution on macOS.
+    detect_screen_size()
+}
+
+/// Detect main screen resolution via macOS `system_profiler` or fallback.
+fn detect_screen_size() -> Option<(u32, u32)> {
+    let output = std::process::Command::new("system_profiler")
+        .arg("SPDisplaysDataType")
+        .arg("-json")
+        .output()
+        .ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    // Navigate: SPDisplaysDataType[0].spdisplays_ndrvs[0]._spdisplays_resolution
+    let displays = json.get("SPDisplaysDataType")?.as_array()?;
+    for gpu in displays {
+        if let Some(screens) = gpu.get("spdisplays_ndrvs").and_then(|v| v.as_array()) {
+            for screen in screens {
+                if let Some(res) = screen
+                    .get("_spdisplays_resolution")
+                    .and_then(|v| v.as_str())
+                {
+                    // Format: "3024 x 1964" or "1920 x 1080"
+                    let parts: Vec<&str> = res.split(" x ").collect();
+                    if parts.len() == 2
+                        && let (Ok(w), Ok(h)) = (
+                            parts[0].trim().parse::<u32>(),
+                            parts[1].trim().parse::<u32>(),
+                        )
+                    {
+                        let w = (w * 80 / 100).max(1280);
+                        let h = (h * 80 / 100).max(800);
+                        tracing::info!(width = w, height = h, "auto-detected screen size");
+                        return Some((w, h));
+                    }
+                }
+            }
+        }
+    }
     None
 }
 

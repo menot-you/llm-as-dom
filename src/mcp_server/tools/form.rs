@@ -160,7 +160,17 @@ impl LadServer {
             });
 
             if let Some(btn) = submit_el {
-                let click_js = build_element_js(btn.id, "el.click();");
+                // DX-8 FIX: Full pointer event sequence for React compatibility.
+                let click_js = build_element_js(
+                    btn.id,
+                    r#"el.scrollIntoView({ block: 'center' });
+                    el.focus();
+                    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+                    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+                    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                    el.click();"#,
+                );
                 {
                     let mut active = self.active_page.lock().await;
                     let ap = active.as_ref().ok_or_else(no_active_page)?;
