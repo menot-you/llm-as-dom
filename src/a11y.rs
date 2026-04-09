@@ -82,12 +82,15 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
 
             function isHoneypot(el) {
                 const name = (el.getAttribute('name') || '').toLowerCase();
-                if (name === 'website' || name === 'url' || name === 'honeypot') return true;
                 const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
                 const ti = el.getAttribute('tabindex');
                 const style = window.getComputedStyle(el);
                 const invisible = style.display === 'none' || style.visibility === 'hidden'
                     || parseFloat(style.opacity) === 0;
+                // DX-14 FIX: Only treat "website"/"url"/"honeypot" as honeypot if INVISIBLE.
+                // Visible fields named "website" are legitimate (e.g. Twitter Edit Profile).
+                if ((name === 'website' || name === 'url' || name === 'honeypot') && invisible) return true;
+                if (name === 'honeypot') return true; // "honeypot" name is always suspicious.
                 if (ac === 'off' && invisible) return true;
                 if (ti === '-1' && invisible) return true;
                 return false;
