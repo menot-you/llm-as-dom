@@ -34,8 +34,10 @@ impl ChromiumEngine {
 
         let mut builder = chromiumoxide::BrowserConfig::builder();
 
-        if config.interactive {
+        // Visible or interactive mode: show the browser window.
+        if config.visible || config.interactive {
             builder = builder
+                .with_head() // Disable chromiumoxide's default --headless flag.
                 .arg("--app=about:blank")
                 .arg("--disable-extensions")
                 .arg("--disable-default-apps")
@@ -47,11 +49,6 @@ impl ChromiumEngine {
                     "--window-size={},{}",
                     config.window_size.0, config.window_size.1
                 ));
-        } else if !config.visible {
-            builder = builder.arg("--headless=new").arg(format!(
-                "--window-size={},{}",
-                config.window_size.0, config.window_size.1
-            ));
         } else {
             builder = builder.arg(format!(
                 "--window-size={},{}",
