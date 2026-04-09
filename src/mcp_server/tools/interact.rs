@@ -73,7 +73,18 @@ impl LadServer {
             "lad_click"
         );
 
-        let js = build_element_js(p.element, "el.click();");
+        // DX-8 FIX: Use full pointer event sequence for React/Twitter compatibility.
+        // el.click() doesn't trigger React's synthetic event system in some cases.
+        let js = build_element_js(
+            p.element,
+            r#"el.scrollIntoView({ block: 'center' });
+            el.focus();
+            el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            el.click();"#,
+        );
 
         if p.wait_for_navigation {
             {
