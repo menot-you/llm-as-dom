@@ -16,6 +16,10 @@ pub(crate) struct BrowseParams {
     pub max_steps: u32,
     /// Optional maximum length of the HTML/DOM text embedded into the prompt.
     pub max_length: Option<usize>,
+    /// Open the browser window visibly (default: false = headless).
+    /// When toggled, restarts the browser engine with the new mode.
+    #[serde(default)]
+    pub visible: bool,
 }
 
 /// Default step limit for browsing goals.
@@ -98,6 +102,10 @@ pub(crate) struct SnapshotParams {
     /// `lad_browse` or `lad_snapshot`), re-extracts the current page without navigating.
     #[serde(default)]
     pub url: Option<String>,
+    /// Open the browser window visibly (default: false = headless).
+    /// When toggled, restarts the browser engine with the new mode.
+    #[serde(default)]
+    pub visible: bool,
 }
 
 /// Parameters for the `lad_click` tool.
