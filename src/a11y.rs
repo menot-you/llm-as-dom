@@ -1007,4 +1007,52 @@ mod tests {
         // Without env var, should be 15 seconds.
         assert_eq!(DEFAULT_WAIT_TIMEOUT, 15);
     }
+
+    // ── DX-16: HN profile form.id = {} parsing ──────────────────────
+
+    #[test]
+    fn js_form_meta_deserializes_string_id() {
+        let json = r#"{"index":0,"action":"/xuser","method":"POST","id":"myform","name":null}"#;
+        let meta: JsFormMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, Some("myform".into()));
+    }
+
+    #[test]
+    fn js_form_meta_deserializes_null_id() {
+        let json = r#"{"index":0,"action":"/xuser","method":"POST","id":null,"name":null}"#;
+        let meta: JsFormMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, None);
+    }
+
+    #[test]
+    fn js_form_meta_deserializes_empty_object_id() {
+        // HN returns form.id as {} (empty object from DOM element without id attribute).
+        let json = r#"{"index":0,"action":"/xuser","method":"POST","id":{},"name":null}"#;
+        let meta: JsFormMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, None);
+    }
+
+    #[test]
+    fn js_form_meta_deserializes_missing_id() {
+        let json = r#"{"index":0,"action":"/xuser","method":"POST","name":null}"#;
+        let meta: JsFormMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, None);
+    }
+
+    #[test]
+    fn js_extraction_with_hn_form() {
+        // Minimal JsExtraction mimicking HN profile page with form.id = {}.
+        let json = r#"{
+            "elements": [],
+            "visibleText": "Hacker News profile",
+            "formCount": 1,
+            "elementCap": null,
+            "forms": [{"index":0,"action":"/xuser","method":"POST","id":{},"name":null}]
+        }"#;
+        let extraction: JsExtraction = serde_json::from_str(json).unwrap();
+        assert_eq!(extraction.form_count, 1);
+        assert_eq!(extraction.forms.len(), 1);
+        assert_eq!(extraction.forms[0].id, None);
+        assert_eq!(extraction.forms[0].action, Some("/xuser".into()));
+    }
 }
