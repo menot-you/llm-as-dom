@@ -98,9 +98,15 @@ impl LadServer {
             });
 
             if let Some(el) = matched_el {
+                // DX-12 FIX: React-compatible native setter (same as lad_type).
                 let body = format!(
                     "el.focus();\n\
-                     el.value = '{escaped_val}';\n\
+                     const nativeSetter = Object.getOwnPropertyDescriptor(\n\
+                         el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,\n\
+                         'value'\n\
+                     )?.set;\n\
+                     if (nativeSetter) {{ nativeSetter.call(el, '{escaped_val}'); }}\n\
+                     else {{ el.value = '{escaped_val}'; }}\n\
                      el.dispatchEvent(new Event('input', {{ bubbles: true }}));\n\
                      el.dispatchEvent(new Event('change', {{ bubbles: true }}));"
                 );
