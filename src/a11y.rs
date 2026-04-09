@@ -60,12 +60,48 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 return results;
             }
 
-            // DX-FIX: Detect active modal/dialog and scope extraction to it.
-            // This prevents extracting background elements when a modal is open,
-            // fixing fill_form wrong-match, click-behind-modal, and modal scroll issues.
-            const activeDialog = document.querySelector(
+            // DX-FIX + DX-MZ4 (bug 4): Detect active modal/dialog and scope
+            // extraction to it. This prevents extracting background elements
+            // when a modal is open, fixing fill_form wrong-match, click-
+            // behind-modal, and modal scroll issues.
+            //
+            // When multiple candidate dialogs are present (e.g. Twitter
+            // renders a backdrop dialog + a keyboard-shortcut dialog),
+            // pick the topmost by (1) highest computed z-index and then
+            // (2) last in source order as the tiebreaker. This matches
+            // the visual "top" of the modal stack and avoids the
+            // historical bug where x.com/compose/post's element [0]
+            // was a keyboard-shortcuts link masquerading as a close button.
+            const dialogCandidates = Array.from(document.querySelectorAll(
                 'dialog[open], [role="dialog"][aria-modal="true"], [role="dialog"]:not([aria-hidden="true"])'
-            );
+            ));
+            function dialogZIndex(el) {
+                // Walk up to the nearest z-index'd ancestor (dialogs often
+                // inherit their stacking context from a parent).
+                let cur = el;
+                while (cur && cur.nodeType === 1) {
+                    const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+                    if (!Number.isNaN(z)) return z;
+                    cur = cur.parentElement;
+                }
+                return 0;
+            }
+            let activeDialog = null;
+            if (dialogCandidates.length > 0) {
+                let bestZ = -Infinity;
+                for (const cand of dialogCandidates) {
+                    // Skip dialogs that are themselves hidden or inert — they
+                    // cannot be the active modal.
+                    const cs = window.getComputedStyle(cand);
+                    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+                    if (cand.closest('[inert]')) continue;
+                    const z = dialogZIndex(cand);
+                    if (z >= bestZ) {
+                        bestZ = z;
+                        activeDialog = cand; // ties → last in source order
+                    }
+                }
+            }
             const extractionRoot = activeDialog || document;
 
             // If modal detected, scroll it to show all content before extraction.
@@ -114,7 +150,19 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
             function isVisible(el) {
                 const style = window.getComputedStyle(el);
                 if (style.display === 'none' || style.visibility === 'hidden') return false;
+                // DX-MZ4 (bug 4): visibility:collapse hides table rows/cells
+                // identically to display:none. Treat it as invisible too.
+                if (style.visibility === 'collapse') return false;
                 if (parseFloat(style.opacity) === 0) return false;
+                // DX-MZ4: pointer-events:none means the element cannot be
+                // clicked, so collecting it as a clickable would produce
+                // a phantom target whose click goes to whatever is behind.
+                if (style.pointerEvents === 'none') return false;
+                // DX-MZ4: [inert] attribute disables an entire subtree —
+                // background content behind an open aria-modal dialog is
+                // often marked inert. element.closest('[inert]') walks the
+                // ancestor chain for us.
+                if (el.closest('[inert]')) return false;
                 const rect = el.getBoundingClientRect();
                 if (rect.width === 0 && rect.height === 0) return false;
                 // DX-FIX: When inside a modal, check against modal bounds, not window.

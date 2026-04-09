@@ -2153,6 +2153,114 @@ async fn test_extract_iframe_elements() {
     engine.close().await.unwrap();
 }
 
+// ── DX-MZ4 (bug 4): modal stacking / visibility filter ──────────────
+
+/// When a [role="dialog"][aria-modal="true"] is open, extraction must
+/// scope to the dialog subtree. All background buttons in the source —
+/// visible, display:none, visibility:collapse, pointer-events:none, or
+/// behind an [inert] ancestor — must be excluded.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_modal_stacking_excludes_background_elements() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/modal-stacking.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // The modal's Close button must be present.
+    let close_btn = view.elements.iter().find(|e| e.label == "Close");
+    assert!(
+        close_btn.is_some(),
+        "modal's 'Close' button must be extracted, got {} elements: {:?}",
+        view.elements.len(),
+        view.elements.iter().map(|e| &e.label).collect::<Vec<_>>()
+    );
+
+    // None of the background buttons may appear.
+    let forbidden = [
+        "Background Button",
+        "Another Background Button",
+        "Hidden Button",
+        "Collapsed Button",
+        "Ghost Button",
+    ];
+    for name in forbidden {
+        assert!(
+            view.elements.iter().all(|e| e.label != name),
+            "element '{name}' must not be extracted when modal is open"
+        );
+    }
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Regression: visibility filter excludes display:none,
+/// visibility:collapse, pointer-events:none, and [inert] even when no
+/// modal is open.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_visibility_filter_excludes_hidden_buttons() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/hidden-button.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    let visible = view.elements.iter().find(|e| e.label == "Visible Button");
+    assert!(
+        visible.is_some(),
+        "visible button must be extracted, got {} elements: {:?}",
+        view.elements.len(),
+        view.elements.iter().map(|e| &e.label).collect::<Vec<_>>()
+    );
+
+    let forbidden = [
+        "Hidden Button",
+        "Collapsed Button",
+        "Ghost Button",
+        "Inert Button",
+    ];
+    for name in forbidden {
+        assert!(
+            view.elements.iter().all(|e| e.label != name),
+            "'{name}' must be filtered out by visibility rules"
+        );
+    }
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
 // ── DX-CE3 (bug 3): contenteditable / Draft.js / Lexical support ─────
 
 /// Fixture: `fixtures/pages/contenteditable.html` ships a contenteditable

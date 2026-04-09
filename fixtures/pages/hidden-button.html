@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hidden Button Fixture</title>
+  <style>
+    body { font-family: system-ui; padding: 2rem; }
+    .hidden-bucket { display: none; }
+    .collapsed-row { visibility: collapse; }
+    .ghost-wrapper { pointer-events: none; }
+    .inert-wrapper { color: #999; }
+  </style>
+</head>
+<body>
+  <!-- DX-MZ4 fixture: no modal is open. The visibility filter must
+       still skip the hidden/collapsed/inert/pointer-events subtrees. -->
+  <h1>Visibility filter regression</h1>
+
+  <button id="visible-btn" type="button">Visible Button</button>
+
+  <div class="hidden-bucket">
+    <button id="hidden-btn" type="button">Hidden Button</button>
+  </div>
+
+  <table>
+    <tr class="collapsed-row">
+      <td><button id="collapsed-btn" type="button">Collapsed Button</button></td>
+    </tr>
+  </table>
+
+  <div class="ghost-wrapper">
+    <button id="ghost-btn" type="button">Ghost Button</button>
+  </div>
+
+  <div class="inert-wrapper" inert>
+    <button id="inert-btn" type="button">Inert Button</button>
+  </div>
+</body>
+</html>
