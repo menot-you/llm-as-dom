@@ -4,6 +4,7 @@
 //! specific browser engine (Chromium, WebKit, etc.).
 
 pub mod chromium;
+pub mod singleton_lock;
 pub mod webkit;
 pub(crate) mod webkit_proto;
 

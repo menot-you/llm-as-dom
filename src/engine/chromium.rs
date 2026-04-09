@@ -29,8 +29,11 @@ pub struct ChromiumEngine {
 impl ChromiumEngine {
     /// Launch a Chromium browser with the given configuration.
     pub async fn launch(config: EngineConfig) -> Result<Self, crate::Error> {
-        // Clean up stale Chrome lock files before launching.
-        Self::cleanup_stale_lock(&config.user_data_dir);
+        // DX-SL1 (bug 1): Clean up stale Singleton{Lock,Socket,Cookie}
+        // left behind by a crashed Chrome before launching. Without this the
+        // second `Browser::launch` fails with "profile appears to be in use"
+        // until the user `rm -rf`s the user-data-dir manually.
+        super::singleton_lock::cleanup_stale_singleton_locks(&config.user_data_dir);
 
         let mut builder = chromiumoxide::BrowserConfig::builder();
 
@@ -97,59 +100,6 @@ impl ChromiumEngine {
             _temp_dir: config.temp_dir,
             alive,
         })
-    }
-
-    /// Remove a stale `SingletonLock` file left by a crashed Chrome process.
-    ///
-    /// Chrome writes `SingletonLock` in the user-data-dir to prevent concurrent
-    /// access. If Chrome crashes, the lock file persists and blocks relaunch.
-    ///
-    /// The lock file format is `hostname-pid` (e.g. `MacBook-12345`).
-    /// We parse the PID, check if the process is still alive, and remove the
-    /// lock only when the owner is dead.
-    fn cleanup_stale_lock(user_data_dir: &std::path::Path) {
-        let lock_path = user_data_dir.join("SingletonLock");
-        if !lock_path.exists() {
-            return;
-        }
-
-        let content = match std::fs::read_to_string(&lock_path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::debug!(path = %lock_path.display(), error = %e, "cannot read SingletonLock");
-                return;
-            }
-        };
-
-        // Format: "hostname-PID" or just "PID"
-        let pid_str = content.trim().rsplit('-').next().unwrap_or(content.trim());
-
-        let pid: u32 = match pid_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                tracing::debug!(content = %content.trim(), "SingletonLock has unparseable PID, removing");
-                let _ = std::fs::remove_file(&lock_path);
-                return;
-            }
-        };
-
-        // Check if the process is still alive via `kill -0 PID`
-        let alive = std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-
-        if alive {
-            tracing::debug!(pid, "SingletonLock owner is alive, leaving it");
-        } else {
-            tracing::info!(pid, path = %lock_path.display(), "removing stale SingletonLock (owner dead)");
-            if let Err(e) = std::fs::remove_file(&lock_path) {
-                tracing::warn!(error = %e, "failed to remove stale SingletonLock");
-            }
-        }
     }
 }
 
