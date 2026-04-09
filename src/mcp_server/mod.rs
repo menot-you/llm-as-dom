@@ -160,8 +160,10 @@ impl LadServer {
             interactive: self.interactive,
             user_data_dir,
             temp_dir: td.map(std::sync::Arc::new),
+            // DX-5: Use 1440x900 for visible mode (fits most laptop screens).
+            // Headless stays at 1280x800.
             window_size: if self.interactive {
-                (1024, 768)
+                (1440, 900)
             } else {
                 (1280, 800)
             },
