@@ -41,7 +41,8 @@ struct Cli {
     no_auth: bool,
 
     /// Timeout waiting for iPhone to connect, in seconds.
-    #[arg(long, default_value = "120")]
+    /// SEC-S7: Reduced from 120s to 30s to minimize brute-force window.
+    #[arg(long, default_value = "30")]
     connect_timeout: u64,
 
     /// Also publish via Bonjour/mDNS for local network discovery.
@@ -148,6 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             msg = ws_source.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
+                        // SEC-S4: Drop messages exceeding 20 MB to prevent OOM.
+                        if text.len() > 20 * 1024 * 1024 {
+                            warn!("dropped oversized WS message: {} bytes", text.len());
+                            continue;
+                        }
                         if let Err(e) = stdout.write_all(format!("{text}\n").as_bytes()).await {
                             error!("stdout write error: {e}");
                             break;
@@ -180,6 +186,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 /// Accept exactly one WebSocket connection, validating the auth token.
+///
+/// SEC-S6: Rate-limits failed attempts (1s delay, max 10).
+/// SEC-S8: 5s handshake timeout prevents TCP tarpit DoS.
 async fn accept_one(
     listener: &TcpListener,
     expected_token: Option<&str>,
@@ -189,39 +198,61 @@ async fn accept_one(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let accept_fut = async {
+        let mut failed_attempts: u32 = 0;
+        const MAX_FAILED: u32 = 10;
+
         loop {
+            if failed_attempts >= MAX_FAILED {
+                return Err::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    format!("too many failed attempts ({MAX_FAILED})").into(),
+                );
+            }
+
             let (stream, peer) = listener.accept().await?;
             info!("incoming connection from {peer}");
 
-            #[allow(clippy::result_large_err)]
-            let callback = |req: &http::Request<()>,
-                            resp: http::Response<()>|
-             -> Result<_, http::Response<Option<String>>> {
-                if let Some(token) = expected_token {
-                    // FIX-CX4: Exact query param parsing instead of substring match.
-                    let uri = req.uri().to_string();
-                    let has_valid_token = uri
-                        .split('?')
-                        .nth(1)
-                        .unwrap_or("")
-                        .split('&')
-                        .any(|param| param == format!("token={token}"));
-                    if !has_valid_token {
-                        warn!("rejected {peer}: invalid token");
-                        return Err(http::Response::builder()
-                            .status(401)
-                            .body(Some("invalid token".into()))
-                            .unwrap());
+            // SEC-S8: 5s handshake timeout — reject slow/tarpit connections.
+            let handshake = async {
+                #[allow(clippy::result_large_err)]
+                let callback = |req: &http::Request<()>,
+                                resp: http::Response<()>|
+                 -> Result<_, http::Response<Option<String>>> {
+                    if let Some(token) = expected_token {
+                        let uri = req.uri().to_string();
+                        let has_valid_token = uri
+                            .split('?')
+                            .nth(1)
+                            .unwrap_or("")
+                            .split('&')
+                            .any(|param| param == format!("token={token}"));
+                        if !has_valid_token {
+                            warn!("rejected {peer}: invalid token");
+                            return Err(http::Response::builder()
+                                .status(401)
+                                .body(Some("invalid token".into()))
+                                .unwrap());
+                        }
                     }
-                }
-                Ok(resp)
+                    Ok(resp)
+                };
+
+                tokio_tungstenite::accept_hdr_async(stream, callback).await
             };
 
-            match tokio_tungstenite::accept_hdr_async(stream, callback).await {
-                Ok(ws) => return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(ws),
-                Err(e) => {
-                    warn!("handshake failed from {peer}: {e}");
-                    continue;
+            match tokio::time::timeout(Duration::from_secs(5), handshake).await {
+                Ok(Ok(ws)) => return Ok(ws),
+                Ok(Err(e)) => {
+                    failed_attempts += 1;
+                    warn!(
+                        "handshake failed from {peer}: {e} (attempt {failed_attempts}/{MAX_FAILED})"
+                    );
+                    // SEC-S6: 1s delay after failed attempt to slow brute-force.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+                Err(_) => {
+                    failed_attempts += 1;
+                    warn!("handshake timeout from {peer} (attempt {failed_attempts}/{MAX_FAILED})");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
