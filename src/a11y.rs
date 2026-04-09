@@ -24,9 +24,24 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
             try { window.close = function(){}; } catch(_) {}
 
             const MAX_ELEMENTS = 300;
-            const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [onclick]';
+            // DX-CE3 (bug 3): include contenteditable roots, [role="textbox"],
+            // and [aria-multiline="true"]. These are how Twitter/Discord/
+            // Slack/Notion/Gmail/LinkedIn/Substack/Medium render their
+            // text inputs (Draft.js, Lexical, ProseMirror, Slate, etc.).
+            const selectors = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [onclick], [contenteditable="true"], [contenteditable=""], [role="textbox"], [aria-multiline="true"]';
             const rawElements = [];
             let id = 0;
+
+            // DX-CE3 (bug 3): is this element a rich-text editor target
+            // (contenteditable root, [role="textbox"], etc.)?
+            function isEditorTarget(el) {
+                const ce = el.getAttribute('contenteditable');
+                if (ce === 'true' || ce === '') return true;
+                if (el.isContentEditable === true) return true;
+                if (el.getAttribute('role') === 'textbox') return true;
+                if (el.getAttribute('aria-multiline') === 'true') return true;
+                return false;
+            }
 
             // ── Shadow DOM + light DOM recursive query ─────────────────
             // CHAOS-03: maxDepth=5 prevents unbounded recursion.
@@ -123,6 +138,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                     if (!isVisible(el)) continue;
 
                     const tag = el.tagName.toLowerCase();
+                    const editor = isEditorTarget(el);
                     let kind = 'other';
                     if (tag === 'button' || el.getAttribute('role') === 'button' || (tag === 'input' && el.type === 'submit')) kind = 'button';
                     else if (tag === 'input' && el.type !== 'hidden') kind = 'input';
@@ -132,17 +148,33 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                     else if (el.getAttribute('role') === 'checkbox' || (tag === 'input' && el.type === 'checkbox')) kind = 'checkbox';
                     else if (el.getAttribute('role') === 'radio' || (tag === 'input' && el.type === 'radio')) kind = 'radio';
                     else if (el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'menuitem') kind = 'button';
+                    // DX-CE3 (bug 3): reuse 'input' kind for contenteditable /
+                    // role=textbox / aria-multiline. Constraint: do NOT add a
+                    // new ElementKind — reuse Input. The input_type field
+                    // ("contenteditable") is the disambiguator.
+                    else if (editor) kind = 'input';
 
                     const ariaLabel = el.getAttribute('aria-label');
                     const labelEl = el.labels?.[0];
                     const labelText = labelEl?.textContent?.trim();
-                    const placeholder = el.getAttribute('placeholder');
-                    const textContent = el.textContent?.trim()?.substring(0, 80);
+                    // DX-CE3: many SPAs expose an `aria-placeholder` attribute
+                    // on contenteditable roots (e.g. Twitter's "What is happening?").
+                    const placeholder = el.getAttribute('placeholder') || el.getAttribute('aria-placeholder');
+                    // DX-CE3: for contenteditable roots, textContent IS the
+                    // current document value — using it as the label would
+                    // echo whatever the user already typed. Skip textContent
+                    // as a label fallback for editor targets.
+                    const textContent = editor ? '' : (el.textContent?.trim()?.substring(0, 80) || '');
                     const elTitle = el.getAttribute('title');
                     const href = el.getAttribute('href') || '';
-                    let label = (ariaLabel || labelText || placeholder || textContent || elTitle || '').replace(/\s+/g, ' ').trim();
+                    // DX-CE3: data-testid fallback for unlabelled editor roots.
+                    const testId = editor ? (el.getAttribute('data-testid') || '') : '';
+                    let label = (ariaLabel || labelText || placeholder || textContent || elTitle || testId || '').replace(/\s+/g, ' ').trim();
                     if (!label && kind === 'link' && href) {
                         label = href.split('/').filter(Boolean).pop() || '';
+                    }
+                    if (!label && editor) {
+                        label = 'text editor';
                     }
 
                     const closestForm = el.closest('form');
@@ -185,13 +217,27 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                         options = Array.from(el.options).slice(0, 10).map(o => o.textContent.trim());
                     }
 
+                    // DX-CE3 (bug 3): editor targets report their current
+                    // value via innerText (capped) and a synthetic
+                    // input_type of "contenteditable" so the type handler
+                    // can branch on it.
+                    let editorValue = null;
+                    let editorType = null;
+                    if (editor) {
+                        try {
+                            const text = (el.innerText || el.textContent || '').trim();
+                            if (text) editorValue = text.substring(0, 200);
+                        } catch (_) {}
+                        editorType = 'contenteditable';
+                    }
+
                     rawElements.push({
                         el, kind, label: label.substring(0, 80),
                         name: el.getAttribute('name') || null,
-                        value: el.value || null,
+                        value: editorValue || el.value || null,
                         placeholder: placeholder || null,
                         href: href || null,
-                        input_type: el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
+                        input_type: editorType || el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : null),
                         disabled: el.disabled || false,
                         form_index: formIndex,
                         hint_type: hintType,

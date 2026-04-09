@@ -2153,6 +2153,256 @@ async fn test_extract_iframe_elements() {
     engine.close().await.unwrap();
 }
 
+// ── DX-CE3 (bug 3): contenteditable / Draft.js / Lexical support ─────
+
+/// Fixture: `fixtures/pages/contenteditable.html` ships a contenteditable
+/// div with `role="textbox"`, `aria-multiline="true"`, and
+/// `aria-label="Post text"` — the same shape Twitter's Draft.js composer
+/// exposes. The old extractor skipped it entirely because it only knew
+/// about `<input>`, `<textarea>`, `<select>`.
+///
+/// Assertions:
+/// 1. The composer is extracted as an `Input` with
+///    `input_type == "contenteditable"` and `label == "Post text"`.
+/// 2. The fallback `<textarea>` is still extracted (regression).
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_contenteditable_as_input() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use llm_as_dom::semantic::ElementKind;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/contenteditable.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    let composer = view
+        .elements
+        .iter()
+        .find(|e| e.label == "Post text")
+        .unwrap_or_else(|| {
+            panic!(
+                "contenteditable composer should be extracted; got {} elements: {:?}",
+                view.elements.len(),
+                view.elements
+                    .iter()
+                    .map(|e| (e.kind, &e.label, &e.input_type))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(composer.kind, ElementKind::Input);
+    assert_eq!(composer.input_type.as_deref(), Some("contenteditable"));
+
+    // Regression: plain textarea must still be collected.
+    let fallback = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("fallback"));
+    assert!(
+        fallback.is_some(),
+        "plain textarea must still be extracted after contenteditable support"
+    );
+    let fallback = fallback.unwrap();
+    assert_eq!(fallback.kind, ElementKind::Textarea);
+
+    // The page ships with the "Post" button too.
+    let post_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label == "Post" && e.kind == ElementKind::Button);
+    assert!(post_btn.is_some(), "Post button should be extracted");
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Typing into a contenteditable via `lad_type` must populate the
+/// editor's `innerText`. The JS payload is copied from
+/// `mcp_server::tools::interact::tool_lad_type` so the test exercises
+/// the exact production path.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_type_into_contenteditable() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/contenteditable.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Extract so each element gets a data-lad-id. Pick the composer ID.
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+    let composer = view
+        .elements
+        .iter()
+        .find(|e| e.label == "Post text")
+        .expect("composer must be extracted");
+    let composer_id = composer.id;
+
+    // Production-path JS: locate by data-lad-id, branch on isEditor,
+    // execCommand insertText. Must stay in sync with interact.rs.
+    let text = "hello contenteditable world";
+    let js = format!(
+        r#"(() => {{
+            const el = document.querySelector('[data-lad-id="{id}"]');
+            if (!el) return JSON.stringify({{ error: "not found" }});
+            const isEditor = el.isContentEditable
+                || el.getAttribute('contenteditable') === 'true'
+                || el.getAttribute('contenteditable') === ''
+                || el.getAttribute('role') === 'textbox'
+                || el.getAttribute('aria-multiline') === 'true';
+            el.focus();
+            if (isEditor) {{
+                try {{
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                }} catch (_) {{}}
+                let ok = false;
+                try {{ ok = document.execCommand('insertText', false, '{text}'); }} catch (_) {{ ok = false; }}
+                if (!ok) {{
+                    el.textContent = '{text}';
+                    el.dispatchEvent(new InputEvent('input', {{
+                        bubbles: true, cancelable: true,
+                        data: '{text}', inputType: 'insertText'
+                    }}));
+                }}
+            }}
+            return JSON.stringify({{ ok: true }});
+        }})()"#,
+        id = composer_id,
+        text = text,
+    );
+    page.eval_js(&js).await.unwrap();
+
+    // Small flush so async input events settle.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Assert the composer's innerText equals our payload.
+    let got: String = page
+        .eval_js(r#"document.getElementById('composer').innerText.trim()"#)
+        .await
+        .unwrap()
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(
+        got, text,
+        "contenteditable innerText should match typed payload"
+    );
+
+    // Bonus: the page's input-event spy must have fired at least once.
+    let fires = page
+        .eval_js("window.__composerInput || 0")
+        .await
+        .unwrap()
+        .as_i64()
+        .unwrap_or(0);
+    assert!(
+        fires >= 1,
+        "contenteditable should have received at least one 'input' event, got {fires}"
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Regression: plain <textarea> via lad_type's native-setter path must
+/// still populate its .value.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_type_into_plain_textarea_regression() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/contenteditable.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+    let textarea = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("fallback"))
+        .expect("fallback textarea must be extracted");
+    let id = textarea.id;
+    let text = "plain textarea payload";
+
+    let js = format!(
+        r#"(() => {{
+            const el = document.querySelector('[data-lad-id="{id}"]');
+            if (!el) return JSON.stringify({{ error: "not found" }});
+            const isEditor = el.isContentEditable
+                || el.getAttribute('contenteditable') === 'true'
+                || el.getAttribute('contenteditable') === ''
+                || el.getAttribute('role') === 'textbox'
+                || el.getAttribute('aria-multiline') === 'true';
+            el.focus();
+            if (!isEditor) {{
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+                    'value'
+                )?.set;
+                if (nativeSetter) {{ nativeSetter.call(el, '{text}'); }}
+                else {{ el.value = '{text}'; }}
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+            return JSON.stringify({{ ok: true }});
+        }})()"#
+    );
+    page.eval_js(&js).await.unwrap();
+
+    let got: String = page
+        .eval_js(r#"document.getElementById('fallback-area').value"#)
+        .await
+        .unwrap()
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(got, text, "plain textarea .value should match payload");
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
 // ── DX-CL2 (bug 2): SPA shell cloaking false-positive ────────────────
 
 /// Regression test: a React/Next.js SPA shell with zero interactive

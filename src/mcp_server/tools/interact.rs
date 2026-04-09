@@ -164,19 +164,60 @@ impl LadServer {
             String::new()
         };
 
-        // DX-12 FIX: Use React-compatible native setter to trigger synthetic events.
-        // React overrides el.value setter; using the native HTMLInputElement setter
-        // bypasses React's override and triggers proper change detection.
+        // DX-12 + DX-CE3: Dual path for typing.
+        //
+        // Plain <input>/<textarea>:
+        //   Use the native HTMLInputElement/HTMLTextAreaElement value setter
+        //   so React's synthetic event system fires correctly (React
+        //   overrides .value on its managed instances).
+        //
+        // contenteditable / [role="textbox"] / [aria-multiline="true"]:
+        //   Twitter's Draft.js, Discord/Slack's Lexical, Notion's ProseMirror
+        //   and similar rich-text editors listen for `beforeinput` and the
+        //   synthetic `input` event with `inputType: 'insertText'` — they do
+        //   NOT react to `.value = x`. We clear the editor via a Range, then
+        //   use `document.execCommand('insertText', false, text)` which
+        //   fires the expected event sequence. execCommand is deprecated
+        //   but is still the single highest-fidelity path for these editors.
         let body = format!(
-            "el.focus();\n\
-             const nativeSetter = Object.getOwnPropertyDescriptor(\n\
-                 el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,\n\
-                 'value'\n\
-             )?.set;\n\
-             if (nativeSetter) {{ nativeSetter.call(el, '{escaped}'); }}\n\
-             else {{ el.value = '{escaped}'; }}\n\
-             el.dispatchEvent(new Event('input', {{ bubbles: true }}));\n\
-             el.dispatchEvent(new Event('change', {{ bubbles: true }}));{enter_snippet}"
+            "const isEditor = el.isContentEditable\n\
+                 || el.getAttribute('contenteditable') === 'true'\n\
+                 || el.getAttribute('contenteditable') === ''\n\
+                 || el.getAttribute('role') === 'textbox'\n\
+                 || el.getAttribute('aria-multiline') === 'true';\n\
+             el.focus();\n\
+             if (isEditor) {{\n\
+                 // Move caret to end + select all existing content so the\n\
+                 // insertText command replaces, not appends.\n\
+                 try {{\n\
+                     const range = document.createRange();\n\
+                     range.selectNodeContents(el);\n\
+                     const sel = window.getSelection();\n\
+                     sel.removeAllRanges();\n\
+                     sel.addRange(range);\n\
+                 }} catch (_) {{}}\n\
+                 // execCommand fires beforeinput + input with the native\n\
+                 // InputEvent that React/Draft.js/Lexical/ProseMirror rely on.\n\
+                 let ok = false;\n\
+                 try {{ ok = document.execCommand('insertText', false, '{escaped}'); }} catch (_) {{ ok = false; }}\n\
+                 if (!ok) {{\n\
+                     // Fallback: directly set textContent + fire input event.\n\
+                     el.textContent = '{escaped}';\n\
+                     el.dispatchEvent(new InputEvent('input', {{\n\
+                         bubbles: true, cancelable: true,\n\
+                         data: '{escaped}', inputType: 'insertText'\n\
+                     }}));\n\
+                 }}\n\
+             }} else {{\n\
+                 const nativeSetter = Object.getOwnPropertyDescriptor(\n\
+                     el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,\n\
+                     'value'\n\
+                 )?.set;\n\
+                 if (nativeSetter) {{ nativeSetter.call(el, '{escaped}'); }}\n\
+                 else {{ el.value = '{escaped}'; }}\n\
+                 el.dispatchEvent(new Event('input', {{ bubbles: true }}));\n\
+                 el.dispatchEvent(new Event('change', {{ bubbles: true }}));\n\
+             }}{enter_snippet}"
         );
         let js = build_element_js(p.element, &body);
 
