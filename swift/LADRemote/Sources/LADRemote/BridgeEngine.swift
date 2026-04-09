@@ -56,7 +56,8 @@ public final class BridgeEngine: NSObject {
         let script = WKUserScript(
             source: consoleJS,
             injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
+            // SEC-S2: Main frame only — prevent cross-origin iframe exfiltration.
+            forMainFrameOnly: true
         )
         config.userContentController.addUserScript(script)
 
@@ -86,6 +87,12 @@ public final class BridgeEngine: NSObject {
                 respond(.error(cmd.id, "missing or invalid url"))
                 return
             }
+            // SEC-S1: URL scheme allowlist — block file://, javascript://, data://, tel://, etc.
+            let scheme = url.scheme?.lowercased() ?? ""
+            guard scheme == "http" || scheme == "https" else {
+                respond(.error(cmd.id, "blocked URL scheme: \(scheme) — only http/https allowed"))
+                return
+            }
             webView.load(URLRequest(url: url))
             respond(.ok(cmd.id))
 
@@ -111,7 +118,8 @@ public final class BridgeEngine: NSObject {
                 respond(.error(cmd.id, "missing script"))
                 return
             }
-            let interval = cmd.interval ?? 1000
+            // SEC-S9: Enforce minimum 100ms interval to prevent CPU exhaustion DoS.
+            let interval = max(cmd.interval ?? 1000, 100)
             monitoringTimer?.invalidate()
             monitoringTimer = Timer.scheduledTimer(
                 withTimeInterval: Double(interval) / 1000.0,
@@ -431,7 +439,8 @@ final class BridgeUIDelegate: NSObject, WKUIDelegate {
             "type": .string("confirm"),
             "message": .string(message),
         ])
-        completionHandler(true) // Auto-accept.
+        // SEC-S3: Reject by default — don't auto-accept destructive confirm() dialogs.
+        completionHandler(false)
     }
 
     // Handle prompt().

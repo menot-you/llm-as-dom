@@ -1,11 +1,14 @@
 //! One-time auth token generation for relay pairing.
 
-/// Generate a cryptographically random 6-digit numeric token.
+/// SEC-S5: Generate a cryptographically random 12-character alphanumeric token.
+/// Entropy: 36^12 ≈ 4.7 × 10^18 (vs old 10^6).
 pub fn generate() -> String {
-    let mut buf = [0u8; 4];
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut buf = [0u8; 12];
     getrandom::getrandom(&mut buf).expect("getrandom failed");
-    let n = u32::from_le_bytes(buf) % 1_000_000;
-    format!("{n:06}")
+    buf.iter()
+        .map(|b| CHARSET[(*b as usize) % CHARSET.len()] as char)
+        .collect()
 }
 
 #[cfg(test)]
@@ -13,10 +16,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn token_is_6_digits() {
+    fn token_is_12_chars_alphanumeric() {
         let t = generate();
-        assert_eq!(t.len(), 6);
-        assert!(t.chars().all(|c| c.is_ascii_digit()));
+        assert_eq!(t.len(), 12);
+        assert!(
+            t.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]
