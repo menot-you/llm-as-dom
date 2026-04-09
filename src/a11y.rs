@@ -301,7 +301,24 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
         })()
     "#;
 
-    let extraction: JsExtraction = crate::engine::eval_js_into(page, js).await?;
+    let mut extraction: JsExtraction = crate::engine::eval_js_into(page, js).await?;
+    let mut shell_markers = crate::cloaking::probe_shell_markers(page).await;
+
+    // DX-CL2 (bug 2): Twitter/X and other React SPAs render a shell-only
+    // HTML response — interactive count is legitimately 0 for a few hundred
+    // milliseconds during hydration. If we see "zero interactive elements +
+    // SPA shell markers", wait 1.5s and retry once before letting the
+    // cloaking detector touch the view.
+    let interactive_raw = count_interactive(&extraction.elements);
+    if interactive_raw == 0 && shell_markers.looks_like_spa_shell() {
+        tracing::debug!(
+            markers = ?shell_markers,
+            "zero interactive elements on SPA shell — retrying extraction after 1500ms"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        extraction = crate::engine::eval_js_into(page, js).await?;
+        shell_markers = crate::cloaking::probe_shell_markers(page).await;
+    }
 
     tracing::info!(
         elements = extraction.elements.len(),
@@ -372,7 +389,9 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
     sanitize_view(&mut view);
 
     // Detect bot-challenge / CAPTCHA pages after extraction.
-    if let Some(reason) = detect_bot_challenge(&view) {
+    // DX-CL2: pass SPA shell markers so the CSS cloaking heuristic can
+    // suppress itself on mid-hydration Next.js / React pages.
+    if let Some(reason) = detect_bot_challenge_with_markers(&view, &shell_markers) {
         tracing::warn!(reason = %reason, "bot challenge detected");
         view.state = PageState::Blocked(reason.clone());
         view.blocked_reason = Some(reason);
@@ -449,6 +468,18 @@ struct JsElement {
     /// Visible option labels for `<select>` elements (top 10).
     #[serde(default)]
     options: Option<Vec<String>>,
+}
+
+/// Count elements whose kind is `button | input | textarea | select` — the
+/// set used by cloaking / challenge heuristics as "interactive".
+///
+/// Operates on the raw JS extraction to avoid re-running the ElementKind
+/// classifier before the Rust-side `Element`s have been built.
+fn count_interactive(elements: &[JsElement]) -> usize {
+    elements
+        .iter()
+        .filter(|e| matches!(e.kind.as_str(), "button" | "input" | "textarea" | "select"))
+        .count()
 }
 
 /// Map a JS kind string to the strongly-typed [`ElementKind`].
@@ -555,7 +586,24 @@ const ERROR_PAGE_TITLES: &[&str] = &[
 /// or error/auth-wall page.
 ///
 /// Returns `Some(reason)` when a challenge or error is detected, `None` otherwise.
+///
+/// Thin wrapper over [`detect_bot_challenge_with_markers`] that supplies
+/// default (empty) SPA markers. Use when you don't have live DOM access —
+/// e.g. in unit tests over a statically-constructed `SemanticView`.
 pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
+    detect_bot_challenge_with_markers(view, &crate::cloaking::ShellMarkers::default())
+}
+
+/// Variant of [`detect_bot_challenge`] that consults SPA shell markers.
+///
+/// DX-CL2 (bug 2): The CSS cloaking branch now uses
+/// [`crate::cloaking::is_css_cloaking`] which raises the text threshold and
+/// suppresses the classification when the page is a legitimate SPA shell
+/// (Next.js, React, Vue) that is still hydrating.
+pub fn detect_bot_challenge_with_markers(
+    view: &SemanticView,
+    markers: &crate::cloaking::ShellMarkers,
+) -> Option<String> {
     let lower_title = view.title.to_lowercase();
     let lower_text = view.visible_text.to_lowercase();
     let lower_url = view.url.to_lowercase();
@@ -616,11 +664,12 @@ pub fn detect_bot_challenge(view: &SemanticView) -> Option<String> {
         }
     }
 
-    // 6. CHAOS-C6: CSS cloaking detection — zero interactive elements but
-    //    visible text is present. The page may be hiding interactive content
-    //    behind CSS (display:none on the container, visible text via
-    //    pseudo-elements or aria-hidden tricks).
-    if view.elements.is_empty() && !view.visible_text.trim().is_empty() {
+    // 6. CHAOS-C6 + DX-CL2: CSS cloaking detection — zero interactive
+    //    elements but substantial visible text is present, AND the page does
+    //    not look like a SPA shell mid-hydration. The page may be hiding
+    //    interactive content behind CSS (display:none on the container,
+    //    visible text via pseudo-elements or aria-hidden tricks).
+    if crate::cloaking::is_css_cloaking(interactive_count, &view.visible_text, markers) {
         return Some(
             "possible CSS cloaking: no interactive elements but text is visible".to_string(),
         );
@@ -931,6 +980,30 @@ mod tests {
 
     #[test]
     fn detect_css_cloaking_no_elements_with_text() {
+        // DX-CL2 (bug 2): raised threshold to 500 chars AND requires absence
+        // of SPA shell markers. We feed it 600 chars of static text with
+        // default (all-false) markers, which is the true cloaking case.
+        let long_text = "x ".repeat(400); // 800 chars.
+        let view = SemanticView {
+            url: "https://example.com".into(),
+            title: "Normal Page".into(),
+            page_hint: "".into(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: long_text,
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        let reason = detect_bot_challenge(&view);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("CSS cloaking"));
+    }
+
+    #[test]
+    fn no_css_cloaking_below_text_threshold() {
+        // DX-CL2: short text should no longer trip the detector.
         let view = SemanticView {
             url: "https://example.com".into(),
             title: "Normal Page".into(),
@@ -943,9 +1016,34 @@ mod tests {
             blocked_reason: None,
             session_context: None,
         };
-        let reason = detect_bot_challenge(&view);
-        assert!(reason.is_some());
-        assert!(reason.unwrap().contains("CSS cloaking"));
+        assert!(detect_bot_challenge(&view).is_none());
+    }
+
+    #[test]
+    fn no_css_cloaking_on_spa_shell() {
+        // DX-CL2 (bug 2): long text + zero elements + SPA shell markers
+        // (Next.js) must NOT be classified as cloaking. Same case as
+        // detect_css_cloaking_no_elements_with_text but with markers.
+        let long_text = "x ".repeat(400);
+        let view = SemanticView {
+            url: "https://twitter.com".into(),
+            title: "X".into(),
+            page_hint: "".into(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: long_text,
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        let markers = crate::cloaking::ShellMarkers {
+            ready_complete: true,
+            has_next_data: true,
+            has_framework_root: true,
+            script_tag_count: 10,
+        };
+        assert!(detect_bot_challenge_with_markers(&view, &markers).is_none());
     }
 
     #[test]

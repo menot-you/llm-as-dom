@@ -2152,3 +2152,57 @@ async fn test_extract_iframe_elements() {
     drop(page);
     engine.close().await.unwrap();
 }
+
+// ── DX-CL2 (bug 2): SPA shell cloaking false-positive ────────────────
+
+/// Regression test: a React/Next.js SPA shell with zero interactive
+/// elements in the initial HTML and heavy hero copy must NOT be
+/// classified as "possible CSS cloaking". The fixture ships with a
+/// hydration script that injects a composer after 800ms, so after the
+/// 1500ms retry the extraction sees interactive elements.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_spa_shell_not_classified_as_cloaking() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/spa-shell.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    // Do NOT sleep here — extract_semantic_view is supposed to retry
+    // internally when it sees a SPA shell with zero elements.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // After the internal retry the composer should be visible.
+    assert!(
+        !view.elements.is_empty(),
+        "SPA shell retry should have picked up hydrated elements, got {}",
+        view.elements.len()
+    );
+    assert_eq!(
+        view.state,
+        PageState::Ready,
+        "SPA shell must not be blocked as cloaking — blocked_reason = {:?}",
+        view.blocked_reason
+    );
+    assert!(
+        view.blocked_reason.is_none(),
+        "no blocked_reason expected, got {:?}",
+        view.blocked_reason
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}

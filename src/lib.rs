@@ -6,6 +6,7 @@
 pub mod a11y;
 pub mod audit;
 pub mod backend;
+pub mod cloaking;
 pub mod crypto;
 pub mod engine;
 pub mod error;
