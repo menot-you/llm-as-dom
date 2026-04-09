@@ -403,8 +403,23 @@ struct JsFormMeta {
     index: u32,
     action: Option<String>,
     method: String,
+    /// DX-16: HN returns `"id": {}` (empty object) instead of a string.
+    /// Use Value to accept any type, then convert to Option<String>.
+    #[serde(default, deserialize_with = "deserialize_string_or_null")]
     id: Option<String>,
     name: Option<String>,
+}
+
+/// Accept string, null, or any other type (coerce non-strings to None).
+fn deserialize_string_or_null<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: serde_json::Value = serde::Deserialize::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(s) if !s.is_empty() => Ok(Some(s)),
+        _ => Ok(None), // null, empty string, object, array → None
+    }
 }
 
 /// A single element as returned by the JS extractor.
