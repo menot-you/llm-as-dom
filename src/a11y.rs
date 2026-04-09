@@ -45,10 +45,29 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 return results;
             }
 
-            const els = deepQueryAll(document, selectors);
+            // DX-FIX: Detect active modal/dialog and scope extraction to it.
+            // This prevents extracting background elements when a modal is open,
+            // fixing fill_form wrong-match, click-behind-modal, and modal scroll issues.
+            const activeDialog = document.querySelector(
+                'dialog[open], [role="dialog"][aria-modal="true"], [role="dialog"]:not([aria-hidden="true"])'
+            );
+            const extractionRoot = activeDialog || document;
+
+            // If modal detected, scroll it to show all content before extraction.
+            if (activeDialog) {
+                const scrollable = activeDialog.querySelector('[style*="overflow"], [class*="scroll"]')
+                    || activeDialog;
+                if (scrollable.scrollHeight > scrollable.clientHeight) {
+                    // Scroll to bottom then back to top to force lazy content to load.
+                    scrollable.scrollTop = scrollable.scrollHeight;
+                    scrollable.scrollTop = 0;
+                }
+            }
+
+            const els = deepQueryAll(extractionRoot, selectors);
 
             // Build a form index: map each <form> to a sequential number
-            const allForms = deepQueryAll(document, 'form');
+            const allForms = deepQueryAll(extractionRoot, 'form');
             const formMap = new Map();
             allForms.forEach((f, i) => formMap.set(f, i));
 
@@ -80,9 +99,16 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 if (parseFloat(style.opacity) === 0) return false;
                 const rect = el.getBoundingClientRect();
                 if (rect.width === 0 && rect.height === 0) return false;
-                if (rect.right < 0 || rect.bottom < 0
-                    || rect.left > window.innerWidth
-                    || rect.top > window.innerHeight) return false;
+                // DX-FIX: When inside a modal, check against modal bounds, not window.
+                // For full-page extraction, check against window viewport.
+                if (!activeDialog) {
+                    if (rect.right < 0 || rect.bottom < 0
+                        || rect.left > window.innerWidth
+                        || rect.top > window.innerHeight) return false;
+                }
+                // Inside a modal: skip viewport clipping — extract ALL elements
+                // in the dialog regardless of scroll position. This fixes the
+                // "fields below modal scroll" blind spot.
                 if (hasZeroAncestorOpacity(el, 3)) return false;
                 if (isHoneypot(el)) return false;
                 return true;

@@ -17,6 +17,21 @@ pub(crate) fn read_env_with_fallback(new_name: &str, old_name: &str, default: &s
     default.to_string()
 }
 
+/// Parse LAD_WINDOW_SIZE env var ("WIDTHxHEIGHT", e.g. "1920x1080").
+pub(crate) fn parse_window_size_env() -> Option<(u32, u32)> {
+    let val = std::env::var("LAD_WINDOW_SIZE").ok()?;
+    let parts: Vec<&str> = val.split('x').collect();
+    if parts.len() == 2 {
+        let w = parts[0].parse::<u32>().ok()?;
+        let h = parts[1].parse::<u32>().ok()?;
+        if w >= 320 && h >= 240 {
+            return Some((w, h));
+        }
+    }
+    tracing::warn!(val = %val, "invalid LAD_WINDOW_SIZE — expected WIDTHxHEIGHT (e.g. 1920x1080)");
+    None
+}
+
 /// Convert any `Display` error into an MCP internal-error response.
 pub(crate) fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
     rmcp::ErrorData::internal_error(e.to_string(), None)

@@ -28,17 +28,33 @@ impl LadServer {
                 "el.scrollIntoView({ behavior: 'smooth', block: 'center' });",
             )
         } else {
-            // Directional scroll
+            // DX-FIX: Detect active dialog/modal and scroll it instead of the page.
+            // Falls back to window.scrollBy if no modal is active.
             let scroll_cmd = match p.direction.as_str() {
-                "up" => format!("window.scrollBy(0, -{})", p.pixels),
-                "bottom" => "window.scrollTo(0, document.body.scrollHeight)".to_string(),
-                "top" => "window.scrollTo(0, 0)".to_string(),
-                // "down" is the default
-                _ => format!("window.scrollBy(0, {})", p.pixels),
+                "up" => format!("pixels = -{}", p.pixels),
+                "bottom" => "pixels = 999999".to_string(),
+                "top" => "pixels = -999999".to_string(),
+                _ => format!("pixels = {}", p.pixels),
             };
             format!(
                 r#"(() => {{
-                    {scroll_cmd};
+                    let {scroll_cmd};
+                    const dialog = document.querySelector(
+                        'dialog[open], [role="dialog"][aria-modal="true"], [role="dialog"]:not([aria-hidden="true"])'
+                    );
+                    if (dialog) {{
+                        // Find scrollable container inside the dialog.
+                        let scrollTarget = dialog;
+                        for (const child of dialog.querySelectorAll('*')) {{
+                            if (child.scrollHeight > child.clientHeight + 10) {{
+                                scrollTarget = child;
+                                break;
+                            }}
+                        }}
+                        scrollTarget.scrollBy(0, pixels);
+                    }} else {{
+                        window.scrollBy(0, pixels);
+                    }}
                     return JSON.stringify({{ ok: true }});
                 }})()"#
             )

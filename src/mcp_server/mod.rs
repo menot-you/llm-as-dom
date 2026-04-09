@@ -12,7 +12,7 @@ mod params;
 mod state;
 mod tools;
 
-use helpers::{mcp_err, read_env_with_fallback, same_origin};
+use helpers::{mcp_err, parse_window_size_env, read_env_with_fallback, same_origin};
 use params::*;
 use state::{ActivePage, McpSessionState};
 
@@ -160,13 +160,13 @@ impl LadServer {
             interactive: self.interactive,
             user_data_dir,
             temp_dir: td.map(std::sync::Arc::new),
-            // DX-5: Use 1440x900 for visible mode (fits most laptop screens).
-            // Headless stays at 1280x800.
-            window_size: if self.interactive {
+            // DX-5: Window size from LAD_WINDOW_SIZE env var ("WIDTHxHEIGHT"),
+            // or defaults: 1440x900 visible, 1280x800 headless.
+            window_size: parse_window_size_env().unwrap_or(if self.interactive {
                 (1440, 900)
             } else {
                 (1280, 800)
-            },
+            }),
         };
 
         let engine_name = std::env::var("LAD_ENGINE").unwrap_or_default();
