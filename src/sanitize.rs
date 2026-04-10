@@ -86,6 +86,32 @@ const BLOCKED_SCHEMES: &[&str] = &["file:", "javascript:", "data:", "blob:", "vb
 /// scheme check so `java\x0Bscript:` is caught. Only allows unparseable
 /// URLs that look like relative paths (no scheme-like prefix).
 ///
+///// Check whether the SSRF bypass escape hatch is currently active.
+///
+/// Returns `true` only when BOTH conditions hold:
+/// 1. The build is compiled with `debug_assertions` (i.e. debug/dev build,
+///    never a `--release` binary that ships to users).
+/// 2. The `LAD_EVAL_BYPASS_SSRF` environment variable is set to `1`.
+///
+/// This is a defense-in-depth gate against the footgun where a production
+/// operator accidentally inherits the env var from a parent shell, a
+/// dotfile, or a supply-chain compromise and silently disables SSRF
+/// protection. In release builds the env var is a no-op.
+///
+/// When the bypass is active, the caller of `is_safe_url` emits an
+/// `ERROR`-level tracing event on every bypass decision so it is
+/// auditable in logs.
+fn ssrf_bypass_active() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("LAD_EVAL_BYPASS_SSRF").ok().as_deref() == Some("1")
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
 /// FIX-14: Blocks known DNS rebinding hostnames (nip.io, sslip.io, etc.)
 /// and documents the limitation that async DNS resolution is needed for
 /// full rebinding protection in production deployments.
@@ -115,15 +141,19 @@ pub fn is_safe_url(url: &str) -> bool {
             }
             // Check for private/loopback hosts (SSRF targets).
             if let Some(host) = parsed.host_str() {
-                // Dev/eval escape hatch: LAD_EVAL_BYPASS_SSRF=1 allows loopback
-                // + localhost hostnames for running the regression corpus
-                // against a local http.server. Keeps scheme blocks active.
-                let bypass = std::env::var("LAD_EVAL_BYPASS_SSRF").ok().as_deref() == Some("1");
+                let bypass = ssrf_bypass_active();
                 if is_suspicious_hostname(host) && !bypass {
                     return false;
                 }
                 if is_private_host(host) && !bypass {
                     return false;
+                }
+                if bypass {
+                    tracing::error!(
+                        host = %host,
+                        "LAD_EVAL_BYPASS_SSRF active — allowing private/loopback host. \
+                         This MUST NOT be used in production."
+                    );
                 }
                 return true;
             }

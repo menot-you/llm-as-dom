@@ -44,7 +44,10 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 // Never hold a higher-numbered lock while acquiring a lower-numbered one.
 
 /// MCP server that manages a headless browser and exposes pilot tools.
-#[derive(Clone)]
+///
+/// `Clone` is implemented manually rather than derived because `AtomicBool`
+/// is not `Clone`. We snapshot the current value on clone — callers that
+/// need to share state across clones should use the original `Arc` fields.
 #[allow(dead_code)] // tool_router is used internally by rmcp macros
 struct LadServer {
     /// Router that dispatches MCP tool calls to handler methods.
@@ -58,13 +61,37 @@ struct LadServer {
     /// Session state carried across tool calls within this MCP session.
     pub(crate) session: Arc<Mutex<McpSessionState>>,
     /// Whether interactive mode is enabled (captcha pause for human).
-    pub(crate) interactive: bool,
+    ///
+    /// Stored as `AtomicBool` so `ensure_engine_visible` can toggle it at
+    /// runtime without a `&mut self` reference — replacing a prior unsafe
+    /// `*const Self → *mut Self` cast that was UB under Rust's aliasing
+    /// rules. All reads use `Ordering::Acquire`, writes use `Ordering::Release`.
+    pub(crate) interactive: std::sync::atomic::AtomicBool,
     /// Persistent page from `lad_snapshot`, reused by click/type/select.
     pub(crate) active_page: Arc<Mutex<Option<ActivePage>>>,
     /// Active watch state (at most one watch at a time).
     pub(crate) watch_state: Arc<Mutex<Option<watch::WatchState>>>,
     /// MCP peer for server-initiated push notifications.
     pub(crate) peer: Arc<Mutex<Option<rmcp::Peer<rmcp::service::RoleServer>>>>,
+}
+
+impl Clone for LadServer {
+    fn clone(&self) -> Self {
+        use std::sync::atomic::Ordering;
+        Self {
+            tool_router: self.tool_router.clone(),
+            engine: Arc::clone(&self.engine),
+            llm_url: self.llm_url.clone(),
+            llm_model: self.llm_model.clone(),
+            session: Arc::clone(&self.session),
+            interactive: std::sync::atomic::AtomicBool::new(
+                self.interactive.load(Ordering::Acquire),
+            ),
+            active_page: Arc::clone(&self.active_page),
+            watch_state: Arc::clone(&self.watch_state),
+            peer: Arc::clone(&self.peer),
+        }
+    }
 }
 
 impl LadServer {
@@ -80,9 +107,11 @@ impl LadServer {
             ),
             llm_model: read_env_with_fallback("LAD_LLM_MODEL", "LAD_MODEL", "qwen2.5:7b"),
             session: Arc::new(Mutex::new(McpSessionState::default())),
-            interactive: std::env::var("LAD_INTERACTIVE")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
+            interactive: std::sync::atomic::AtomicBool::new(
+                std::env::var("LAD_INTERACTIVE")
+                    .map(|v| v == "true" || v == "1")
+                    .unwrap_or(false),
+            ),
             active_page: Arc::new(Mutex::new(None)),
             watch_state: Arc::new(Mutex::new(None)),
             peer: Arc::new(Mutex::new(None)),
@@ -95,15 +124,13 @@ impl LadServer {
         &self,
         request_visible: bool,
     ) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
+        use std::sync::atomic::Ordering;
         let mut engine_lock = self.engine.lock().await;
-        let need_restart = if engine_lock.is_some() {
-            request_visible != self.interactive
-        } else {
-            false
-        };
+        let current = self.interactive.load(Ordering::Acquire);
+        let need_restart = engine_lock.is_some() && request_visible != current;
         if need_restart {
             tracing::info!(
-                from = self.interactive,
+                from = current,
                 to = request_visible,
                 "visibility changed — restarting browser"
             );
@@ -111,12 +138,11 @@ impl LadServer {
             *engine_lock = None;
             *self.active_page.lock().await = None;
         }
-        // SAFETY: we cast away the & to mutate interactive. This is fine because
-        // we hold the engine lock and no other code reads interactive concurrently.
-        #[allow(invalid_reference_casting)]
-        if request_visible != self.interactive {
-            let self_mut = unsafe { &mut *(self as *const Self as *mut Self) };
-            self_mut.interactive = request_visible;
+        // Store the new mode atomically. Safe under the engine lock because
+        // `ensure_engine_inner` below will read this fresh value to launch
+        // the new browser.
+        if request_visible != current {
+            self.interactive.store(request_visible, Ordering::Release);
         }
         self.ensure_engine_inner(&mut engine_lock).await
     }
@@ -135,7 +161,8 @@ impl LadServer {
             return Ok(Arc::clone(e));
         }
 
-        let mode = if self.interactive {
+        let interactive = self.interactive.load(std::sync::atomic::Ordering::Acquire);
+        let mode = if interactive {
             "interactive (visible)"
         } else {
             "headless"
@@ -156,16 +183,16 @@ impl LadServer {
         // tempdir trade-off was per-run isolation, which hurts DX badly.
         // The default cache dir lives in the user's own home, so there is
         // no cross-tenant risk — same threat model as ~/.config or ~/.ssh.
-        let (user_data_dir, td) = resolve_user_data_dir();
+        let (user_data_dir, td) = resolve_user_data_dir()?;
 
         let config = EngineConfig {
-            visible: self.interactive,
-            interactive: self.interactive,
+            visible: interactive,
+            interactive,
             user_data_dir,
             temp_dir: td,
             // DX-5: Window size from LAD_WINDOW_SIZE env var ("WIDTHxHEIGHT"),
             // or defaults: 1440x900 visible, 1280x800 headless.
-            window_size: parse_window_size_env().unwrap_or(if self.interactive {
+            window_size: parse_window_size_env().unwrap_or(if interactive {
                 (1440, 900)
             } else {
                 (1280, 800)
@@ -779,7 +806,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Resolve the Chromium user-data directory with the following priority:
 ///
 /// 1. `$LAD_USER_DATA_DIR` — explicit override. Created if it does not exist.
-///    Must be an absolute path. Returned without a tempdir drop guard.
+///    Fails loudly if create OR a writable pre-flight check fails — the user
+///    set this env var expecting a specific path, so silent fallback would
+///    mask misconfiguration.
 /// 2. `$LAD_EPHEMERAL` set to `1`/`true` — random tempdir for tests, CI,
 ///    and one-shot invocations that want zero cross-run state. Returned
 ///    with a drop guard so the directory is cleaned up on engine drop.
@@ -787,28 +816,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///    `~/Library/Caches/lad/chrome-profile` on macOS, or
 ///    `~/.cache/lad/chrome-profile` elsewhere. Persistent across runs so
 ///    login sessions (auth_token, ct0, Google SSO, etc) survive restarts.
+///    If the default cache location cannot be created or written to, falls
+///    back to an ephemeral tempdir rather than a bare `/tmp` path (the
+///    fallback is held by a drop guard so it is cleaned up on exit).
 ///
 /// The directory is created with mode 0o700 on Unix to limit exposure.
-fn resolve_user_data_dir() -> (
-    std::path::PathBuf,
-    Option<std::sync::Arc<tempfile::TempDir>>,
-) {
-    // 1. Explicit override via env.
+fn resolve_user_data_dir() -> Result<
+    (
+        std::path::PathBuf,
+        Option<std::sync::Arc<tempfile::TempDir>>,
+    ),
+    llm_as_dom::Error,
+> {
+    // 1. Explicit override via env — fail loudly on create/write failure.
+    //    The user set this expecting it to take effect; silent fallback masks
+    //    misconfiguration (e.g. pointing at a deleted volume).
     if let Ok(path) = std::env::var("LAD_USER_DATA_DIR")
         && !path.is_empty()
     {
         let pb = std::path::PathBuf::from(&path);
-        if let Err(e) = std::fs::create_dir_all(&pb) {
-            tracing::warn!(
-                path = %pb.display(),
-                error = %e,
-                "LAD_USER_DATA_DIR create failed — falling back to default"
-            );
-        } else {
-            set_dir_mode_700(&pb);
-            tracing::info!(path = %pb.display(), "user_data_dir: explicit");
-            return (pb, None);
-        }
+        std::fs::create_dir_all(&pb).map_err(|e| {
+            llm_as_dom::Error::Browser(format!(
+                "LAD_USER_DATA_DIR='{}' could not be created: {e}",
+                pb.display()
+            ))
+        })?;
+        preflight_writable(&pb).map_err(|e| {
+            llm_as_dom::Error::Browser(format!(
+                "LAD_USER_DATA_DIR='{}' is not writable: {e}",
+                pb.display()
+            ))
+        })?;
+        set_dir_mode_700(&pb);
+        tracing::info!(path = %pb.display(), "user_data_dir: explicit");
+        return Ok((pb, None));
     }
 
     // 2. Ephemeral opt-in for tests/CI.
@@ -818,29 +859,53 @@ fn resolve_user_data_dir() -> (
     if ephemeral && let Ok(td) = tempfile::Builder::new().prefix("lad-chrome-").tempdir() {
         let pb = td.path().to_path_buf();
         tracing::info!(path = %pb.display(), "user_data_dir: ephemeral");
-        return (pb, Some(std::sync::Arc::new(td)));
+        return Ok((pb, Some(std::sync::Arc::new(td))));
     }
     // If ephemeral was requested but tempdir failed, fall through to default.
 
     // 3. Default persistent cache dir.
     let base = default_cache_dir();
     let pb = base.join("lad").join("chrome-profile");
-    if let Err(e) = std::fs::create_dir_all(&pb) {
-        tracing::warn!(
-            path = %pb.display(),
-            error = %e,
-            "default user_data_dir create failed — falling back to tempdir"
-        );
-        // Last-resort fallback so we never hand Chromium a non-existent path.
-        if let Ok(td) = tempfile::Builder::new().prefix("lad-chrome-").tempdir() {
-            let fallback = td.path().to_path_buf();
-            return (fallback, Some(std::sync::Arc::new(td)));
+    match std::fs::create_dir_all(&pb)
+        .and_then(|_| preflight_writable(&pb).map_err(std::io::Error::other))
+    {
+        Ok(()) => {
+            set_dir_mode_700(&pb);
+            tracing::info!(path = %pb.display(), "user_data_dir: persistent");
+            Ok((pb, None))
         }
-        return (std::env::temp_dir().join("lad-chrome-fallback"), None);
+        Err(e) => {
+            tracing::warn!(
+                path = %pb.display(),
+                error = %e,
+                "default user_data_dir unusable — falling back to ephemeral tempdir"
+            );
+            // Last-resort fallback: ALWAYS held by a drop guard so we never
+            // leak a stray profile on disk. If tempdir itself fails there is
+            // nothing sane to return, so surface the error.
+            let td = tempfile::Builder::new()
+                .prefix("lad-chrome-fallback-")
+                .tempdir()
+                .map_err(|e2| {
+                    llm_as_dom::Error::Browser(format!(
+                        "user_data_dir resolution failed: default={e}, fallback tempdir={e2}"
+                    ))
+                })?;
+            let path = td.path().to_path_buf();
+            Ok((path, Some(std::sync::Arc::new(td))))
+        }
     }
-    set_dir_mode_700(&pb);
-    tracing::info!(path = %pb.display(), "user_data_dir: persistent");
-    (pb, None)
+}
+
+/// Pre-flight: verify the directory is writable by creating and removing a
+/// probe file. Catches deleted-volume, read-only mount, and permission
+/// mismatches before we hand the path to Chromium (which would otherwise
+/// hang or crash with a cryptic error).
+fn preflight_writable(dir: &std::path::Path) -> Result<(), std::io::Error> {
+    let probe = dir.join(".lad-writable-probe");
+    std::fs::write(&probe, b"ok")?;
+    std::fs::remove_file(&probe)?;
+    Ok(())
 }
 
 /// Return the platform cache directory without an external crate.

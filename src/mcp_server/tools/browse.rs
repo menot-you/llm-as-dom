@@ -87,7 +87,7 @@ impl LadServer {
             playbook_dir: None,
             max_retries_per_step: 2,
             session: None,
-            interactive: self.interactive,
+            interactive: self.interactive.load(std::sync::atomic::Ordering::Acquire),
         };
 
         tracing::info!("running pilot");
