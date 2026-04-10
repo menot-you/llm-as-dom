@@ -70,8 +70,16 @@ impl ChromiumEngine {
         // code was scrubbing the wrong directory all along.
         builder = builder
             .user_data_dir(&config.user_data_dir)
-            .arg("--disable-gpu")
             .arg("--disable-dev-shm-usage");
+
+        // STEALTH: Only disable GPU in headless mode. A real browser has WebGL
+        // enabled — `--disable-gpu` causes `getContext('webgl')` to return null,
+        // which is itself a bot-detection signal (no human user has WebGL off).
+        // In visible/interactive mode we keep the GPU alive so our WebGL
+        // vendor/renderer overrides in the stealth script can actually fire.
+        if !config.visible && !config.interactive {
+            builder = builder.arg("--disable-gpu");
+        }
 
         // STEALTH: Flag-level anti-detection. Disables the AutomationControlled
         // Blink feature and prevents Chrome from exposing automation indicators
