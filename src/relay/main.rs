@@ -48,6 +48,12 @@ struct Cli {
     /// Also publish via Bonjour/mDNS for local network discovery.
     #[arg(long)]
     bonjour: bool,
+
+    /// Write the pairing URL to the given file on startup. Lets a parent
+    /// process (LAD MCP server, tests, CI) discover the URL without parsing
+    /// stderr. The file contains just the raw ws:// URL + newline.
+    #[arg(long, value_name = "PATH")]
+    pairing_file: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -78,6 +84,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Determine LAN IP.
     let local_ip = local_ip_address().unwrap_or_else(|| local_addr.ip().to_string());
     let pairing_url = build_pairing_url(&local_ip, local_addr.port(), auth_token.as_deref());
+
+    // If a pairing file was requested, write the URL there so parent
+    // processes can pick it up without parsing stderr. This is how LAD's
+    // webkit engine and the `lad_pair` MCP tool discover the URL.
+    if let Some(ref path) = cli.pairing_file {
+        match std::fs::write(path, format!("{pairing_url}\n")) {
+            Ok(()) => info!("wrote pairing URL to {}", path.display()),
+            Err(e) => warn!("failed to write pairing file {}: {e}", path.display()),
+        }
+    }
 
     // Print pairing info to stderr (LAD reads stdout for NDJSON).
     eprintln!();

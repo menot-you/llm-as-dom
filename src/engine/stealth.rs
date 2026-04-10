@@ -205,48 +205,87 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
   if (window.__lad_stealth_applied) return;
   window.__lad_stealth_applied = true;
 
-  // 1. navigator.webdriver → undefined
+  // 1. navigator.webdriver → DELETED. Real Chrome doesn't have the property
+  //    defined at all. Creepjs and modern detectors check `'webdriver' in
+  //    navigator`, which returns true for any property — even one whose
+  //    getter returns `undefined`. The only way to pass is to actually
+  //    delete the descriptor from the prototype chain.
   try {{
-    Object.defineProperty(Navigator.prototype, 'webdriver', {{
-      get: () => undefined,
-      configurable: true,
-    }});
+    // Delete any descriptor Chromium set via --enable-automation. Some
+    // builds set it as own property on the instance, others on prototype.
+    try {{ delete Object.getPrototypeOf(navigator).webdriver; }} catch (e) {{}}
+    try {{ delete navigator.webdriver; }} catch (e) {{}}
+    // Now redefine as non-enumerable with undefined getter, so if anything
+    // re-installs it later we still return undefined. `enumerable: false`
+    // makes `'webdriver' in navigator` still return true — so we avoid
+    // defineProperty entirely and rely on the delete above. Verify no
+    // residue with a post-check; if the property reappears (e.g. a browser
+    // extension or the CDP injector), fall back to a hidden stub.
+    if ('webdriver' in navigator) {{
+      // Last-resort: define as non-configurable undefined so at least
+      // access returns undefined even if `in` still sees it.
+      try {{
+        Object.defineProperty(Navigator.prototype, 'webdriver', {{
+          get: () => undefined,
+          enumerable: false,
+          configurable: true,
+        }});
+      }} catch (e) {{}}
+    }}
   }} catch (e) {{}}
 
-  // 2. navigator.plugins — OS-realistic. On macOS real Chrome returns an
-  //    empty PluginArray since the built-in PDF viewer is not surfaced as
-  //    a plugin. On Windows Chrome still returns 3 PDF entries. We detect
-  //    platform at JS time using the UA string the outer override already set.
+  // 2. navigator.plugins — real Chrome on BOTH macOS and Windows exposes
+  //    the 5-entry PDF Viewer array (internal-pdf-viewer + 4 chrome-pdf*
+  //    aliases). Previous impl returned 0 on macOS which tripped Creepjs
+  //    `noPlugins: true`. Verified against a stock Chrome 131 on Sequoia.
   try {{
-    const uaLower = navigator.userAgent.toLowerCase();
-    const isMac = uaLower.includes('mac os');
-    let fakePlugins;
-    if (isMac) {{
-      fakePlugins = {{
-        length: 0,
-        item: function() {{ return null; }},
-        namedItem: function() {{ return null; }},
-        refresh: function() {{}},
-      }};
-    }} else {{
-      fakePlugins = {{
-        0: {{ name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
-        1: {{ name: 'Chrome PDF Viewer', filename: 'chrome-pdf-viewer', description: 'Portable Document Format' }},
-        2: {{ name: 'Chromium PDF Viewer', filename: 'mojo-pdf-plugin', description: 'Portable Document Format' }},
-        length: 3,
-        item: function(i) {{ return this[i] || null; }},
-        namedItem: function(name) {{
-          for (let i = 0; i < this.length; i++) {{
-            if (this[i].name === name) return this[i];
-          }}
-          return null;
-        }},
-        refresh: function() {{}},
-      }};
+    const pdfEntries = [
+      {{ name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+      {{ name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+      {{ name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+      {{ name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+      {{ name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+    ];
+    const mimeTypes = [
+      {{ type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' }},
+      {{ type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' }},
+    ];
+    const fakePlugins = {{
+      length: pdfEntries.length,
+      item: function(i) {{ return pdfEntries[i] || null; }},
+      namedItem: function(name) {{
+        for (let i = 0; i < pdfEntries.length; i++) {{
+          if (pdfEntries[i].name === name) return pdfEntries[i];
+        }}
+        return null;
+      }},
+      refresh: function() {{}},
+    }};
+    for (let i = 0; i < pdfEntries.length; i++) {{
+      fakePlugins[i] = pdfEntries[i];
     }}
     try {{ Object.setPrototypeOf(fakePlugins, PluginArray.prototype); }} catch (e) {{}}
     Object.defineProperty(Navigator.prototype, 'plugins', {{
       get: () => fakePlugins,
+      configurable: true,
+    }});
+    // navigator.mimeTypes paired with plugins — Creepjs checks both.
+    const fakeMimeTypes = {{
+      length: mimeTypes.length,
+      item: function(i) {{ return mimeTypes[i] || null; }},
+      namedItem: function(name) {{
+        for (let i = 0; i < mimeTypes.length; i++) {{
+          if (mimeTypes[i].type === name) return mimeTypes[i];
+        }}
+        return null;
+      }},
+    }};
+    for (let i = 0; i < mimeTypes.length; i++) {{
+      fakeMimeTypes[i] = mimeTypes[i];
+    }}
+    try {{ Object.setPrototypeOf(fakeMimeTypes, MimeTypeArray.prototype); }} catch (e) {{}}
+    Object.defineProperty(Navigator.prototype, 'mimeTypes', {{
+      get: () => fakeMimeTypes,
       configurable: true,
     }});
   }} catch (e) {{}}
