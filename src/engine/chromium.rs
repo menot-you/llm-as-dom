@@ -73,6 +73,14 @@ impl ChromiumEngine {
             .arg("--disable-gpu")
             .arg("--disable-dev-shm-usage");
 
+        // STEALTH: Flag-level anti-detection. Disables the AutomationControlled
+        // Blink feature and prevents Chrome from exposing automation indicators
+        // on startup. CDP-level JS patches in `stealth::apply_stealth` cover
+        // the rest (webdriver, plugins, chrome object, WebGL, etc).
+        for flag in super::stealth::STEALTH_FLAGS {
+            builder = builder.arg(*flag);
+        }
+
         // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
         // --no-sandbox is a significant security reduction; only enable when necessary.
         if should_disable_sandbox() {
@@ -109,7 +117,22 @@ impl ChromiumEngine {
 #[async_trait]
 impl BrowserEngine for ChromiumEngine {
     async fn new_page(&self, url: &str) -> Result<Box<dyn PageHandle>, crate::Error> {
-        let page = self.browser.new_page(url).await.map_err(cdp_err)?;
+        // STEALTH: Create a blank page first so we can install UA override and
+        // document-load script BEFORE the real URL navigation happens. If we
+        // navigated directly via `new_page(url)`, the target site's detection
+        // code would run against an unpatched navigator.
+        let page = self
+            .browser
+            .new_page("about:blank")
+            .await
+            .map_err(cdp_err)?;
+
+        super::stealth::apply_stealth(&page).await?;
+
+        if !url.is_empty() && url != "about:blank" {
+            page.goto(url).await.map_err(cdp_err)?;
+        }
+
         Ok(Box::new(ChromiumPage {
             page,
             alive: Arc::clone(&self.alive),

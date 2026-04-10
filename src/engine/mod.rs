@@ -5,6 +5,7 @@
 
 pub mod chromium;
 pub mod singleton_lock;
+pub mod stealth;
 pub mod webkit;
 pub(crate) mod webkit_proto;
 
