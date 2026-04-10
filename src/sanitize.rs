@@ -115,10 +115,17 @@ pub fn is_safe_url(url: &str) -> bool {
             }
             // Check for private/loopback hosts (SSRF targets).
             if let Some(host) = parsed.host_str() {
-                if is_suspicious_hostname(host) {
+                // Dev/eval escape hatch: LAD_EVAL_BYPASS_SSRF=1 allows loopback
+                // + localhost hostnames for running the regression corpus
+                // against a local http.server. Keeps scheme blocks active.
+                let bypass = std::env::var("LAD_EVAL_BYPASS_SSRF").ok().as_deref() == Some("1");
+                if is_suspicious_hostname(host) && !bypass {
                     return false;
                 }
-                return !is_private_host(host);
+                if is_private_host(host) && !bypass {
+                    return false;
+                }
+                return true;
             }
             // No host = relative URL, allow
             true
