@@ -142,24 +142,27 @@ impl LadServer {
         };
         tracing::info!(mode, "launching browser");
 
-        // FIX-R3-12: Use tempfile::Builder for cryptographically random temp dir
-        // instead of predictable PID-based path.
-        let td = tempfile::Builder::new()
-            .prefix("lad-chrome-")
-            .tempdir()
-            .ok();
-        let user_data_dir = td
-            .as_ref()
-            .map(|t| t.path().to_path_buf())
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("lad-chrome-{}", std::process::id()))
-            });
+        // DX: Persistent user_data_dir so login sessions survive MCP reconnects.
+        //
+        // Resolution order:
+        // 1. $LAD_USER_DATA_DIR — explicit override (absolute path)
+        // 2. $LAD_EPHEMERAL=1 — ephemeral random tempdir (tests/CI/one-shot)
+        // 3. default: $XDG_CACHE_HOME/lad/chrome-profile or
+        //    ~/Library/Caches/lad/chrome-profile (macOS) or
+        //    ~/.cache/lad/chrome-profile (Linux)
+        //
+        // Without persistence, every MCP reconnect = fresh Chromium profile =
+        // user has to re-login to every site. FIX-R3-12's crypto-random
+        // tempdir trade-off was per-run isolation, which hurts DX badly.
+        // The default cache dir lives in the user's own home, so there is
+        // no cross-tenant risk — same threat model as ~/.config or ~/.ssh.
+        let (user_data_dir, td) = resolve_user_data_dir();
 
         let config = EngineConfig {
             visible: self.interactive,
             interactive: self.interactive,
             user_data_dir,
-            temp_dir: td.map(std::sync::Arc::new),
+            temp_dir: td,
             // DX-5: Window size from LAD_WINDOW_SIZE env var ("WIDTHxHEIGHT"),
             // or defaults: 1440x900 visible, 1280x800 headless.
             window_size: parse_window_size_env().unwrap_or(if self.interactive {
@@ -771,6 +774,110 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     service.waiting().await?;
 
     Ok(())
+}
+
+/// Resolve the Chromium user-data directory with the following priority:
+///
+/// 1. `$LAD_USER_DATA_DIR` — explicit override. Created if it does not exist.
+///    Must be an absolute path. Returned without a tempdir drop guard.
+/// 2. `$LAD_EPHEMERAL` set to `1`/`true` — random tempdir for tests, CI,
+///    and one-shot invocations that want zero cross-run state. Returned
+///    with a drop guard so the directory is cleaned up on engine drop.
+/// 3. Default — `$XDG_CACHE_HOME/lad/chrome-profile`, or
+///    `~/Library/Caches/lad/chrome-profile` on macOS, or
+///    `~/.cache/lad/chrome-profile` elsewhere. Persistent across runs so
+///    login sessions (auth_token, ct0, Google SSO, etc) survive restarts.
+///
+/// The directory is created with mode 0o700 on Unix to limit exposure.
+fn resolve_user_data_dir() -> (
+    std::path::PathBuf,
+    Option<std::sync::Arc<tempfile::TempDir>>,
+) {
+    // 1. Explicit override via env.
+    if let Ok(path) = std::env::var("LAD_USER_DATA_DIR")
+        && !path.is_empty()
+    {
+        let pb = std::path::PathBuf::from(&path);
+        if let Err(e) = std::fs::create_dir_all(&pb) {
+            tracing::warn!(
+                path = %pb.display(),
+                error = %e,
+                "LAD_USER_DATA_DIR create failed — falling back to default"
+            );
+        } else {
+            set_dir_mode_700(&pb);
+            tracing::info!(path = %pb.display(), "user_data_dir: explicit");
+            return (pb, None);
+        }
+    }
+
+    // 2. Ephemeral opt-in for tests/CI.
+    let ephemeral = std::env::var("LAD_EPHEMERAL")
+        .ok()
+        .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
+    if ephemeral && let Ok(td) = tempfile::Builder::new().prefix("lad-chrome-").tempdir() {
+        let pb = td.path().to_path_buf();
+        tracing::info!(path = %pb.display(), "user_data_dir: ephemeral");
+        return (pb, Some(std::sync::Arc::new(td)));
+    }
+    // If ephemeral was requested but tempdir failed, fall through to default.
+
+    // 3. Default persistent cache dir.
+    let base = default_cache_dir();
+    let pb = base.join("lad").join("chrome-profile");
+    if let Err(e) = std::fs::create_dir_all(&pb) {
+        tracing::warn!(
+            path = %pb.display(),
+            error = %e,
+            "default user_data_dir create failed — falling back to tempdir"
+        );
+        // Last-resort fallback so we never hand Chromium a non-existent path.
+        if let Ok(td) = tempfile::Builder::new().prefix("lad-chrome-").tempdir() {
+            let fallback = td.path().to_path_buf();
+            return (fallback, Some(std::sync::Arc::new(td)));
+        }
+        return (std::env::temp_dir().join("lad-chrome-fallback"), None);
+    }
+    set_dir_mode_700(&pb);
+    tracing::info!(path = %pb.display(), "user_data_dir: persistent");
+    (pb, None)
+}
+
+/// Return the platform cache directory without an external crate.
+fn default_cache_dir() -> std::path::PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+        && !xdg.is_empty()
+    {
+        return std::path::PathBuf::from(xdg);
+    }
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    #[cfg(target_os = "macos")]
+    {
+        home.join("Library").join("Caches")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        home.join(".cache")
+    }
+}
+
+/// Best-effort `chmod 0700` on the user-data dir. No-op on non-Unix.
+fn set_dir_mode_700(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let mut perm = metadata.permissions();
+            perm.set_mode(0o700);
+            let _ = std::fs::set_permissions(path, perm);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
 }
 
 /// SS-7: Tests extracted to `tests.rs` to keep mod.rs lean (~740 LOC -> ~740 LOC of tests).
