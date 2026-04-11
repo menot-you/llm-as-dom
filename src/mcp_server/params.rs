@@ -106,6 +106,17 @@ pub(crate) struct SnapshotParams {
     /// When toggled, restarts the browser engine with the new mode.
     #[serde(default)]
     pub visible: bool,
+    /// Hard timeout for the whole snapshot call in milliseconds.
+    /// Default: 20000 (20s). Covers engine launch + navigation + content
+    /// stabilization. Returns a timeout error instead of hanging if the
+    /// target site never stabilizes.
+    #[serde(default = "default_snapshot_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+/// Default snapshot hard timeout: 20 seconds.
+pub(crate) fn default_snapshot_timeout_ms() -> u64 {
+    20_000
 }
 
 /// Parameters for the `lad_click` tool.

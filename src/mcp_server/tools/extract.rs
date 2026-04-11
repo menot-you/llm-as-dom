@@ -122,29 +122,44 @@ impl LadServer {
         params: Parameters<SnapshotParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
+        let deadline = std::time::Duration::from_millis(p.timeout_ms);
 
-        // Ensure engine matches requested visibility before navigating.
-        self.ensure_engine_visible(p.visible)
-            .await
-            .map_err(mcp_err)?;
+        // Wrap the entire snapshot pipeline in a hard timeout so a hung
+        // browser launch or a site that never stabilizes can't block the
+        // MCP session indefinitely. Returns a timeout error to the caller.
+        let work = async {
+            self.ensure_engine_visible(p.visible)
+                .await
+                .map_err(mcp_err)?;
 
-        if let Some(ref url) = p.url {
-            tracing::info!(url = %url, "lad_snapshot (with url)");
-            let view = self.navigate_or_reuse(url).await?;
-            Ok(CallToolResult::success(vec![Content::text(
-                view.to_prompt(),
-            )]))
-        } else {
-            tracing::info!("lad_snapshot (current page)");
-            let view = self.refresh_active_view().await.map_err(|_| {
-                rmcp::ErrorData::invalid_params(
-                    "no active page — provide a URL or call lad_browse first".to_string(),
-                    None,
-                )
-            })?;
-            Ok(CallToolResult::success(vec![Content::text(
-                view.to_prompt(),
-            )]))
+            if let Some(ref url) = p.url {
+                tracing::info!(url = %url, "lad_snapshot (with url)");
+                let view = self.navigate_or_reuse(url).await?;
+                Ok::<CallToolResult, rmcp::ErrorData>(CallToolResult::success(vec![Content::text(
+                    view.to_prompt(),
+                )]))
+            } else {
+                tracing::info!("lad_snapshot (current page)");
+                let view = self.refresh_active_view().await.map_err(|_| {
+                    rmcp::ErrorData::invalid_params(
+                        "no active page — provide a URL or call lad_browse first".to_string(),
+                        None,
+                    )
+                })?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    view.to_prompt(),
+                )]))
+            }
+        };
+
+        match tokio::time::timeout(deadline, work).await {
+            Ok(result) => result,
+            Err(_) => Err(mcp_err(format!(
+                "lad_snapshot timed out after {}ms — browser launch or page \
+                 stabilization exceeded the deadline. Retry with a longer \
+                 timeout_ms, or check browser engine state.",
+                p.timeout_ms
+            ))),
         }
     }
 
