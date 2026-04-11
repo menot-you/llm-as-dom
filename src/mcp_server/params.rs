@@ -124,10 +124,22 @@ pub(crate) fn default_snapshot_timeout_ms() -> u64 {
 }
 
 /// Parameters for the `lad_click` tool.
+///
+/// Specify EITHER `element` (fast numeric ID from `lad_snapshot`) OR
+/// `target` (semantic selector — role/text/label/testid — that survives
+/// rerenders and skips the snapshot roundtrip). One is required.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct ClickParams {
-    /// Element ID from snapshot.
-    pub element: u32,
+    /// Element ID from a prior `lad_snapshot`. Fast, stable within a
+    /// single snapshot cycle but stale after DOM rerenders.
+    #[serde(default)]
+    pub element: Option<u32>,
+    /// Semantic target spec (role, text, label, testid, ...). Resolved
+    /// fresh on every call — survives rerenders. Use when you don't
+    /// want a snapshot roundtrip or when the page mutates between
+    /// snapshot and click.
+    #[serde(default)]
+    pub target: Option<llm_as_dom::target::TargetSpec>,
     /// If true, wait for the page to navigate after clicking before taking a new snapshot. Useful for links and submit buttons.
     #[serde(default)]
     pub wait_for_navigation: bool,
@@ -136,9 +148,14 @@ pub(crate) struct ClickParams {
 /// Parameters for the `lad_type` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct TypeParams {
-    /// Element ID from snapshot.
-    pub element: u32,
-    /// Text to type into the element.
+    /// Element ID from `lad_snapshot`. Mutually exclusive with `target`.
+    #[serde(default)]
+    pub element: Option<u32>,
+    /// Semantic target spec. Mutually exclusive with `element`.
+    #[serde(default)]
+    pub target: Option<llm_as_dom::target::TargetSpec>,
+    /// Text to type into the element. Handles multiline via
+    /// `insertText`+`insertLineBreak` on Draft.js/Lexical/ProseMirror.
     pub text: String,
     /// If true, press Enter after typing (saves a separate `lad_press_key` call).
     #[serde(default)]
@@ -148,8 +165,12 @@ pub(crate) struct TypeParams {
 /// Parameters for the `lad_select` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct SelectParams {
-    /// Element ID from snapshot.
-    pub element: u32,
+    /// Element ID from `lad_snapshot`. Mutually exclusive with `target`.
+    #[serde(default)]
+    pub element: Option<u32>,
+    /// Semantic target spec. Mutually exclusive with `element`.
+    #[serde(default)]
+    pub target: Option<llm_as_dom::target::TargetSpec>,
     /// Value to select.
     pub value: String,
     /// If true, wait for the page to navigate after selecting before taking a new snapshot. Useful for dropdowns that auto-submit.
@@ -218,8 +239,12 @@ pub(crate) struct NetworkParams {
 /// Parameters for the `lad_hover` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct HoverParams {
-    /// Element ID from a prior lad_snapshot.
-    pub element: u32,
+    /// Element ID from `lad_snapshot`. Mutually exclusive with `target`.
+    #[serde(default)]
+    pub element: Option<u32>,
+    /// Semantic target spec. Mutually exclusive with `element`.
+    #[serde(default)]
+    pub target: Option<llm_as_dom::target::TargetSpec>,
 }
 
 /// Parameters for the `lad_dialog` tool.
@@ -282,6 +307,10 @@ pub(crate) struct UploadParams {
 /// Parameters for the `lad_clear` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct ClearParams {
-    /// Element ID from a prior lad_snapshot.
-    pub element: u32,
+    /// Element ID from `lad_snapshot`. Mutually exclusive with `target`.
+    #[serde(default)]
+    pub element: Option<u32>,
+    /// Semantic target spec. Mutually exclusive with `element`.
+    #[serde(default)]
+    pub target: Option<llm_as_dom::target::TargetSpec>,
 }

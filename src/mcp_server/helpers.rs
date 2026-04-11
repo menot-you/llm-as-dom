@@ -128,6 +128,26 @@ pub(crate) fn no_active_page() -> rmcp::ErrorData {
     )
 }
 
+/// Build a JS IIFE that locates an element and runs `body` with `el`
+/// bound to the match. Accepts EITHER a numeric `data-lad-id` (fast
+/// path, stable between snapshot and interaction) OR a semantic
+/// `TargetSpec` (slow path but eliminates the snapshot roundtrip and
+/// survives rerenders). At least one must be `Some`.
+pub(crate) fn build_element_js_or_target(
+    element_id: Option<u32>,
+    target: Option<&llm_as_dom::target::TargetSpec>,
+    body: &str,
+) -> Result<String, rmcp::ErrorData> {
+    match (element_id, target) {
+        (Some(id), _) => Ok(build_element_js(id, body)),
+        (None, Some(spec)) if spec.is_populated() => Ok(llm_as_dom::target::build_target_js(spec, body)),
+        _ => Err(rmcp::ErrorData::invalid_params(
+            "must provide either `element` (numeric ID from lad_snapshot) or `target` (semantic selector: role/text/label/testid)".to_string(),
+            None,
+        )),
+    }
+}
+
 /// Check JS eval result for `{ error: "..." }` pattern and surface it.
 pub(crate) fn check_js_result(value: &serde_json::Value) -> Result<(), rmcp::ErrorData> {
     if let Some(s) = value.as_str()
