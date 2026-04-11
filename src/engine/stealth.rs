@@ -273,18 +273,39 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
     nativeMap.set(proxyToString, nativeFunctionToString);
   }} catch (e) {{}}
 
-  // 1. navigator.webdriver = false (NOT undefined, NOT deleted).
-  //    Creepjs's webDriverIsOn check is a double-bind trap:
-  //      webDriverIsOn = (CSS.supports('border-end-end-radius: initial')
-  //                        && navigator.webdriver === undefined)
-  //                      || !!navigator.webdriver
-  //                      || !!lieProps['Navigator.webdriver']
-  //    Chrome supports the CSS prop, so if webdriver is undefined we fail.
-  //    Only setting it to `false` (matching real user Chrome) passes.
+  // 1. navigator.webdriver = false, installed as a getter that MATCHES
+  //    native Chrome's interface-check semantics. Creepjs's lies module
+  //    runs an exhaustive battery on every `get`ter it finds:
+  //      - Function.prototype.toString.call(getter) must match one of
+  //        ['function webdriver() {{ [native code] }}',
+  //         'function get webdriver() {{ [native code] }}']
+  //      - new apiFunction()        must throw TypeError
+  //      - apiFunction.call(proto)  must throw TypeError
+  //      - apiFunction.apply(proto) must throw TypeError
+  //      - class Fake extends apiFunction {{}} must throw
+  //      - 'prototype' in apiFunction must be false
+  //      - Object.keys(getOwnPropertyDescriptors(fn)) must == 'length,name'
+  //    Any single failure populates lieProps['Navigator.webdriver'] which
+  //    flips webDriverIsOn to true even when the getter returns false.
   try {{
+    // Build a method-shorthand getter (no .prototype own property). The
+    // interface check throws TypeError unless `this` is a Navigator
+    // instance — matching how native Chrome getters reject .call(proto).
+    const wrapper = {{
+      get webdriver() {{
+        if (!(this instanceof Navigator)) {{
+          throw new TypeError("Illegal invocation");
+        }}
+        return false;
+      }},
+    }};
+    const fakeGetter = Object.getOwnPropertyDescriptor(wrapper, 'webdriver').get;
+    // Mark so Function.prototype.toString.call returns native-form with
+    // the 'get webdriver' name that Creepjs's whitelist accepts.
+    if (window.__lad_mark_native) window.__lad_mark_native(fakeGetter, 'get webdriver');
     Object.defineProperty(Navigator.prototype, 'webdriver', {{
-      get: () => false,
-      set: () => {{}},
+      get: fakeGetter,
+      set: undefined,
       enumerable: true,
       configurable: true,
     }});
