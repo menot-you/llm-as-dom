@@ -196,16 +196,41 @@ impl LadServer {
                      sel.removeAllRanges();\n\
                      sel.addRange(range);\n\
                  }} catch (_) {{}}\n\
-                 // execCommand fires beforeinput + input with the native\n\
-                 // InputEvent that React/Draft.js/Lexical/ProseMirror rely on.\n\
-                 let ok = false;\n\
-                 try {{ ok = document.execCommand('insertText', false, '{escaped}'); }} catch (_) {{ ok = false; }}\n\
-                 if (!ok) {{\n\
-                     // Fallback: directly set textContent + fire input event.\n\
-                     el.textContent = '{escaped}';\n\
+                 // DX-03 FIX: Split on \\n and alternate insertText +\n\
+                 // insertLineBreak. execCommand('insertText') is a PLAIN\n\
+                 // text insert that does NOT honor embedded newlines in\n\
+                 // rich-text editors (Draft.js/Lexical/ProseMirror silently\n\
+                 // drop lines after the first \\n). We iterate line by line\n\
+                 // so every newline becomes a proper line-break Draft block.\n\
+                 const fullText = '{escaped}';\n\
+                 const lines = fullText.split('\\n');\n\
+                 let anyOk = true;\n\
+                 for (let i = 0; i < lines.length; i++) {{\n\
+                     if (lines[i].length > 0) {{\n\
+                         try {{\n\
+                             if (!document.execCommand('insertText', false, lines[i])) {{\n\
+                                 anyOk = false;\n\
+                             }}\n\
+                         }} catch (_) {{ anyOk = false; }}\n\
+                     }}\n\
+                     if (i < lines.length - 1) {{\n\
+                         // Prefer insertLineBreak; fall back to insertParagraph\n\
+                         // (Draft.js treats these as different block types).\n\
+                         let lb = false;\n\
+                         try {{ lb = document.execCommand('insertLineBreak'); }} catch (_) {{}}\n\
+                         if (!lb) {{\n\
+                             try {{ document.execCommand('insertParagraph'); }} catch (_) {{}}\n\
+                         }}\n\
+                     }}\n\
+                 }}\n\
+                 if (!anyOk) {{\n\
+                     // Last-resort fallback: set textContent directly and\n\
+                     // fire an input event. Breaks React controlled state but\n\
+                     // at least captures the text.\n\
+                     el.textContent = fullText;\n\
                      el.dispatchEvent(new InputEvent('input', {{\n\
                          bubbles: true, cancelable: true,\n\
-                         data: '{escaped}', inputType: 'insertText'\n\
+                         data: fullText, inputType: 'insertText'\n\
                      }}));\n\
                  }}\n\
              }} else {{\n\
