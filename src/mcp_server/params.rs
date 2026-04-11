@@ -116,8 +116,22 @@ pub(crate) struct AuditParams {
 /// Parameters for the `lad_session` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct SessionParams {
-    /// Action: "get" to view current session state, "clear" to reset.
+    /// Action: "get" to view current session state, "clear" to reset,
+    /// "attach_cdp" to connect to a running Chrome via CDP (Wave 3),
+    /// "detach" to release an attached CDP engine without killing the
+    /// user's Chrome (Wave 3).
     pub action: String,
+    /// Wave 3 — CDP endpoint URL. Required when `action=attach_cdp`.
+    /// Accepts either a raw `ws://` URL or an `http://` debug endpoint
+    /// (LAD will auto-resolve via `/json/version`). MUST be loopback
+    /// (`localhost`, `127.0.0.1`, `::1`) — any other host is rejected.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    /// Wave 3 — when `action=attach_cdp`, enumerate existing tabs on
+    /// the running Chrome and insert them into LAD's tab map. Default
+    /// `true`. Set to `false` to start with a clean slate.
+    #[serde(default)]
+    pub adopt_existing: Option<bool>,
 }
 
 /// Parameters for the `lad_watch` tool.

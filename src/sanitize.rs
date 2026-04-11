@@ -370,6 +370,71 @@ static RE_CREDENTIALS_GOAL: std::sync::LazyLock<regex::Regex> = std::sync::LazyL
         .expect("valid regex")
 });
 
+/// Wave 3: inverse-SSRF check for CDP attach URLs.
+///
+/// Returns `true` ONLY when the URL points to a loopback host
+/// (`localhost`, `127.0.0.1`, `::1`). Rejects anything else — including
+/// RFC1918 private ranges (`192.168.*`, `10.*`, `172.16-31.*`),
+/// link-local (`169.254.*`), and public hosts. The caller is expected
+/// to pass a resolved CDP endpoint (either an `http://` debug endpoint
+/// or a `ws://` WebSocket URL) to this function before calling
+/// `chromiumoxide::Browser::connect`.
+///
+/// The contract is the *inverse* of [`is_safe_url`]: SSRF protection
+/// normally blocks loopback as the target and allows public hosts,
+/// but here we want to connect to the user's LOCAL Chrome ONLY. Any
+/// remote host on this code path would let a malicious MCP client
+/// point LAD at an attacker-controlled CDP endpoint — a full RCE
+/// through the debug protocol. Hence loopback-only.
+///
+/// Unparseable URLs, URLs without a host component, and malformed
+/// schemes all return `false` (deny by default).
+pub fn is_loopback_only(url: &str) -> bool {
+    // Strip control chars defensively — matches `is_safe_url`'s approach.
+    let cleaned: String = url.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let parsed = match url::Url::parse(trimmed) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+
+    // Scheme must be one of the four we care about: ws/wss/http/https.
+    match parsed.scheme() {
+        "ws" | "wss" | "http" | "https" => {}
+        _ => return false,
+    }
+
+    let host = match parsed.host_str() {
+        Some(h) => h,
+        None => return false,
+    };
+    // `url` keeps IPv6 brackets in `host_str` — strip them for the
+    // literal equality checks below.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+
+    // Explicit loopback hostnames — the ONLY values we accept.
+    if bare.eq_ignore_ascii_case("localhost") || bare == "127.0.0.1" || bare == "::1" {
+        return true;
+    }
+
+    // Any parsed IP that is loopback in IPv4 or IPv6 counts (handles
+    // weird forms like `127.0.0.2`, `0:0:0:0:0:0:0:1`, etc.). Private
+    // and link-local IPs explicitly DO NOT count — this is stricter
+    // than `is_private_host`.
+    if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        };
+    }
+
+    false
+}
+
 /// FIX-2: Redact `Action::Type` values in serialized output.
 ///
 /// When rendering pilot actions for the MCP response, masks the typed
@@ -1028,5 +1093,125 @@ mod tests {
                 prop_assert!(redacted.contains(&safe_val), "safe value lost: {redacted}");
             }
         }
+    }
+
+    // ── is_loopback_only (Wave 3 — inverse SSRF for CDP attach) ──
+
+    #[test]
+    fn loopback_allows_ws_localhost() {
+        assert!(is_loopback_only("ws://localhost:9222/devtools/browser/abc"));
+    }
+
+    #[test]
+    fn loopback_allows_ws_127_0_0_1() {
+        assert!(is_loopback_only("ws://127.0.0.1:9222/devtools/browser/abc"));
+    }
+
+    #[test]
+    fn loopback_allows_ws_ipv6_bracketed() {
+        assert!(is_loopback_only("ws://[::1]:9222/devtools/browser/abc"));
+    }
+
+    #[test]
+    fn loopback_allows_wss_localhost() {
+        assert!(is_loopback_only(
+            "wss://localhost:9222/devtools/browser/abc"
+        ));
+    }
+
+    #[test]
+    fn loopback_allows_http_localhost() {
+        assert!(is_loopback_only("http://localhost:9222"));
+    }
+
+    #[test]
+    fn loopback_allows_http_localhost_with_path() {
+        assert!(is_loopback_only("http://localhost:9222/json/version"));
+    }
+
+    #[test]
+    fn loopback_allows_http_127_0_0_1() {
+        assert!(is_loopback_only("http://127.0.0.1:9222"));
+    }
+
+    #[test]
+    fn loopback_allows_https_localhost() {
+        assert!(is_loopback_only("https://localhost:9222"));
+    }
+
+    #[test]
+    fn loopback_allows_localhost_case_insensitive() {
+        assert!(is_loopback_only("http://LocalHost:9222"));
+    }
+
+    #[test]
+    fn loopback_rejects_private_192() {
+        assert!(!is_loopback_only(
+            "ws://192.168.1.1:9222/devtools/browser/x"
+        ));
+    }
+
+    #[test]
+    fn loopback_rejects_private_10() {
+        assert!(!is_loopback_only("http://10.0.0.1:9222"));
+    }
+
+    #[test]
+    fn loopback_rejects_private_172() {
+        assert!(!is_loopback_only("http://172.16.0.1:9222"));
+    }
+
+    #[test]
+    fn loopback_rejects_link_local() {
+        assert!(!is_loopback_only("http://169.254.1.1:9222"));
+    }
+
+    #[test]
+    fn loopback_rejects_public_host() {
+        assert!(!is_loopback_only("ws://evil.com:9222/devtools/browser/x"));
+    }
+
+    #[test]
+    fn loopback_rejects_dns_rebinding_like_hostnames() {
+        // .localhost TLD, .local TLD etc. — these can resolve anywhere.
+        assert!(!is_loopback_only("http://evil.localhost:9222"));
+        assert!(!is_loopback_only("http://mybox.local:9222"));
+    }
+
+    #[test]
+    fn loopback_rejects_empty_string() {
+        assert!(!is_loopback_only(""));
+    }
+
+    #[test]
+    fn loopback_rejects_whitespace_only() {
+        assert!(!is_loopback_only("   "));
+    }
+
+    #[test]
+    fn loopback_rejects_bare_path() {
+        assert!(!is_loopback_only("/devtools/browser/abc"));
+    }
+
+    #[test]
+    fn loopback_rejects_missing_scheme() {
+        assert!(!is_loopback_only("localhost:9222"));
+    }
+
+    #[test]
+    fn loopback_rejects_wrong_scheme() {
+        assert!(!is_loopback_only("file://localhost/etc/passwd"));
+        assert!(!is_loopback_only("chrome://localhost/"));
+    }
+
+    #[test]
+    fn loopback_rejects_url_without_host() {
+        // `http:` with no authority fails — no host.
+        assert!(!is_loopback_only("http:///abc"));
+    }
+
+    #[test]
+    fn loopback_rejects_garbage() {
+        assert!(!is_loopback_only("not a url at all"));
     }
 }

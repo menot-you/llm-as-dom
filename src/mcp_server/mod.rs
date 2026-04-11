@@ -211,6 +211,14 @@ impl<'a> ActivePageGuard<'a> {
 }
 
 impl LadServer {
+    /// Wave 3: constructor exposed for child-module unit tests (e.g.
+    /// `tools::lifecycle::tests`). Forwards to `new()` — no test-only
+    /// state differs.
+    #[cfg(test)]
+    pub(crate) fn new_for_test() -> Self {
+        Self::new()
+    }
+
     /// Create a new server reading config from environment variables.
     fn new() -> Self {
         Self {
