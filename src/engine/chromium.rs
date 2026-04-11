@@ -153,7 +153,20 @@ impl BrowserEngine for ChromiumEngine {
             .await
             .map_err(cdp_err)?;
 
-        super::stealth::apply_stealth(&page).await?;
+        // LAD_SKIP_JS_STEALTH=1 lets us A/B test the CloakBrowser C++ patches
+        // WITHOUT our JS stealth on top. Our JS layer installs a
+        // Function.prototype.toString proxy that Creepjs flags as
+        // hasToStringProxy, which then cascades via detectProxies mode to
+        // poison the Navigator.webdriver lies check — even though
+        // CloakBrowser's native C++ patches already fix webdriver.
+        let skip_stealth = std::env::var("LAD_SKIP_JS_STEALTH")
+            .ok()
+            .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
+        if !skip_stealth {
+            super::stealth::apply_stealth(&page).await?;
+        } else {
+            tracing::info!("LAD_SKIP_JS_STEALTH=1 — skipping JS stealth layer");
+        }
 
         if !url.is_empty() && url != "about:blank" {
             page.goto(url).await.map_err(cdp_err)?;

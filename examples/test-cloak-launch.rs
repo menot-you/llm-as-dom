@@ -16,8 +16,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("-> path: {:?}", path);
 
     eprintln!("\n== STEP 2: build BrowserConfig with LAD flags ==");
-    let udd = "/tmp/lad-cloak-full-test";
-    std::fs::create_dir_all(udd)?;
+    // Use LAD's real persistent profile to reproduce the hang
+    let udd_path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join("Library/Caches/lad/chrome-profile");
+    std::fs::create_dir_all(&udd_path)?;
+    let udd = udd_path.to_string_lossy().to_string();
+    eprintln!("-> udd: {}", udd);
     let mut builder = chromiumoxide::BrowserConfig::builder()
         .user_data_dir(udd)
         .arg("--no-first-run")
