@@ -111,6 +111,34 @@ lad --url "https://example.com" --extract-only
 lad --url "https://example.com" --engine webkit --extract-only
 ```
 
+### Attach to your real Chrome (Wave 3)
+
+Skip the headless ghost. Point LAD at your actual running Chrome and
+drive it inside your real authenticated session — cookies, logins,
+extensions, VPN, everything. Zero setup beyond a debug flag:
+
+```bash
+# 1. Start Chrome with CDP enabled
+google-chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.cache/lad-chrome"
+
+# 2. From any MCP client, attach:
+#    { "tool": "lad_session",
+#      "arguments": { "action": "attach_cdp",
+#                     "endpoint": "http://localhost:9222" } }
+```
+
+LAD adopts every open tab into its multi-tab map so `lad_tabs_list`,
+`lad_click`, `lad_type`, and every other tool operate on your real
+browser from the first call. Detach anytime with
+`lad_session action=detach` — your Chrome keeps running.
+
+Loopback-only enforcement (`localhost`/`127.0.0.1`/`::1`) is
+mandatory — CDP is a full RCE vector over the wire. See
+[`docs/attach-chrome.md`](docs/attach-chrome.md) for the full
+walkthrough, threat model, and troubleshooting.
+
 ### Why Multi-Engine Matters
 
 1. **Real rendering differences** — Safari handles flexbox, `<dialog>`, scroll, clipboard API differently. Testing only in Chromium misses ~20% of the web.

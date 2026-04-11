@@ -2,6 +2,12 @@
 //!
 //! Wraps `chromiumoxide::Browser` and `chromiumoxide::Page` behind the
 //! `BrowserEngine` / `PageHandle` traits.
+//!
+//! Wave 3: gained [`ChromiumEngine::attach`] — a sibling constructor
+//! that connects to an already-running Chrome/Chromium/Brave/Edge/Opera
+//! via its remote debugging port (CDP). The attach path lives in
+//! [`crate::engine::chromium_attach`] to keep this file under the
+//! 550-LOC clean-code cap.
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -18,12 +24,18 @@ const MAX_SCREENSHOT_BYTES: usize = 5 * 1024 * 1024;
 
 /// Chromium-backed browser engine.
 pub struct ChromiumEngine {
-    browser: Arc<chromiumoxide::Browser>,
-    _handler: tokio::task::JoinHandle<()>,
-    _temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
+    pub(super) browser: Arc<chromiumoxide::Browser>,
+    pub(super) _handler: tokio::task::JoinHandle<()>,
+    pub(super) _temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
     /// CHAOS-04: Set to `false` when the CDP event-stream handler exits,
     /// indicating Chrome has crashed or the WebSocket is dead.
-    alive: Arc<AtomicBool>,
+    pub(super) alive: Arc<AtomicBool>,
+    /// Wave 3: `true` when LAD launched the browser and owns the process,
+    /// `false` when LAD attached to a user-owned Chrome via CDP. Controls
+    /// whether [`ChromiumEngine::close`] is allowed to tear down the
+    /// underlying `chromiumoxide::Browser` (which would kill the user's
+    /// Chrome). Attach mode MUST NOT kill the user's browser on close.
+    pub(super) owned: bool,
 }
 
 impl ChromiumEngine {
@@ -116,28 +128,41 @@ impl ChromiumEngine {
 
         let browser_config = builder.build().map_err(crate::Error::Browser)?;
 
-        let (browser, mut handler) = chromiumoxide::Browser::launch(browser_config)
+        let (browser, handler) = chromiumoxide::Browser::launch(browser_config)
             .await
             .map_err(|e| crate::Error::Browser(format!("{e}")))?;
 
-        let alive = Arc::new(AtomicBool::new(true));
-        let alive_clone = Arc::clone(&alive);
-
-        let handle = tokio::spawn(async move {
-            use futures::StreamExt;
-            while handler.next().await.is_some() {}
-            // CHAOS-04: CDP stream ended — Chrome crashed or WS closed.
-            alive_clone.store(false, Ordering::Relaxed);
-            tracing::error!("chromium CDP event stream ended — browser presumed dead");
-        });
+        let (alive, handle) = spawn_cdp_handler(handler);
 
         Ok(Self {
             browser: Arc::new(browser),
             _handler: handle,
             _temp_dir: config.temp_dir,
             alive,
+            owned: true,
         })
     }
+}
+
+/// Wave 3: spawn the CDP event-stream drainer task shared by both
+/// [`ChromiumEngine::launch`] and [`ChromiumEngine::attach`]. Returns
+/// the liveness `AtomicBool` the engine tracks and the spawned task
+/// handle. The task flips `alive` to `false` when the stream ends
+/// (Chrome crashed, WS closed, user killed the browser) so every
+/// subsequent `eval_js` call can fail fast with a clear error.
+pub(super) fn spawn_cdp_handler<H>(mut handler: H) -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>)
+where
+    H: futures::Stream + Unpin + Send + 'static,
+{
+    let alive = Arc::new(AtomicBool::new(true));
+    let alive_clone = Arc::clone(&alive);
+    let handle = tokio::spawn(async move {
+        use futures::StreamExt;
+        while handler.next().await.is_some() {}
+        alive_clone.store(false, Ordering::Relaxed);
+        tracing::error!("chromium CDP event stream ended — browser presumed dead");
+    });
+    (alive, handle)
 }
 
 #[async_trait]
@@ -187,17 +212,58 @@ impl BrowserEngine for ChromiumEngine {
     }
 
     async fn close(&self) -> Result<(), crate::Error> {
-        // Dropping the browser triggers graceful shutdown.
-        // The handler task will end when the event stream closes.
+        // Wave 3: attach mode (`owned: false`) keeps the user's Chrome
+        // alive. We flip the liveness flag so stale `ChromiumPage`
+        // handles fail fast on the next CDP call, but we do NOT call
+        // `browser.close()` — the Drop on `chromiumoxide::Browser`
+        // created via `connect` will not terminate the underlying
+        // process when the outer `Arc` drops (there's nothing to
+        // terminate; LAD never spawned it).
+        //
+        // Launch mode (`owned: true`) keeps the pre-Wave-3 behaviour:
+        // dropping the browser via `Arc` drop triggers graceful
+        // shutdown of the spawned Chromium. Don't set `alive = false`
+        // here — launch-mode callers may still hold valid `ChromiumPage`
+        // handles until the Arc is actually dropped (this is the case
+        // when `LadServer` replaces the engine Arc shortly after).
+        if !self.owned {
+            self.alive.store(false, Ordering::Relaxed);
+            tracing::info!("attached chromium engine closed — user browser left running");
+        }
         Ok(())
+    }
+
+    async fn adopt_existing_pages(&self) -> Result<Vec<Box<dyn PageHandle>>, crate::Error> {
+        // Wave 3: enumerate every `chromiumoxide::Page` the underlying
+        // browser currently has open and wrap each into a `ChromiumPage`
+        // so LAD's multi-tab map can adopt them. Only attach mode calls
+        // this in practice (launch mode starts with zero pages) but the
+        // implementation is engine-wide so `adopt_existing` can surface
+        // tabs that launch mode inherited from a pre-existing user data
+        // dir as well.
+        let pages = self
+            .browser
+            .pages()
+            .await
+            .map_err(|e| crate::Error::Browser(format!("failed to list pages: {e}")))?;
+        let alive = Arc::clone(&self.alive);
+        Ok(pages
+            .into_iter()
+            .map(|page| {
+                Box::new(ChromiumPage {
+                    page,
+                    alive: Arc::clone(&alive),
+                }) as Box<dyn PageHandle>
+            })
+            .collect())
     }
 }
 
 /// Chromium-backed page handle.
-struct ChromiumPage {
-    page: chromiumoxide::Page,
+pub(super) struct ChromiumPage {
+    pub(super) page: chromiumoxide::Page,
     /// Shared liveness flag — mirrors `ChromiumEngine::alive`.
-    alive: Arc<AtomicBool>,
+    pub(super) alive: Arc<AtomicBool>,
 }
 
 #[async_trait]

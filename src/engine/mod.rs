@@ -2,8 +2,14 @@
 //!
 //! Decouples the pilot, a11y, session, and network modules from any
 //! specific browser engine (Chromium, WebKit, etc.).
+//!
+//! Wave 3: Chromium gained an `attach` constructor that connects to an
+//! already-running browser via CDP (see `chromium_attach`). The trait
+//! gained [`BrowserEngine::adopt_existing_pages`] so attach callers can
+//! surface pre-existing tabs as LAD tabs on the first CDP handshake.
 
 pub mod chromium;
+pub mod chromium_attach;
 pub mod cloak_bootstrap;
 pub mod singleton_lock;
 pub mod stealth;
@@ -63,6 +69,17 @@ pub trait BrowserEngine: Send + Sync {
 
     /// Shut down the browser and release resources.
     async fn close(&self) -> Result<(), crate::Error>;
+
+    /// Wave 3: return any pages that already exist on the browser,
+    /// wrapped as `PageHandle` trait objects. The default implementation
+    /// returns an empty vec for engines that don't support adoption
+    /// (WebKit, future backends). Chromium overrides this to enumerate
+    /// `chromiumoxide::Browser::pages()` — used by the CDP attach path
+    /// (`lad_session attach_cdp`) to surface the user's already-open
+    /// tabs as LAD tabs on the first handshake.
+    async fn adopt_existing_pages(&self) -> Result<Vec<Box<dyn PageHandle>>, crate::Error> {
+        Ok(Vec::new())
+    }
 }
 
 /// A page handle — the single abstraction over browser-specific page types.
