@@ -311,7 +311,7 @@ fn network_params_custom_filter() {
 fn hover_params_parse() {
     let json = r#"{"element":42}"#;
     let p: HoverParams = serde_json::from_str(json).unwrap();
-    assert_eq!(p.element, 42);
+    assert_eq!(p.element, Some(42));
 }
 
 #[test]
@@ -437,7 +437,7 @@ fn snapshot_params_null_url() {
 fn type_params_default_no_enter() {
     let json = r#"{"element":1,"text":"hello"}"#;
     let p: TypeParams = serde_json::from_str(json).unwrap();
-    assert_eq!(p.element, 1);
+    assert_eq!(p.element, Some(1));
     assert_eq!(p.text, "hello");
     assert!(!p.press_enter);
 }
@@ -446,7 +446,7 @@ fn type_params_default_no_enter() {
 fn type_params_with_press_enter() {
     let json = r#"{"element":5,"text":"search query","press_enter":true}"#;
     let p: TypeParams = serde_json::from_str(json).unwrap();
-    assert_eq!(p.element, 5);
+    assert_eq!(p.element, Some(5));
     assert_eq!(p.text, "search query");
     assert!(p.press_enter);
 }
@@ -655,7 +655,7 @@ fn to_prompt_skips_form_index_when_none() {
 fn select_params_with_label() {
     let json = r#"{"element":5,"value":"United States"}"#;
     let p: SelectParams = serde_json::from_str(json).unwrap();
-    assert_eq!(p.element, 5);
+    assert_eq!(p.element, Some(5));
     assert_eq!(p.value, "United States");
     assert!(!p.wait_for_navigation);
 }
@@ -717,7 +717,18 @@ fn wait_params_empty_produces_defaults() {
 fn clear_params_parse() {
     let json = r#"{"element":7}"#;
     let p: ClearParams = serde_json::from_str(json).unwrap();
-    assert_eq!(p.element, 7);
+    assert_eq!(p.element, Some(7));
+    assert!(p.target.is_none());
+}
+
+#[test]
+fn clear_params_parse_with_target() {
+    let json = r#"{"target":{"role":"textbox","label":"Email"}}"#;
+    let p: ClearParams = serde_json::from_str(json).unwrap();
+    assert!(p.element.is_none());
+    let t = p.target.unwrap();
+    assert_eq!(t.role.as_deref(), Some("textbox"));
+    assert_eq!(t.label.as_deref(), Some("Email"));
 }
 
 // ── DX-W3-5: element count summary in to_prompt ──────────────

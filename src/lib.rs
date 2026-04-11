@@ -23,6 +23,7 @@ pub mod sanitize;
 pub mod selector;
 pub mod semantic;
 pub mod session;
+pub mod target;
 pub mod watch;
 
 pub use error::Error;

@@ -24,7 +24,7 @@ impl LadServer {
         params: Parameters<ClearParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(element = p.element, "lad_clear");
+        tracing::info!(element = ?p.element, target = ?p.target, "lad_clear");
 
         let body = "\
             el.focus();\n\
@@ -32,7 +32,7 @@ impl LadServer {
             document.execCommand('delete');\n\
             el.dispatchEvent(new Event('input', { bubbles: true }));\n\
             el.dispatchEvent(new Event('change', { bubbles: true }));";
-        let js = build_element_js(p.element, body);
+        let js = crate::helpers::build_element_js_or_target(p.element, p.target.as_ref(), body)?;
         self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
     }
 
