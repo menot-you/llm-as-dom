@@ -78,7 +78,28 @@ pub fn mask_sensitive_value(
 }
 
 /// Schemes that must never be navigated to.
-const BLOCKED_SCHEMES: &[&str] = &["file:", "javascript:", "data:", "blob:", "vbscript:"];
+///
+/// Wave 1: Extended to cover browser-internal URLs (chrome:, opera:, about:,
+/// devtools:, view-source:, edge:, brave:) and raw WebSocket protocols
+/// (ws:, wss:). These paths let an agent reach settings pages, extensions,
+/// internal devtools, and raw sockets that should never be driven by MCP.
+const BLOCKED_SCHEMES: &[&str] = &[
+    "file:",
+    "javascript:",
+    "data:",
+    "blob:",
+    "vbscript:",
+    "chrome:",
+    "chrome-extension:",
+    "opera:",
+    "about:",
+    "devtools:",
+    "view-source:",
+    "edge:",
+    "brave:",
+    "ws:",
+    "wss:",
+];
 
 /// Check whether a URL is safe for automated navigation.
 ///
@@ -528,6 +549,62 @@ mod tests {
     #[test]
     fn blocks_blob_scheme() {
         assert!(!is_safe_url("blob:http://example.com/abc"));
+    }
+
+    // ── Wave 1: extended BLOCKED_SCHEMES — browser-internal + ws ──
+
+    #[test]
+    fn blocks_chrome_scheme() {
+        assert!(!is_safe_url("chrome://settings"));
+        assert!(!is_safe_url("chrome://flags"));
+    }
+
+    #[test]
+    fn blocks_chrome_extension_scheme() {
+        assert!(!is_safe_url(
+            "chrome-extension://abcdefghijklmnopqrstuvwxyz/index.html"
+        ));
+    }
+
+    #[test]
+    fn blocks_opera_scheme() {
+        assert!(!is_safe_url("opera://settings"));
+    }
+
+    #[test]
+    fn blocks_about_blank() {
+        assert!(!is_safe_url("about:blank"));
+        assert!(!is_safe_url("about:config"));
+    }
+
+    #[test]
+    fn blocks_devtools() {
+        assert!(!is_safe_url("devtools://devtools/bundled/inspector.html"));
+    }
+
+    #[test]
+    fn blocks_view_source() {
+        assert!(!is_safe_url("view-source:https://example.com"));
+    }
+
+    #[test]
+    fn blocks_edge_scheme() {
+        assert!(!is_safe_url("edge://settings"));
+    }
+
+    #[test]
+    fn blocks_brave_scheme() {
+        assert!(!is_safe_url("brave://wallet"));
+    }
+
+    #[test]
+    fn blocks_ws_scheme() {
+        assert!(!is_safe_url("ws://example.com:9000/socket"));
+    }
+
+    #[test]
+    fn blocks_wss_scheme() {
+        assert!(!is_safe_url("wss://example.com/socket"));
     }
 
     #[test]

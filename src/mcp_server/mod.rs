@@ -484,13 +484,23 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Extract structured info from a page: interactive elements, text, page type. Never returns raw HTML. URL is optional — omit to extract from current page without navigating (preserves session state)."
+        description = "Extract structured info from a page: interactive elements, text, page type. Never returns raw HTML. URL is optional — omit to extract from current page without navigating (preserves session state). Wave 1: pass paginate_index+page_size to slice elements and include_hidden=true to bypass the default hidden-element filter."
     )]
     async fn lad_extract(
         &self,
         params: Parameters<ExtractParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.tool_lad_extract(params).await
+    }
+
+    #[tool(
+        description = "Run a jq query against the current page's semantic view JSON. Use this to extract specific fields (e.g. '.elements | map(select(.role == \"button\")) | .[].label') instead of pulling the whole snapshot. Saves tokens."
+    )]
+    async fn lad_jq(
+        &self,
+        params: Parameters<JqParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_jq(params).await
     }
 
     #[tool(
@@ -544,7 +554,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Get a structured semantic snapshot of the current page. Returns elements with IDs that can be used with lad_click/lad_type. URL is optional — omit it to re-read the current page without navigating (avoids accidentally undoing clicks). Like Playwright's browser_snapshot but 10-60x fewer tokens."
+        description = "Get a structured semantic snapshot of the current page. Returns elements with IDs that can be used with lad_click/lad_type. URL is optional — omit it to re-read the current page without navigating (avoids accidentally undoing clicks). Like Playwright's browser_snapshot but 10-60x fewer tokens. Wave 1: pass paginate_index+page_size to get a slice, and include_hidden=true to show DOM nodes hidden via display:none/aria-hidden (filtered by default to block injected prompts)."
     )]
     async fn lad_snapshot(
         &self,

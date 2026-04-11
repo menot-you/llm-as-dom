@@ -31,6 +31,7 @@ fn input_element(
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -51,6 +52,7 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -71,6 +73,7 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 

@@ -36,6 +36,7 @@ fn make_element(kind: semantic::ElementKind, label: &str) -> semantic::Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 

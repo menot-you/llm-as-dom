@@ -512,6 +512,7 @@ mod tests {
             checked: None,
             options: None,
             frame_index: None,
+            is_visible: None,
         });
         let result = try_detect_done(&view, "login as user pw pass").unwrap();
         if let Some(Action::Done { result: val, .. }) = &result.action {
@@ -595,6 +596,7 @@ mod tests {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             });
             v
         };

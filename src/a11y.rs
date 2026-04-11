@@ -279,6 +279,31 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                         editorType = 'contenteditable';
                     }
 
+                    // Wave 1 — strict visibility flag. Closes a class of
+                    // prompt injection (Brave disclosure, Oct 2025) where
+                    // adversarial pages smuggle instructions into nodes
+                    // marked aria-hidden or [hidden] that slip past the
+                    // existing isVisible() filter above. Defense in depth:
+                    // isVisible() drops most hidden nodes; this flag lets
+                    // Rust drop the rest by default.
+                    let isVisibleStrict = true;
+                    try {
+                        const cs2 = window.getComputedStyle(el);
+                        const rect2 = el.getBoundingClientRect();
+                        isVisibleStrict =
+                            cs2.display !== 'none' &&
+                            cs2.visibility !== 'hidden' &&
+                            parseFloat(cs2.opacity) > 0 &&
+                            !el.hidden &&
+                            el.getAttribute('aria-hidden') !== 'true' &&
+                            rect2.width > 0 &&
+                            rect2.height > 0 &&
+                            rect2.bottom > 0 &&
+                            rect2.right > 0;
+                    } catch (_) {
+                        isVisibleStrict = true;
+                    }
+
                     rawElements.push({
                         el, kind, label: label.substring(0, 80),
                         name: el.getAttribute('name') || null,
@@ -293,6 +318,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                         frame_index: frameIdx,
                         checked: checked,
                         options: options,
+                        is_visible: isVisibleStrict,
                         score,
                         isActionable: kind !== 'link' && kind !== 'other',
                     });
@@ -357,6 +383,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                     frame_index: raw.frame_index,
                     checked: raw.checked,
                     options: raw.options,
+                    is_visible: raw.is_visible,
                 });
                 id++;
             }
@@ -448,6 +475,9 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
                 checked: e.checked,
                 options: e.options,
                 frame_index: e.frame_index,
+                // Wave 1: Map the JS-emitted `is_visible` flag through. `None`
+                // means the extractor didn't compute one → treat as visible.
+                is_visible: e.is_visible,
             }
         })
         .collect();
@@ -562,6 +592,12 @@ struct JsElement {
     /// Visible option labels for `<select>` elements (top 10).
     #[serde(default)]
     options: Option<Vec<String>>,
+    /// Wave 1: visibility flag emitted by the JS accessibility walker.
+    /// `Some(false)` for elements flagged hidden (aria-hidden, display:none,
+    /// opacity:0, zero bounds). `None` when the extractor didn't compute one
+    /// (legacy fixtures / old JS) — treated as visible by the Rust side.
+    #[serde(default)]
+    is_visible: Option<bool>,
 }
 
 /// Count elements whose kind is `button | input | textarea | select` — the
@@ -966,6 +1002,7 @@ mod tests {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             }],
             forms: vec![],
             visible_text: String::new(),
@@ -1162,6 +1199,7 @@ mod tests {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             }],
             forms: vec![],
             visible_text: "Some text".into(),

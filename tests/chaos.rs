@@ -72,6 +72,7 @@ fn inp(id: u32, label: &str, itype: &str, name: Option<&str>, form: Option<u32>)
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -92,6 +93,7 @@ fn btn(id: u32, label: &str, form: Option<u32>) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -112,6 +114,7 @@ fn link(id: u32, label: &str, href: &str) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -132,6 +135,7 @@ fn disabled_btn(id: u32, label: &str, form: Option<u32>) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -152,6 +156,7 @@ fn select_el(id: u32, label: &str, name: &str, form: Option<u32>) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -172,6 +177,7 @@ fn checkbox(id: u32, label: &str, name: &str, form: Option<u32>) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -797,6 +803,7 @@ fn semantic_view_optional_fields_skip() {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     };
     let v = view(vec![el], "content page");
     let json = serde_json::to_string(&v).unwrap();

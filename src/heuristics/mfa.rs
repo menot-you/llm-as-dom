@@ -104,6 +104,7 @@ mod tests {
             checked: None,
             options: None,
             frame_index: None,
+            is_visible: None,
         }
     }
 
