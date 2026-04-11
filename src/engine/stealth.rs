@@ -216,34 +216,56 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
   window.__lad_stealth_applied = true;
 
   // 0. Function.prototype.toString patch — MUST run before any other hook.
-  //    Creepjs explicitly tests for "prototype lies" by calling
-  //    `Function.prototype.toString.call(patchedFunction)`. If the result
-  //    is our JS source instead of `function getParameter() {{ [native code] }}`
-  //    the fingerprinter flags it. We track every native function we replace
-  //    and map its patched version back to the native toString output.
-  //
-  //    The classic bypass: wrap Function.prototype.toString itself so it
-  //    recognises our patched functions via a WeakMap and returns the
-  //    native-form string for them.
+  //    Creepjs's `hasToStringProxy` check calls the native method on a
+  //    non-Function (e.g. `Function.prototype.toString.call({{}})`) and
+  //    expects a TypeError. Naive proxies that always return a string fail
+  //    this check. Our replacement MUST throw for non-Function receivers
+  //    to match native behavior exactly.
   try {{
     const nativeToString = Function.prototype.toString;
+    const nativeFunctionToString = nativeToString.call(nativeToString);
     const nativeMap = new WeakMap();
-    // Helper the rest of this script uses to mark a replacement fn as
-    // "this should look native". Called as `markNative(newFn, originalName)`.
-    window.__lad_mark_native = (fn, name) => {{
-      try {{
-        nativeMap.set(fn, `function ${{name}}() {{ [native code] }}`);
-      }} catch (e) {{}}
-      return fn;
-    }};
-    Function.prototype.toString = function toString() {{
+    // Marker helper used by the rest of this script to tag replacement
+    // functions with their native-form string. Non-enumerable so it
+    // doesn't show up in `Object.keys(window)` enumeration.
+    Object.defineProperty(window, '__lad_mark_native', {{
+      value: (fn, name) => {{
+        try {{
+          nativeMap.set(fn, `function ${{name}}() {{ [native code] }}`);
+        }} catch (e) {{}}
+        return fn;
+      }},
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    }});
+    const proxyToString = function toString() {{
+      // MATCH NATIVE: throw TypeError if `this` is not a Function.
+      // nativeToString.call(this) throws for us when this is non-callable.
+      if (typeof this !== 'function') {{
+        return nativeToString.call(this); // delegates → native TypeError
+      }}
       try {{
         if (nativeMap.has(this)) return nativeMap.get(this);
       }} catch (e) {{}}
       return nativeToString.call(this);
     }};
-    // Recursively: toString itself must look native.
-    nativeMap.set(Function.prototype.toString, 'function toString() {{ [native code] }}');
+    // Copy name/length/prototype to match the native function's shape.
+    // Name: native is 'toString'. Our function declaration also names it
+    // 'toString' so .name === 'toString' already.
+    // Length: native toString.length === 0 (takes no args).
+    Object.defineProperty(proxyToString, 'length', {{ value: 0, configurable: true }});
+    // Install via defineProperty with the SAME descriptor flags as native:
+    // writable: true, enumerable: false, configurable: true.
+    Object.defineProperty(Function.prototype, 'toString', {{
+      value: proxyToString,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    }});
+    // Recursively mark toString itself so Function.prototype.toString.toString()
+    // returns the native-form string, not our JS source.
+    nativeMap.set(proxyToString, nativeFunctionToString);
   }} catch (e) {{}}
 
   // 1. navigator.webdriver → DELETED. Real Chrome doesn't have the property
@@ -712,29 +734,34 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
       return 'data:application/javascript;base64,' + btoa(body);
     }};
 
-    if (typeof Worker !== 'undefined') {{
-      const OrigWorker = Worker;
-      window.Worker = function(scriptUrl, options) {{
-        try {{
-          const absUrl = new URL(scriptUrl, document.baseURI).toString();
-          return new OrigWorker(wrapSource(absUrl), options);
-        }} catch (e) {{
-          return new OrigWorker(scriptUrl, options);
-        }}
+    // Use Proxy with a `construct` trap so the replacement is actually
+    // callable via `new Worker(...)`. Previous impl using a plain function
+    // constructor could fail in strict mode for some callers. Proxy
+    // preserves the original class identity for `instanceof` checks.
+    const makeWorkerProxy = (OrigClass) => {{
+      const handler = {{
+        construct(target, args) {{
+          try {{
+            const scriptUrl = args[0];
+            const options = args[1];
+            if (typeof scriptUrl === 'string' && !scriptUrl.startsWith('data:') && !scriptUrl.startsWith('blob:')) {{
+              const absUrl = new URL(scriptUrl, document.baseURI).toString();
+              return new target(wrapSource(absUrl), options);
+            }}
+            return new target(...args);
+          }} catch (e) {{
+            return new target(...args);
+          }}
+        }},
       }};
-      window.Worker.prototype = OrigWorker.prototype;
+      return new Proxy(OrigClass, handler);
+    }};
+
+    if (typeof Worker !== 'undefined') {{
+      window.Worker = makeWorkerProxy(Worker);
     }}
     if (typeof SharedWorker !== 'undefined') {{
-      const OrigShared = SharedWorker;
-      window.SharedWorker = function(scriptUrl, options) {{
-        try {{
-          const absUrl = new URL(scriptUrl, document.baseURI).toString();
-          return new OrigShared(wrapSource(absUrl), options);
-        }} catch (e) {{
-          return new OrigShared(scriptUrl, options);
-        }}
-      }};
-      window.SharedWorker.prototype = OrigShared.prototype;
+      window.SharedWorker = makeWorkerProxy(SharedWorker);
     }}
   }} catch (e) {{}}
 
@@ -747,6 +774,71 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
         configurable: true,
       }});
     }}
+  }} catch (e) {{}}
+
+  // 16. Missing APIs that headless Chrome doesn't expose — Creepjs checks
+  //     for these explicitly in its `noContentIndex`, `noContactsManager`,
+  //     `noDownlinkMax` tests. Stubbing them matches the shape of a real
+  //     Chrome 131 navigator on macOS.
+  try {{
+    // navigator.contentIndex — Content Index API (PWA content listings)
+    if (!('contentIndex' in navigator) && 'serviceWorker' in navigator) {{
+      const stub = {{
+        add: () => Promise.resolve(),
+        delete: () => Promise.resolve(),
+        getAll: () => Promise.resolve([]),
+      }};
+      Object.defineProperty(Navigator.prototype, 'contentIndex', {{
+        get: () => stub,
+        configurable: true,
+      }});
+    }}
+
+    // navigator.contacts — ContactsManager API
+    if (!('contacts' in navigator)) {{
+      const stub = {{
+        select: () => Promise.resolve([]),
+        getProperties: () => Promise.resolve(['name', 'email', 'tel']),
+      }};
+      Object.defineProperty(Navigator.prototype, 'contacts', {{
+        get: () => stub,
+        configurable: true,
+      }});
+    }}
+
+    // navigator.connection.downlinkMax — NetworkInformation API
+    if (navigator.connection && !('downlinkMax' in navigator.connection)) {{
+      try {{
+        Object.defineProperty(navigator.connection, 'downlinkMax', {{
+          get: () => Infinity,
+          configurable: true,
+        }});
+      }} catch (e) {{}}
+    }}
+  }} catch (e) {{}}
+
+  // 17. hasKnownBgColor — Creepjs renders an element and reads its computed
+  //     background color, comparing against a list of values that headless
+  //     Chrome uses by default (rgba(0,0,0,0), rgb(255,255,255), etc).
+  //     Override the default document styles with CSS injected into the
+  //     earliest possible point (head) so computed styles differ.
+  try {{
+    const applyBgFix = () => {{
+      if (!document.head) {{
+        // Too early — try again after DOMContentLoaded.
+        document.addEventListener('DOMContentLoaded', applyBgFix, {{ once: true }});
+        return;
+      }}
+      if (document.getElementById('__lad_bg_fix')) return;
+      const style = document.createElement('style');
+      style.id = '__lad_bg_fix';
+      // Set an inherited background on :root that's not in the headless
+      // default list. Using a near-white off-white (#fafafa) that real
+      // user themes commonly set.
+      style.textContent = ':root {{ background-color: #fafafa; }}';
+      document.head.appendChild(style);
+    }};
+    applyBgFix();
   }} catch (e) {{}}
 }})();
 "#,
