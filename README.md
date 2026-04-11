@@ -19,7 +19,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-purple.svg)](https://modelcontextprotocol.io)
 
-[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Watch System](#watch-system) · [Playwright Parity](#playwright-parity) · [Benchmarks](#benchmarks)
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Multi-Engine](#multi-engine) · [MCP Server](#mcp-server) · [Watch System](#watch-system) · [Playwright Parity](#playwright-parity) · [Opera Neon Parity](#opera-neon-mcp-connector-parity) · [Benchmarks](#benchmarks)
 
 </div>
 
@@ -164,7 +164,7 @@ LAD_WEBKIT_BRIDGE=lad-relay lad --url "https://example.com" --engine webkit
 - **Device features** — touch events, Safe Area, real viewport
 - **Token auth** — one-time 6-digit PIN, secure even on public Wi-Fi
 - **Auto-reconnect** — exponential backoff if connection drops
-- **Same API** — all 25 LAD tools work identically over Remote Control
+- **Same API** — all 29 LAD tools work identically over Remote Control
 
 ### Architecture
 
@@ -254,7 +254,7 @@ lad --url "https://staging.myapp.com/login" \
 
 ## MCP Server
 
-`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **25 semantic tools** — full Playwright parity with 60x fewer tokens.
+`llm-as-dom-mcp` turns your browser into a tool that Claude can call directly. **29 semantic tools** — full Playwright parity with 60x fewer tokens.
 
 ```bash
 llm-as-dom-mcp  # starts MCP server (stdio)
@@ -270,8 +270,9 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 
 | Tool | What it does |
 |------|-------------|
-| `lad_extract` | Extract structured page info: elements, text, page type. Never returns raw HTML |
-| `lad_snapshot` | Semantic snapshot of the current page — elements with IDs for `lad_click`/`lad_type`. Like Playwright's `browser_snapshot` but 10-60x fewer tokens |
+| `lad_extract` | Extract structured page info: elements, text, page type. Never returns raw HTML. Supports `paginate_index`/`page_size` for large pages and `include_hidden=true` opt-in |
+| `lad_snapshot` | Semantic snapshot of the current page — elements with IDs for `lad_click`/`lad_type`. Like Playwright's `browser_snapshot` but 10-60x fewer tokens. Same pagination + hidden-filter params as `lad_extract` |
+| `lad_jq` | Run a `jq` query against the current page's SemanticView JSON. Pulls subsets (e.g. `.elements \| map(select(.role == "button")) \| .[].label`) instead of the full snapshot — 10-30x token savings |
 | `lad_screenshot` | Take a base64-encoded PNG screenshot of the active page |
 
 ### Interaction
@@ -327,13 +328,23 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 |------|-------------|
 | `lad_clear` | Clear an input field (works with React/Vue controlled components) |
 
+### Tabs (multi-tab)
+
+| Tool | What it does |
+|------|-------------|
+| `lad_tabs_list` | List every open tab with `tab_id`, title, url, and `is_active` flag. Opera Neon `list-tabs` shape |
+| `lad_tabs_switch` | Set the active tab by `tab_id`. Every other tool defaults to the active tab when `tab_id` is omitted |
+| `lad_tabs_close` | Close a single tab by `tab_id` (vs `lad_close` which kills the whole browser) |
+
+Every interaction tool (`lad_click`, `lad_type`, `lad_snapshot`, `lad_extract`, `lad_jq`, `lad_eval`, `lad_network`, ...) accepts an optional `tab_id` param that targets a specific tab; omit it to target the active tab.
+
 ### Lifecycle
 
 | Tool | What it does |
 |------|-------------|
-| `lad_close` | Close the browser and release all resources |
+| `lad_close` | Close the browser and release all resources (kills all tabs) |
 | `lad_refresh` | Reload the current page |
-| `lad_session` | View or reset session state: auth status, visited URLs, browse count |
+| `lad_session` | View or reset session state — plus `action=attach_cdp endpoint=http://localhost:9222` to attach to your real Chrome (see [`docs/attach-chrome.md`](docs/attach-chrome.md)) and `action=detach` to release it |
 
 <details>
 <summary>Claude Desktop config</summary>
@@ -387,7 +398,7 @@ lad matches Playwright's tool surface with fundamentally different economics:
 
 | Dimension | lad | Playwright MCP |
 |-----------|-----|---------------|
-| **Tools** | 25 | 21 |
+| **Tools** | 29 | 21 |
 | **Tokens per login test** | ~300 | ~18,000 |
 | **Cost ratio** | 1x | 60x |
 | **Decision engine** | Heuristics-first (70-90% no LLM) | None — LLM parses every page |
@@ -396,6 +407,33 @@ lad matches Playwright's tool surface with fundamentally different economics:
 | **DOM traversal** | Shadow DOM + same-origin iframes | Standard DOM |
 
 The key architectural difference: Playwright gives the LLM a DOM and asks it to figure out what to do. lad compresses the DOM, runs heuristics, and only calls the LLM when genuinely ambiguous.
+
+## Opera Neon MCP Connector parity
+
+Opera shipped its [MCP Connector for Opera Neon](https://press.opera.com/2026/03/31/opera-neon-adds-mcp-connector/) in March 2026, exposing browser control to external AI clients (Claude Code, ChatGPT, Lovable, n8n). It's gated behind a $19.90/month Opera Neon subscription and requires a running Opera Neon process alongside your normal browser. **lad is the self-hosted, zero-subscription, open-source alternative** — with 2× the tool surface and drop-in-compatible tab management.
+
+| Dimension | lad | Opera Neon MCP Connector |
+|-----------|-----|--------------------------|
+| **Tools** | 29 | 13 |
+| **Price** | Free (AGPL-3.0) | $19.90 / month |
+| **Modes** | Headless + Visible + CDP Attach | Attached only (must run Opera Neon) |
+| **Transport** | stdio, SSE | HTTP + OAuth PKCE via `mcp.neon.tech` |
+| **Engines** | Chromium, WebKit, Remote iOS | Opera Neon only |
+| **Authenticated session** | CDP attach to your real Chrome | Opera Neon's own session |
+| **CI/headless friendly** | Yes | No |
+| **Goal-based browse** | `lad_browse` + pilot heuristics (70-90% no LLM) | Not exposed via MCP |
+| **jq over snapshot** | `lad_jq` | `tab-content-jq-search-query` |
+| **Tab management** | `lad_tabs_list` / `lad_tabs_switch` / `lad_tabs_close` | `list-tabs` / `switch-tab` / `close-tab` |
+| **Hidden-element filter** | Default-on (closes [Brave CVE class](https://brave.com/blog/prompt-injection-flaw-opera-neon/)) | Defended in prompt assembly only |
+| **Assert / audit / network** | `lad_assert`, `lad_audit`, `lad_network` | Not available |
+| **JS eval escape hatch** | `lad_eval` | Not available |
+| **Sandbox scheme blocklist** | `chrome://`, `opera://`, `about:`, `devtools:`, `view-source:`, `edge:`, `brave:`, `ws:`, `wss:`, `file:`, `javascript:`, `data:`, `blob:`, `vbscript:` | Partial (blocks reads on `chrome://`, permits navigation) |
+
+**Drop-in compatibility.** lad's tab-management tools mirror Opera's shape exactly — agent prompts written against Opera MCP work against lad with a `lad_` prefix swap. The `adopt_existing_pages` flag on `lad_session attach_cdp` reproduces Opera Neon's "operate on my real tabs" model without requiring Opera Neon.
+
+**Security delta.** Brave's October 2025 disclosure showed Opera Neon was vulnerable to indirect prompt injection via hidden HTML elements (`opacity: 0`, `display: none`, `aria-hidden`). Opera patched the prompt assembly layer; lad filters hidden elements from the accessibility tree extraction itself, closing the entire class at the source. See [`tests/prompt_injection_hidden.rs`](tests/prompt_injection_hidden.rs) for the regression suite.
+
+**When to pick Opera Neon instead.** You want Opera's proprietary agentic features (Neon Do / Make / ODRA) that are not exposed via the MCP Connector, or you prefer a closed-source product with a vendor support contract. For every other use case, lad is a strict functional superset. For a complete end-to-end setup, see [`examples/claude-code-attach.md`](examples/claude-code-attach.md).
 
 ## Benchmarks
 
@@ -438,11 +476,12 @@ The 3 extra WebKit elements are footer links that GitHub serves differently to S
 
 ## Test Suite
 
-- **374+ tests** (unit + chaos + integration + relay E2E + protocol)
+- **726 tests** (unit + chaos + integration + relay E2E + protocol + prompt-injection regression)
 - **11 heuristic modules** (login, form, search, navigation, OAuth, MFA, ecommerce, validation, multistep, hints, selector)
 - **8 micro-benchmarks** (criterion)
-- **~19,000 lines of Rust** (66 files) + ~1,200 lines of Swift
+- **~22,000 lines of Rust** (71 files) + ~1,200 lines of Swift
 - **30 findings fixed** via multi-model adversarial review (Gemini + Codex + Opus)
+- **7 prompt-injection regression tests** covering hidden-element attacks (the class Brave disclosed against Opera Neon in Oct 2025)
 
 ## Requirements
 
