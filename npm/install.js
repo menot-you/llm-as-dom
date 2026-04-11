@@ -8,7 +8,7 @@ const https = require("https");
 
 const VERSION = require("./package.json").version;
 const BINARY = "llm-as-dom-mcp";
-const REPO = "example-org/llm-as-dom";
+const REPO = "menot-you/llm-as-dom";
 
 function getPlatform() {
   const platform = process.platform;
@@ -20,7 +20,7 @@ function getPlatform() {
   throw new Error(
     `Unsupported platform: ${platform}-${arch}. ` +
       `Supported: darwin-arm64, linux-x64. ` +
-      `Install from source: cargo install example-org-mcp-lad`
+      `Install from source: cargo install menot-you-mcp-lad`
   );
 }
 
@@ -59,7 +59,7 @@ async function main() {
     console.log(`llm-as-dom: installed ${BINARY} (${(data.length / 1024 / 1024).toFixed(1)} MB)`);
   } catch (err) {
     console.error(`llm-as-dom: failed to download binary — ${err.message}`);
-    console.error(`llm-as-dom: you can install from source: cargo install example-org-mcp-lad`);
+    console.error(`llm-as-dom: you can install from source: cargo install menot-you-mcp-lad`);
     // Don't fail the install — the run.js wrapper will show a helpful error
   }
 }

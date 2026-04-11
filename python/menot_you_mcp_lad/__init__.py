@@ -1,4 +1,4 @@
-"""example-org-mcp-lad: AI browser pilot MCP server binary wrapper."""
+"""menot-you-mcp-lad: AI browser pilot MCP server binary wrapper."""
 
 import os
 import platform
@@ -10,7 +10,7 @@ import urllib.request
 __version__ = "0.10.0"
 
 BINARY = "llm-as-dom-mcp"
-REPO = "example-org/llm-as-dom"
+REPO = "menot-you/llm-as-dom"
 
 
 def _get_platform() -> str:
@@ -25,7 +25,7 @@ def _get_platform() -> str:
     raise RuntimeError(
         f"Unsupported platform: {system}-{machine}. "
         f"Supported: darwin-arm64, linux-x86_64. "
-        f"Install from source: cargo install example-org-mcp-lad"
+        f"Install from source: cargo install menot-you-mcp-lad"
     )
 
 
@@ -52,7 +52,7 @@ def _ensure_binary() -> str:
         print(f"mcp-lad: installed {BINARY} ({size_mb:.1f} MB)", file=sys.stderr)
     except Exception as e:
         print(f"mcp-lad: failed to download — {e}", file=sys.stderr)
-        print("mcp-lad: install from source: cargo install example-org-mcp-lad", file=sys.stderr)
+        print("mcp-lad: install from source: cargo install menot-you-mcp-lad", file=sys.stderr)
         sys.exit(1)
 
     return path

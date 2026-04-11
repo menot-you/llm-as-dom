@@ -736,7 +736,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-org-mcp-lad"
+name = "menot-you-mcp-lad"
 version = "0.10.0"
 dependencies = [
  "aes",

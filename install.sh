@@ -3,7 +3,7 @@
 # Usage: curl -fsSL https://llm-as-dom.menot.sh/install.sh | sh
 set -euo pipefail
 
-REPO="example-org/llm-as-dom"
+REPO="menot-you/llm-as-dom"
 BINARIES="lad llm-as-dom-mcp lad-relay"
 INSTALL_DIR="${HOME}/.local/bin"
 

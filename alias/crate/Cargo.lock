@@ -1452,7 +1452,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 name = "llm-as-dom"
 version = "0.10.0"
 dependencies = [
- "example-org-mcp-lad",
+ "menot-you-mcp-lad",
 ]
 
 [[package]]
@@ -1503,7 +1503,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "example-org-mcp-lad"
+name = "menot-you-mcp-lad"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eaa1ed1957a08bf1f6806c2738e0c427ebe0f009a9e9e33dd5469dbbb8057a"
