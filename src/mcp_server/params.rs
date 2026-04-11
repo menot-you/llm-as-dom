@@ -44,6 +44,27 @@ pub(crate) struct ExtractParams {
     /// Output format: "json" (default, structured JSON) or "prompt" (compact text like lad_snapshot).
     #[serde(default)]
     pub format: Option<String>,
+    /// Wave 1 — pagination: zero-based page index into `elements`. When set,
+    /// only the slice `[page*page_size..(page+1)*page_size]` is returned.
+    /// `page` is clamped to `[0, total_pages-1]`; out-of-range becomes empty.
+    /// Leave unset to get every element (token-heavy for large pages).
+    #[serde(default)]
+    pub paginate_index: Option<u32>,
+    /// Wave 1 — pagination: elements per page. Default 50. Ignored unless
+    /// `paginate_index` is set.
+    #[serde(default = "default_page_size")]
+    pub page_size: u32,
+    /// Wave 1 — hidden-element gate: include DOM elements flagged as hidden
+    /// (display:none, opacity:0, aria-hidden, zero bounds). Defaults to
+    /// `false` so adversarial pages cannot smuggle prompts via invisible
+    /// nodes. Set to `true` when you need the full view (debugging, audit).
+    #[serde(default)]
+    pub include_hidden: Option<bool>,
+}
+
+/// Wave 1 — default page size for `lad_extract` / `lad_snapshot` pagination.
+pub(crate) fn default_page_size() -> u32 {
+    50
 }
 
 /// Parameters for the `lad_assert` tool.
@@ -116,6 +137,16 @@ pub(crate) struct SnapshotParams {
     /// target site never stabilizes.
     #[serde(default = "default_snapshot_timeout_ms")]
     pub timeout_ms: u64,
+    /// Wave 1 — pagination: zero-based page index into `elements`. See
+    /// `ExtractParams::paginate_index` for semantics.
+    #[serde(default)]
+    pub paginate_index: Option<u32>,
+    /// Wave 1 — pagination: elements per page. Default 50.
+    #[serde(default = "default_page_size")]
+    pub page_size: u32,
+    /// Wave 1 — hidden-element gate. See `ExtractParams::include_hidden`.
+    #[serde(default)]
+    pub include_hidden: Option<bool>,
 }
 
 /// Default snapshot hard timeout: 20 seconds.
@@ -302,6 +333,20 @@ pub(crate) struct UploadParams {
     pub element: u32,
     /// Absolute file paths to upload.
     pub files: Vec<String>,
+}
+
+/// Parameters for the Wave 1 `lad_jq` tool.
+///
+/// Runs a jq expression against the current active page's `SemanticView`
+/// (the same JSON shape emitted by `lad_snapshot` / `lad_extract`). Lets
+/// callers pull out exactly the slice they need (a list of button labels,
+/// a form's fields, a count) without paying the 10-30x token cost of
+/// pulling the whole snapshot into the prompt.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct JqParams {
+    /// jq expression, e.g. `.title` or
+    /// `.elements | map(select(.kind == "button")) | map(.label)`.
+    pub query: String,
 }
 
 /// Parameters for the `lad_clear` tool.

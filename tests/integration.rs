@@ -51,6 +51,7 @@ fn input_element(
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -92,6 +94,7 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         checked: None,
         options: None,
         frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -675,6 +678,7 @@ fn hinted_login_view() -> SemanticView {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             },
             Element {
                 id: 1,
@@ -695,6 +699,7 @@ fn hinted_login_view() -> SemanticView {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             },
             Element {
                 id: 2,
@@ -715,6 +720,7 @@ fn hinted_login_view() -> SemanticView {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             },
         ],
         forms: vec![],
@@ -1158,6 +1164,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             },
             Element {
                 id: 1,
@@ -1175,6 +1182,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 checked: None,
                 options: None,
                 frame_index: None,
+                is_visible: None,
             },
         ],
         forms: vec![],
@@ -1239,6 +1247,7 @@ fn test_hints_active_when_heuristics_disabled() {
             checked: None,
             options: None,
             frame_index: None,
+            is_visible: None,
         }],
         forms: vec![],
         visible_text: "".into(),

@@ -166,6 +166,7 @@ mod tests {
                     checked: None,
                     options: None,
                     frame_index: None,
+                    is_visible: None,
                 },
                 Element {
                     id: 1,
@@ -183,6 +184,7 @@ mod tests {
                     checked: None,
                     options: None,
                     frame_index: None,
+                    is_visible: None,
                 },
                 Element {
                     id: 2,
@@ -200,6 +202,7 @@ mod tests {
                     checked: None,
                     options: None,
                     frame_index: None,
+                    is_visible: None,
                 },
             ],
             forms: vec![],

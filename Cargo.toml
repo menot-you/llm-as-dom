@@ -98,6 +98,14 @@ http = "1"
 async-trait = "0.1"
 thiserror = "2"
 
+# Wave 1: jq engine for the `lad_jq` MCP tool.
+# jaq is a pure-Rust jq interpreter split into several small crates; we need
+# the core engine, the stdlib (length, map, select...), and the JSON value
+# backend with serde support so we can feed `serde_json::Value` through.
+jaq-core = "3.0"
+jaq-std = "3.0"
+jaq-json = { version = "2.0", features = ["serde"] }
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
