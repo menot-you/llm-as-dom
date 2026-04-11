@@ -1,10 +1,18 @@
 //! `llm-as-dom-mcp`: MCP server exposing the browser pilot as semantic tools.
 //!
-//! Provides 25 tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
+//! Wave 2: multi-tab support. The server now holds a `HashMap<u32, ActivePage>`
+//! keyed by stable tab IDs instead of a single active page. Every existing tool
+//! accepts an optional `tab_id` parameter (defaulting to the active tab), and
+//! three new tools (`lad_tabs_list`, `lad_tabs_switch`, `lad_tabs_close`) expose
+//! tab management to callers. Tool shapes match Opera Neon's MCP Connector for
+//! drop-in compatibility.
+//!
+//! Provides 28 tools: `lad_browse`, `lad_extract`, `lad_assert`, `lad_locate`,
 //! `lad_audit`, `lad_session`, `lad_snapshot`, `lad_click`, `lad_type`, `lad_select`,
 //! `lad_eval`, `lad_close`, `lad_press_key`, `lad_back`, `lad_screenshot`,
 //! `lad_wait`, `lad_network`, `lad_hover`, `lad_dialog`, `lad_upload`, `lad_scroll`,
-//! `lad_fill_form`, `lad_refresh`, `lad_clear`, `lad_watch`.
+//! `lad_fill_form`, `lad_refresh`, `lad_clear`, `lad_watch`, `lad_jq`,
+//! `lad_tabs_list`, `lad_tabs_switch`, `lad_tabs_close`.
 
 mod assertions;
 mod helpers;
@@ -12,7 +20,9 @@ mod params;
 mod state;
 mod tools;
 
-use helpers::{mcp_err, parse_window_size_env, read_env_with_fallback, same_origin};
+use helpers::{
+    mcp_err, no_active_page, parse_window_size_env, read_env_with_fallback, same_origin,
+};
 use params::*;
 use state::{ActivePage, McpSessionState};
 
@@ -21,8 +31,10 @@ use llm_as_dom::engine::webkit::WebKitEngine;
 use llm_as_dom::engine::{BrowserEngine, EngineConfig, PageHandle};
 use llm_as_dom::{a11y, backend, pilot, semantic, watch};
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::sync::{Mutex, MutexGuard};
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -32,20 +44,23 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 // ── Server state ───────────────────────────────────────────────────
 
-// FIX-R3-03: Lock ordering contract — to prevent deadlocks when multiple
-// tools execute concurrently, always acquire locks in this order:
+// FIX-R3-03 (Wave 2 update): Lock ordering contract — to prevent deadlocks
+// when multiple tools execute concurrently, always acquire locks in this order:
 //
 //   1. engine
-//   2. active_page
-//   3. session
-//   4. watch_state
-//   5. peer
+//   2. tabs                  ← Wave 2: was `active_page`
+//   3. active_tab_id         ← Wave 2: new
+//   4. session
+//   5. watch_state
+//   6. peer
 //
 // Never hold a higher-numbered lock while acquiring a lower-numbered one.
+// `ActivePageGuard` (below) acquires `tabs` and `active_tab_id` in that order
+// so every callsite that routes through the guard is automatically safe.
 
 /// MCP server that manages a headless browser and exposes pilot tools.
 ///
-/// `Clone` is implemented manually rather than derived because `AtomicBool`
+/// `Clone` is implemented manually rather than derived because `AtomicU32`
 /// is not `Clone`. We snapshot the current value on clone — callers that
 /// need to share state across clones should use the original `Arc` fields.
 #[allow(dead_code)] // tool_router is used internally by rmcp macros
@@ -67,9 +82,22 @@ struct LadServer {
     /// `*const Self → *mut Self` cast that was UB under Rust's aliasing
     /// rules. All reads use `Ordering::Acquire`, writes use `Ordering::Release`.
     pub(crate) interactive: std::sync::atomic::AtomicBool,
-    /// Persistent page from `lad_snapshot`, reused by click/type/select.
-    pub(crate) active_page: Arc<Mutex<Option<ActivePage>>>,
+    /// Wave 2: all open tabs keyed by stable ID. Replaces the Wave 1
+    /// `Option<ActivePage>` single-slot. Lock ordering: always before
+    /// `active_tab_id`.
+    pub(crate) tabs: Arc<Mutex<HashMap<u32, ActivePage>>>,
+    /// Wave 2: ID of the currently focused tab (the "active" one).
+    /// `None` when no tab is open. Lock ordering: always after `tabs`.
+    pub(crate) active_tab_id: Arc<Mutex<Option<u32>>>,
+    /// Wave 2: monotonic tab-ID allocator. Starts at 1 (0 reserved as a
+    /// sentinel for tests and optional future use). Stored as an atomic so
+    /// `insert_tab` can allocate without holding the `tabs` lock yet.
+    pub(crate) next_tab_id: Arc<AtomicU32>,
     /// Active watch state (at most one watch at a time).
+    ///
+    /// Wave 2: watch is still single-instance, not per-tab. If multi-tab
+    /// watch is needed in the future, upgrade this to `HashMap<u32, WatchState>`
+    /// keyed by `tab_id`.
     pub(crate) watch_state: Arc<Mutex<Option<watch::WatchState>>>,
     /// MCP peer for server-initiated push notifications.
     pub(crate) peer: Arc<Mutex<Option<rmcp::Peer<rmcp::service::RoleServer>>>>,
@@ -77,7 +105,6 @@ struct LadServer {
 
 impl Clone for LadServer {
     fn clone(&self) -> Self {
-        use std::sync::atomic::Ordering;
         Self {
             tool_router: self.tool_router.clone(),
             engine: Arc::clone(&self.engine),
@@ -87,10 +114,99 @@ impl Clone for LadServer {
             interactive: std::sync::atomic::AtomicBool::new(
                 self.interactive.load(Ordering::Acquire),
             ),
-            active_page: Arc::clone(&self.active_page),
+            tabs: Arc::clone(&self.tabs),
+            active_tab_id: Arc::clone(&self.active_tab_id),
+            next_tab_id: Arc::clone(&self.next_tab_id),
             watch_state: Arc::clone(&self.watch_state),
             peer: Arc::clone(&self.peer),
         }
+    }
+}
+
+/// Wave 2: guard that holds both the `tabs` and `active_tab_id` mutexes in
+/// the documented lock order, exposing a near-1:1 ergonomic replacement for
+/// the old `MutexGuard<Option<ActivePage>>` API.
+///
+/// Most tool code uses one of four patterns:
+///   - `guard.as_ref()`          — read-only access to the active `ActivePage`
+///   - `guard.as_mut()`          — mutable access to the active `ActivePage`
+///   - `guard.clear_active()`    — detach the active tab (SSRF invalidation)
+///   - `guard.resolve(tab_id)?`  — explicit `tab_id` OR fall back to active
+///
+/// Constructing a new tab uses `LadServer::insert_tab`, which allocates an ID
+/// via the atomic counter, inserts into the map, and sets it as active — all
+/// under a single lock acquisition to avoid TOCTOU between allocate and insert.
+pub(crate) struct ActivePageGuard<'a> {
+    tabs: MutexGuard<'a, HashMap<u32, ActivePage>>,
+    active_id: MutexGuard<'a, Option<u32>>,
+}
+
+impl<'a> ActivePageGuard<'a> {
+    /// Immutable access to the active tab's page, or `None` if no active tab.
+    /// Mirrors `Option::as_ref()` on the pre-Wave 2 `Option<ActivePage>`.
+    pub(crate) fn as_ref(&self) -> Option<&ActivePage> {
+        let id = (*self.active_id)?;
+        self.tabs.get(&id)
+    }
+
+    /// Mutable access to the active tab's page, or `None` if no active tab.
+    pub(crate) fn as_mut(&mut self) -> Option<&mut ActivePage> {
+        let id = (*self.active_id)?;
+        self.tabs.get_mut(&id)
+    }
+
+    /// Resolve by explicit `tab_id` (if provided) or fall back to the active
+    /// tab. Returns an MCP invalid-params error when the resolved id is
+    /// missing from the map. Used by every tool migrated to accept
+    /// `tab_id: Option<u32>`.
+    pub(crate) fn resolve(&self, explicit: Option<u32>) -> Result<&ActivePage, rmcp::ErrorData> {
+        let id = match explicit {
+            Some(id) => id,
+            None => self.active_id.ok_or_else(no_active_page)?,
+        };
+        self.tabs
+            .get(&id)
+            .ok_or_else(|| mcp_err(format!("tab_id {id} not found")))
+    }
+
+    /// Mutable resolve — same semantics as [`Self::resolve`].
+    pub(crate) fn resolve_mut(
+        &mut self,
+        explicit: Option<u32>,
+    ) -> Result<&mut ActivePage, rmcp::ErrorData> {
+        let id = match explicit {
+            Some(id) => id,
+            None => self.active_id.ok_or_else(no_active_page)?,
+        };
+        self.tabs
+            .get_mut(&id)
+            .ok_or_else(|| mcp_err(format!("tab_id {id} not found")))
+    }
+
+    /// Clear the active tab slot AND remove its `ActivePage` from the tabs
+    /// map. This mirrors the Wave 1 behaviour of `*active_page = None` on
+    /// SSRF invalidation: the page is dropped so subsequent tools cannot
+    /// operate on a known-unsafe frame.
+    pub(crate) fn clear_active(&mut self) {
+        if let Some(id) = self.active_id.take() {
+            self.tabs.remove(&id);
+        }
+    }
+
+    /// Currently active tab id (if any).
+    pub(crate) fn active_id(&self) -> Option<u32> {
+        *self.active_id
+    }
+
+    /// Insert an `ActivePage` at `id` and mark it as the active tab.
+    ///
+    /// This is ADDITIVE: any previously-open tabs stay in the map. The old
+    /// Wave 1 behaviour (overwrite the single slot) does not apply once we
+    /// have multi-tab semantics; `lad_tabs_close` is the canonical path to
+    /// remove a tab.
+    pub(crate) fn set_active_page(&mut self, id: u32, ap: ActivePage) {
+        self.tabs.insert(id, ap);
+        *self.active_id = Some(id);
     }
 }
 
@@ -112,10 +228,47 @@ impl LadServer {
                     .map(|v| v == "true" || v == "1")
                     .unwrap_or(false),
             ),
-            active_page: Arc::new(Mutex::new(None)),
+            tabs: Arc::new(Mutex::new(HashMap::new())),
+            active_tab_id: Arc::new(Mutex::new(None)),
+            // Start at 1 so 0 is reserved as a future-proof sentinel. Simpler
+            // than the skip-zero gymnastics the Wave 2 design sketch suggested.
+            next_tab_id: Arc::new(AtomicU32::new(1)),
             watch_state: Arc::new(Mutex::new(None)),
             peer: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Wave 2: acquire the `ActivePageGuard`. Always takes the `tabs` lock
+    /// FIRST, then `active_tab_id` — matching the documented lock order so
+    /// concurrent tools can never deadlock each other.
+    pub(crate) async fn lock_active_page(&self) -> ActivePageGuard<'_> {
+        let tabs = self.tabs.lock().await;
+        let active_id = self.active_tab_id.lock().await;
+        ActivePageGuard { tabs, active_id }
+    }
+
+    /// Wave 2: allocate a fresh tab ID, insert the given `ActivePage` into
+    /// the tabs map, and mark it as active. Returns the new ID.
+    ///
+    /// This is the single canonical path for creating a new tab — `lad_browse`
+    /// and `navigate_or_reuse`'s fresh-navigation branch both route through
+    /// here so no caller can accidentally skip the active-tab-id update.
+    pub(crate) async fn insert_tab(&self, ap: ActivePage) -> u32 {
+        let id = self.next_tab_id.fetch_add(1, Ordering::AcqRel);
+        let mut guard = self.lock_active_page().await;
+        guard.set_active_page(id, ap);
+        id
+    }
+
+    /// Wave 2: clear every open tab and reset the allocator to 1. Called by
+    /// `lad_close` (full browser shutdown). The caller is responsible for
+    /// closing the underlying engine.
+    pub(crate) async fn clear_all_tabs(&self) {
+        let mut guard = self.lock_active_page().await;
+        guard.tabs.clear();
+        *guard.active_id = None;
+        // Reset the allocator so a fresh session starts at id=1 again.
+        self.next_tab_id.store(1, Ordering::Release);
     }
 
     /// Return an existing engine or launch a new one.
@@ -131,7 +284,6 @@ impl LadServer {
         &self,
         request_visible: Option<bool>,
     ) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
-        use std::sync::atomic::Ordering;
         let mut engine_lock = self.engine.lock().await;
         let current = self.interactive.load(Ordering::Acquire);
         // Determine target visibility: None means "keep current"; Some(v)
@@ -145,9 +297,18 @@ impl LadServer {
                 to = target,
                 "visibility changed — restarting browser"
             );
-            // Drop old engine + active page.
+            // Drop old engine + every open tab. The visibility toggle
+            // destroys all browser state, so there is no meaningful way to
+            // keep previously-open tabs alive across it.
             *engine_lock = None;
-            *self.active_page.lock().await = None;
+            drop(engine_lock);
+            self.clear_all_tabs().await;
+            // Re-acquire for ensure_engine_inner below.
+            let mut new_lock = self.engine.lock().await;
+            if target != current {
+                self.interactive.store(target, Ordering::Release);
+            }
+            return self.ensure_engine_inner(&mut new_lock).await;
         }
         // Store the new mode atomically. Safe under the engine lock because
         // `ensure_engine_inner` below will read this fresh value to launch
@@ -172,7 +333,7 @@ impl LadServer {
             return Ok(Arc::clone(e));
         }
 
-        let interactive = self.interactive.load(std::sync::atomic::Ordering::Acquire);
+        let interactive = self.interactive.load(Ordering::Acquire);
         let mode = if interactive {
             "interactive (visible)"
         } else {
@@ -315,14 +476,19 @@ impl LadServer {
         }
     }
 
-    /// Navigate to a URL (or reuse the active page if same origin), returning
-    /// a fresh semantic view. Stores the result in `active_page`.
+    /// Navigate to a URL (or reuse the active tab's page if same origin),
+    /// returning a fresh semantic view. Updates the active tab in-place on the
+    /// reuse path, or opens a fresh tab on the cross-origin path.
     ///
     /// FIX-R3-01: Eliminated TOCTOU race. Previously the lock was dropped and
     /// reacquired between the same-origin check and the write-back, allowing a
-    /// concurrent call to mutate state. Now the lock is held for the reuse path
-    /// and only released for the fresh-navigation path (which needs `navigate_and_extract`
-    /// to acquire `engine` without nesting locks).
+    /// concurrent call to mutate state. Now the guard is held for the reuse
+    /// path and only released for the fresh-navigation path (which needs
+    /// `navigate_and_extract` to acquire `engine` without nesting locks).
+    ///
+    /// Wave 2: operates on the *active* tab (the one resolved from
+    /// `active_tab_id`). Multi-tab callers that want to navigate a specific
+    /// non-active tab should call `ActivePageGuard::resolve_mut` directly.
     pub(crate) async fn navigate_or_reuse(
         &self,
         url: &str,
@@ -331,10 +497,10 @@ impl LadServer {
         if !llm_as_dom::sanitize::is_safe_url(url) {
             return Err(mcp_err(format!("blocked: unsafe URL '{url}'")));
         }
-        let mut active = self.active_page.lock().await;
+        let mut guard = self.lock_active_page().await;
 
-        // Reuse existing page if same origin — hold the lock through the entire operation.
-        if let Some(ap) = active.as_ref()
+        // Reuse existing page if same origin — hold the guard through the entire operation.
+        if let Some(ap) = guard.as_mut()
             && same_origin(&ap.url, url)
         {
             if ap.url != url {
@@ -342,9 +508,9 @@ impl LadServer {
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
 
                 let final_url = ap.page.url().await.map_err(mcp_err)?;
-                // FIX-R8-01: Invalidate active_page on SSRF detection.
+                // FIX-R8-01: Invalidate active tab on SSRF detection.
                 if !llm_as_dom::sanitize::is_safe_url(&final_url) {
-                    *active = None;
+                    guard.clear_active();
                     return Err(mcp_err(format!(
                         "blocked: redirected to unsafe URL {final_url}"
                     )));
@@ -362,30 +528,29 @@ impl LadServer {
             // browser's real URL prevents same-origin misclassification on the
             // next call.
             let actual_url = ap.page.url().await.map_err(mcp_err)?;
-            let mut ap_owned = active.take().unwrap();
-            ap_owned.url = actual_url;
-            ap_owned.view = view.clone();
-            *active = Some(ap_owned);
+            ap.url = actual_url;
+            ap.view = view.clone();
             return Ok(view);
         }
 
-        // Different origin or no active page — must release the lock before calling
+        // Different origin or no active tab — must release the guard before calling
         // navigate_and_extract (which acquires the engine lock). Then reacquire once
         // to store the result. This is safe because we're creating a fresh page.
-        drop(active);
+        drop(guard);
         let (page, view) = self.navigate_and_extract(url).await?;
         // FIX-R7-02: Store the ACTUAL browser URL after navigation + redirects.
         let actual_url = page.url().await.map_err(mcp_err)?;
-        let mut active = self.active_page.lock().await;
-        *active = Some(ActivePage {
+        self.insert_tab(ActivePage {
             page,
             url: actual_url,
             view: view.clone(),
-        });
+        })
+        .await;
         Ok(view)
     }
 
-    /// Re-extract semantic view from the active page and update stored state.
+    /// Re-extract semantic view from the active tab's page and update stored
+    /// state.
     ///
     /// FIX-R6-02: Also syncs `ap.url` with the actual browser URL after every
     /// refresh. Without this, `ActivePage.url` could hold the *requested* URL
@@ -397,23 +562,47 @@ impl LadServer {
     /// `setTimeout(() => location = "http://127.0.0.1", 500)` are caught even
     /// if they slip past the per-tool SSRF checks (which only sample once after
     /// a short delay). This is the SINGLE defense-in-depth bottleneck.
+    ///
+    /// Wave 2: operates on the active tab by default. Pass a specific tab id
+    /// via `refresh_view_for` if you need to refresh a non-active tab.
     pub(crate) async fn refresh_active_view(
         &self,
     ) -> Result<semantic::SemanticView, rmcp::ErrorData> {
-        let mut active = self.active_page.lock().await;
-        let ap = active.as_mut().ok_or_else(helpers::no_active_page)?;
+        self.refresh_view_for(None).await
+    }
+
+    /// Wave 2: refresh the semantic view for either the active tab (when
+    /// `tab_id` is `None`) or a specific tab. Every tool that wires up a
+    /// `tab_id: Option<u32>` param forwards it here so the SSRF chokepoint is
+    /// preserved per-tab.
+    pub(crate) async fn refresh_view_for(
+        &self,
+        tab_id: Option<u32>,
+    ) -> Result<semantic::SemanticView, rmcp::ErrorData> {
+        let mut guard = self.lock_active_page().await;
+        let ap = guard.resolve_mut(tab_id)?;
 
         // Sync URL with actual browser URL (handles redirects, click-driven navs)
         let current_url = ap.page.url().await.map_err(mcp_err)?;
 
         // FIX-R7-01: SSRF gate on EVERY refresh — catches delayed navigations
         // that evade per-tool checks (e.g. setTimeout-based location changes).
-        // FIX-R8-01: Invalidate active_page BEFORE returning the SSRF error.
-        // Without this, subsequent tools (screenshot, eval) still operate on
-        // the unsafe page because `active_page` remains populated.
+        // FIX-R8-01: Invalidate the active tab BEFORE returning the SSRF
+        // error. Without this, subsequent tools (screenshot, eval) would
+        // still operate on the unsafe page because it remained in the map.
         if !llm_as_dom::sanitize::is_safe_url(&current_url) {
             let redacted = llm_as_dom::sanitize::redact_url_secrets(&current_url);
-            *active = None;
+            // If the caller gave us an explicit tab id, remove just that tab;
+            // otherwise clear the active slot (same behaviour as Wave 1).
+            match tab_id {
+                Some(id) => {
+                    guard.tabs.remove(&id);
+                    if *guard.active_id == Some(id) {
+                        *guard.active_id = None;
+                    }
+                }
+                None => guard.clear_active(),
+            }
             return Err(mcp_err(format!(
                 "blocked: page navigated to unsafe URL {redacted}",
             )));
@@ -719,6 +908,36 @@ impl LadServer {
         params: Parameters<ClearParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.tool_lad_clear(params).await
+    }
+
+    #[tool(
+        description = "List all open browser tabs. Returns an array of tabs, each with tab_id, title, url, and an is_active flag. Tool shape matches Opera Neon's list-tabs for drop-in compatibility."
+    )]
+    async fn lad_tabs_list(
+        &self,
+        params: Parameters<TabsListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_tabs_list(params).await
+    }
+
+    #[tool(
+        description = "Switch the active tab to the given tab_id. Subsequent tool calls that do not pass an explicit tab_id will target this tab. Errors if the tab does not exist."
+    )]
+    async fn lad_tabs_switch(
+        &self,
+        params: Parameters<TabSwitchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_tabs_switch(params).await
+    }
+
+    #[tool(
+        description = "Close the tab with the given tab_id. If it was the active tab, active_tab_id is cleared. Errors if the tab does not exist."
+    )]
+    async fn lad_tabs_close(
+        &self,
+        params: Parameters<TabCloseParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_tabs_close(params).await
     }
 }
 

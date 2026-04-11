@@ -20,13 +20,13 @@ impl LadServer {
         params: Parameters<AssertParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(url = ?p.url, assertions = ?p.assertions, "lad_assert");
+        tracing::info!(url = ?p.url, tab_id = ?p.tab_id, assertions = ?p.assertions, "lad_assert");
 
         let view = if let Some(ref url) = p.url {
             let (_page, view) = self.navigate_and_extract(url).await?;
             view
         } else {
-            self.refresh_active_view().await.map_err(|_| {
+            self.refresh_view_for(p.tab_id).await.map_err(|_| {
                 rmcp::ErrorData::invalid_params(
                     "no active page — provide a URL or call lad_browse/lad_snapshot first"
                         .to_string(),
@@ -121,6 +121,7 @@ impl LadServer {
             conditions = ?all_conditions,
             mode = mode,
             timeout_ms = p.timeout_ms,
+            tab_id = ?p.tab_id,
             "lad_wait"
         );
 
@@ -130,7 +131,7 @@ impl LadServer {
             all_conditions.iter().map(|c| c.to_lowercase()).collect();
 
         loop {
-            let view = self.refresh_active_view().await?;
+            let view = self.refresh_view_for(p.tab_id).await?;
             let prompt_text = view.to_prompt();
 
             if is_any {

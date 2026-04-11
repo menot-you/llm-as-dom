@@ -6,7 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 
 use crate::LadServer;
-use crate::helpers::{build_element_js, check_js_result, mcp_err, no_active_page};
+use crate::helpers::{build_element_js, check_js_result, mcp_err};
 use crate::params::{ClearParams, FillFormParams};
 
 use llm_as_dom::pilot;
@@ -24,7 +24,7 @@ impl LadServer {
         params: Parameters<ClearParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(element = ?p.element, target = ?p.target, "lad_clear");
+        tracing::info!(element = ?p.element, target = ?p.target, tab_id = ?p.tab_id, "lad_clear");
 
         let body = "\
             el.focus();\n\
@@ -33,7 +33,8 @@ impl LadServer {
             el.dispatchEvent(new Event('input', { bubbles: true }));\n\
             el.dispatchEvent(new Event('change', { bubbles: true }));";
         let js = crate::helpers::build_element_js_or_target(p.element, p.target.as_ref(), body)?;
-        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+        self.interact_and_refresh(&js, VALUE_SET_DELAY_MS, p.tab_id)
+            .await
     }
 
     /// Fill multiple form fields at once and optionally submit.
@@ -50,6 +51,7 @@ impl LadServer {
             fields = p.fields.len(),
             submit = p.submit,
             form_index = ?p.form_index,
+            tab_id = ?p.tab_id,
             "lad_fill_form"
         );
 
@@ -62,9 +64,8 @@ impl LadServer {
 
         // Snapshot current view to find matching elements.
         let view = {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
-            ap.view.clone()
+            let guard = self.lock_active_page().await;
+            guard.resolve(p.tab_id)?.view.clone()
         };
 
         // Build JS to fill each field in one eval call.
@@ -130,8 +131,8 @@ impl LadServer {
 
         // Execute all field fills.
         {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let guard = self.lock_active_page().await;
+            let ap = guard.resolve(p.tab_id)?;
             ap.page.eval_js(&fill_js).await.map_err(mcp_err)?;
         }
 
@@ -178,8 +179,8 @@ impl LadServer {
                     el.click();"#,
                 );
                 {
-                    let mut active = self.active_page.lock().await;
-                    let ap = active.as_ref().ok_or_else(no_active_page)?;
+                    let mut guard = self.lock_active_page().await;
+                    let ap = guard.resolve(p.tab_id)?;
                     check_js_result(&ap.page.eval_js(&click_js).await.map_err(mcp_err)?)?;
 
                     // Wait for potential navigation after submit.
@@ -192,7 +193,7 @@ impl LadServer {
                     // SSRF gate after navigation.
                     let current_url = ap.page.url().await.map_err(mcp_err)?;
                     if !llm_as_dom::sanitize::is_safe_url(&current_url) {
-                        *active = None;
+                        Self::invalidate_tab_on_ssrf(&mut guard, p.tab_id);
                         return Err(mcp_err(format!(
                             "blocked: form submission navigated to unsafe URL {current_url}"
                         )));
@@ -204,7 +205,7 @@ impl LadServer {
             }
         }
 
-        let view = self.refresh_active_view().await?;
+        let view = self.refresh_view_for(p.tab_id).await?;
         let total = p.fields.len();
         let submit_msg = if p.submit {
             if submitted {
