@@ -4,6 +4,7 @@
 //! specific browser engine (Chromium, WebKit, etc.).
 
 pub mod chromium;
+pub mod cloak_bootstrap;
 pub mod singleton_lock;
 pub mod stealth;
 pub mod webkit;

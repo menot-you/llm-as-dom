@@ -89,6 +89,24 @@ impl ChromiumEngine {
             builder = builder.arg(*flag);
         }
 
+        // CLOAK: Resolve a pre-patched stealth Chromium binary (CloakBrowser)
+        // and point chromiumoxide at it. CloakBrowser ships 49 C++-level
+        // fingerprint patches that defeat JS-layer detectors like Creepjs's
+        // `hasToStringProxy` cascade. Falls back to chromiumoxide's default
+        // Chromium detection when disabled or unsupported on this platform.
+        match super::cloak_bootstrap::resolve_cloak_binary() {
+            Ok(Some(cloak_path)) => {
+                tracing::info!(path = %cloak_path.display(), "using cloakbrowser stealth binary");
+                builder = builder.chrome_executable(&cloak_path);
+            }
+            Ok(None) => {
+                tracing::debug!("cloakbrowser disabled — using default Chromium");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cloakbrowser resolution failed — falling back to default Chromium");
+            }
+        }
+
         // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
         // --no-sandbox is a significant security reduction; only enable when necessary.
         if should_disable_sandbox() {
