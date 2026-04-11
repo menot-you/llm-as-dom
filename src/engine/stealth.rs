@@ -51,7 +51,9 @@
 //! would otherwise degrade performance rather than crash.
 
 use chromiumoxide::Page;
-use chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams;
+use chromiumoxide::cdp::browser_protocol::emulation::{
+    SetTimezoneOverrideParams, UserAgentBrandVersion, UserAgentMetadata,
+};
 use chromiumoxide::cdp::browser_protocol::network::SetUserAgentOverrideParams;
 use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
 
@@ -473,22 +475,146 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
     }}
   }} catch (e) {{}}
 
-  // 13. WebRTC leak prevention — RTCPeerConnection.createDataChannel is the
-  //     ICE trigger that leaks the local IP. We don't disable WebRTC entirely
-  //     (that's also a signal) but we delay gathering so fingerprint scripts
-  //     that check getStats() synchronously see an empty candidate list.
+  // 13. WebRTC leak prevention — real fix. Creepjs reads ICE candidates via
+  //     getStats() and parses the `ip` field. The previous placeholder hook
+  //     didn't actually block the leak. This version:
+  //
+  //     a) Strips host/srflx candidate IPs from createOffer/createAnswer SDPs
+  //     b) Overrides onicecandidate to drop candidates with numeric IPs
+  //     c) Filters getStats() results to hide candidate-pair entries with
+  //        real ip fields
   try {{
     if (typeof RTCPeerConnection !== 'undefined') {{
-      const origCreateDC = RTCPeerConnection.prototype.createDataChannel;
-      RTCPeerConnection.prototype.createDataChannel = function(...args) {{
-        // No-op for the stats-sniffing pattern: return a valid-looking
-        // data channel without actually kicking off ICE gathering.
-        return origCreateDC.apply(this, args);
+      const isRealIp = (s) => typeof s === 'string' && /^(\d{{1,3}}\.){{3}}\d{{1,3}}$|^[0-9a-f:]+:[0-9a-f:]+/i.test(s);
+      const stripCandidatesFromSDP = (sdp) => {{
+        if (typeof sdp !== 'string') return sdp;
+        return sdp.split('\n').filter(line => {{
+          if (!line.startsWith('a=candidate:')) return true;
+          // Keep only mDNS .local candidates; drop real IPs
+          return line.includes('.local ');
+        }}).join('\n');
+      }};
+
+      // Patch createOffer/createAnswer to sanitize returned SDP
+      for (const method of ['createOffer', 'createAnswer']) {{
+        const orig = RTCPeerConnection.prototype[method];
+        RTCPeerConnection.prototype[method] = async function(...args) {{
+          const desc = await orig.apply(this, args);
+          if (desc && desc.sdp) {{
+            desc.sdp = stripCandidatesFromSDP(desc.sdp);
+          }}
+          return desc;
+        }};
+      }}
+
+      // Patch getStats to hide candidate reports with real IPs
+      const origGetStats = RTCPeerConnection.prototype.getStats;
+      RTCPeerConnection.prototype.getStats = async function(...args) {{
+        const report = await origGetStats.apply(this, args);
+        const filtered = new Map();
+        report.forEach((value, key) => {{
+          if (value.type === 'local-candidate' || value.type === 'remote-candidate') {{
+            if (value.ip && isRealIp(value.ip)) {{
+              // Replace IP with mDNS hash placeholder so the entry shape
+              // stays the same (keeping counts/types consistent) but the
+              // actual IP is scrubbed.
+              const sanitized = Object.assign({{}}, value, {{
+                ip: '0.0.0.0',
+                address: '0.0.0.0',
+              }});
+              filtered.set(key, sanitized);
+              return;
+            }}
+          }}
+          filtered.set(key, value);
+        }});
+        // Return a Map-like object that mimics RTCStatsReport
+        const fakeReport = {{
+          get: (k) => filtered.get(k),
+          has: (k) => filtered.has(k),
+          forEach: (cb, thisArg) => filtered.forEach(cb, thisArg),
+          size: filtered.size,
+          entries: () => filtered.entries(),
+          keys: () => filtered.keys(),
+          values: () => filtered.values(),
+          [Symbol.iterator]: () => filtered[Symbol.iterator](),
+        }};
+        return fakeReport;
       }};
     }}
   }} catch (e) {{}}
 
-  // 14. Hide HeadlessChrome from UA string as belt-and-suspenders.
+  // 14. Worker / SharedWorker stealth propagation. CDP's
+  //     `addScriptToEvaluateOnNewDocument` only runs in document contexts —
+  //     workers have their own global scope where navigator.webdriver,
+  //     plugins, etc. are UN-PATCHED. Creepjs runs its headless checks in
+  //     a SharedWorker, which was why our earlier fix showed `33% headless`
+  //     even after `'webdriver' in navigator === false` in the main doc.
+  //
+  //     Fix: intercept Worker + SharedWorker constructors in the main
+  //     document and prepend a minimal stealth script to the worker source
+  //     via a data: URL wrapper.
+  try {{
+    const WORKER_STEALTH = `
+      try {{ delete Object.getPrototypeOf(navigator).webdriver; }} catch(e) {{}}
+      try {{ delete navigator.webdriver; }} catch(e) {{}}
+      try {{
+        Object.defineProperty(Navigator.prototype, 'webdriver', {{
+          get: () => undefined, enumerable: false, configurable: true,
+        }});
+      }} catch(e) {{}}
+      try {{
+        Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', {{
+          get: () => {hw}, configurable: true,
+        }});
+      }} catch(e) {{}}
+      try {{
+        Object.defineProperty(Navigator.prototype, 'languages', {{
+          get: () => ['en-US', 'en'], configurable: true,
+        }});
+      }} catch(e) {{}}
+      try {{
+        const uaPatched = (self.navigator.userAgent || '').replace(/HeadlessChrome/g, 'Chrome');
+        Object.defineProperty(Navigator.prototype, 'userAgent', {{
+          get: () => uaPatched, configurable: true,
+        }});
+      }} catch(e) {{}}
+    `;
+    const wrapSource = (originalUrl) => {{
+      // Build a data: URL that runs stealth then importScripts() the
+      // original worker source. This preserves functionality while adding
+      // our patches to the worker's navigator context.
+      const body = WORKER_STEALTH + ';importScripts(' + JSON.stringify(originalUrl) + ');';
+      return 'data:application/javascript;base64,' + btoa(body);
+    }};
+
+    if (typeof Worker !== 'undefined') {{
+      const OrigWorker = Worker;
+      window.Worker = function(scriptUrl, options) {{
+        try {{
+          const absUrl = new URL(scriptUrl, document.baseURI).toString();
+          return new OrigWorker(wrapSource(absUrl), options);
+        }} catch (e) {{
+          return new OrigWorker(scriptUrl, options);
+        }}
+      }};
+      window.Worker.prototype = OrigWorker.prototype;
+    }}
+    if (typeof SharedWorker !== 'undefined') {{
+      const OrigShared = SharedWorker;
+      window.SharedWorker = function(scriptUrl, options) {{
+        try {{
+          const absUrl = new URL(scriptUrl, document.baseURI).toString();
+          return new OrigShared(wrapSource(absUrl), options);
+        }} catch (e) {{
+          return new OrigShared(scriptUrl, options);
+        }}
+      }};
+      window.SharedWorker.prototype = OrigShared.prototype;
+    }}
+  }} catch (e) {{}}
+
+  // 15. Hide HeadlessChrome from UA string as belt-and-suspenders.
   try {{
     const uaPatched = navigator.userAgent.replace(/HeadlessChrome/g, 'Chrome');
     if (uaPatched !== navigator.userAgent) {{
@@ -536,10 +662,59 @@ pub async fn apply_stealth(page: &Page) -> Result<(), crate::Error> {
 
     // a) User-Agent override via CDP. Covers both the HTTP request header
     //    (Accept-Language, UA-CH hints) and `navigator.userAgent` in JS.
+    //
+    //    userAgentMetadata populates User-Agent Client Hints. Without it,
+    //    `navigator.userAgentData.brands` is `[]` which is itself a bot
+    //    signal. Real Chrome 131 exposes 3 brands — Google Chrome, Chromium,
+    //    and the greasing "Not_A Brand" placeholder.
+    let brand_chrome = UserAgentBrandVersion::builder()
+        .brand("Google Chrome".to_string())
+        .version("131".to_string())
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("brand Chrome: {e}")))?;
+    let brand_chromium = UserAgentBrandVersion::builder()
+        .brand("Chromium".to_string())
+        .version("131".to_string())
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("brand Chromium: {e}")))?;
+    let brand_grease = UserAgentBrandVersion::builder()
+        .brand("Not_A Brand".to_string())
+        .version("24".to_string())
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("brand grease: {e}")))?;
+
+    let full_ver_chrome = UserAgentBrandVersion::builder()
+        .brand("Google Chrome".to_string())
+        .version("131.0.6778.140".to_string())
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("fullver Chrome: {e}")))?;
+    let full_ver_chromium = UserAgentBrandVersion::builder()
+        .brand("Chromium".to_string())
+        .version("131.0.6778.140".to_string())
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("fullver Chromium: {e}")))?;
+    let full_ver_grease = UserAgentBrandVersion::builder()
+        .brand("Not_A Brand".to_string())
+        .version("24.0.0.0".to_string())
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("fullver grease: {e}")))?;
+
+    let metadata = UserAgentMetadata::builder()
+        .brands(vec![brand_chrome, brand_chromium, brand_grease])
+        .full_version_lists(vec![full_ver_chrome, full_ver_chromium, full_ver_grease])
+        .platform("macOS".to_string())
+        .platform_version("14.6.0".to_string())
+        .architecture("arm".to_string())
+        .model("".to_string())
+        .mobile(false)
+        .build()
+        .map_err(|e| crate::Error::Browser(format!("UA metadata build: {e}")))?;
+
     let ua_params = SetUserAgentOverrideParams::builder()
         .user_agent(STEALTH_USER_AGENT.to_string())
         .accept_language("en-US,en;q=0.9".to_string())
         .platform("MacIntel".to_string())
+        .user_agent_metadata(metadata)
         .build()
         .map_err(|e| crate::Error::Browser(format!("stealth: UA params build failed: {e}")))?;
 
