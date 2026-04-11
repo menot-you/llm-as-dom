@@ -216,21 +216,28 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
   window.__lad_stealth_applied = true;
 
   // 0. Function.prototype.toString patch — MUST run before any other hook.
-  //    Creepjs's `hasToStringProxy` check calls the native method on a
-  //    non-Function (e.g. `Function.prototype.toString.call({{}})`) and
-  //    expects a TypeError. Naive proxies that always return a string fail
-  //    this check. Our replacement MUST throw for non-Function receivers
-  //    to match native behavior exactly.
+  //    Creepjs's lies module checks EVERY hook with:
+  //      - 'prototype' in apiFunction  (native has none)
+  //      - Object.keys(getOwnPropertyDescriptors(fn)) == 'length,name'  (native)
+  //      - hasKnownToString whitelist
+  //    Regular function expressions carry a 'prototype' own property that
+  //    natives lack. We therefore build the proxy via method shorthand
+  //    inside an object literal — that produces a function WITHOUT a
+  //    prototype property, matching native shape. Then we fix length+name
+  //    to match Function.prototype.toString's native descriptors.
   try {{
     const nativeToString = Function.prototype.toString;
     const nativeFunctionToString = nativeToString.call(nativeToString);
     const nativeMap = new WeakMap();
-    // Marker helper used by the rest of this script to tag replacement
-    // functions with their native-form string. Non-enumerable so it
-    // doesn't show up in `Object.keys(window)` enumeration.
     Object.defineProperty(window, '__lad_mark_native', {{
       value: (fn, name) => {{
         try {{
+          // ALSO strip the `prototype` own property from the fn so it
+          // matches native shape. Method-shorthand and arrow fns don't
+          // have prototype, but regular `function foo(){{}}` declarations do.
+          if ('prototype' in fn && Object.getOwnPropertyDescriptor(fn, 'prototype')?.configurable !== false) {{
+            try {{ delete fn.prototype; }} catch (e) {{}}
+          }}
           nativeMap.set(fn, `function ${{name}}() {{ [native code] }}`);
         }} catch (e) {{}}
         return fn;
@@ -239,62 +246,48 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
       enumerable: false,
       configurable: false,
     }});
-    const proxyToString = function toString() {{
-      // MATCH NATIVE: throw TypeError if `this` is not a Function.
-      // nativeToString.call(this) throws for us when this is non-callable.
-      if (typeof this !== 'function') {{
-        return nativeToString.call(this); // delegates → native TypeError
-      }}
-      try {{
-        if (nativeMap.has(this)) return nativeMap.get(this);
-      }} catch (e) {{}}
-      return nativeToString.call(this);
-    }};
-    // Copy name/length/prototype to match the native function's shape.
-    // Name: native is 'toString'. Our function declaration also names it
-    // 'toString' so .name === 'toString' already.
-    // Length: native toString.length === 0 (takes no args).
-    Object.defineProperty(proxyToString, 'length', {{ value: 0, configurable: true }});
-    // Install via defineProperty with the SAME descriptor flags as native:
-    // writable: true, enumerable: false, configurable: true.
+
+    // Build proxyToString via method-shorthand so it lacks `prototype`.
+    const proxyToString = {{
+      toString() {{
+        // Match native: throw TypeError for non-Function receivers.
+        if (typeof this !== 'function') {{
+          return nativeToString.call(this);
+        }}
+        try {{
+          if (nativeMap.has(this)) return nativeMap.get(this);
+        }} catch (e) {{}}
+        return nativeToString.call(this);
+      }},
+    }}.toString;
+    // length must match native (0)
+    try {{ Object.defineProperty(proxyToString, 'length', {{ value: 0, configurable: true }}); }} catch (e) {{}}
+    // Install with native descriptor flags.
     Object.defineProperty(Function.prototype, 'toString', {{
       value: proxyToString,
       writable: true,
       enumerable: false,
       configurable: true,
     }});
-    // Recursively mark toString itself so Function.prototype.toString.toString()
-    // returns the native-form string, not our JS source.
+    // Map so toString.toString() returns native-form.
     nativeMap.set(proxyToString, nativeFunctionToString);
   }} catch (e) {{}}
 
-  // 1. navigator.webdriver → DELETED. Real Chrome doesn't have the property
-  //    defined at all. Creepjs and modern detectors check `'webdriver' in
-  //    navigator`, which returns true for any property — even one whose
-  //    getter returns `undefined`. The only way to pass is to actually
-  //    delete the descriptor from the prototype chain.
+  // 1. navigator.webdriver = false (NOT undefined, NOT deleted).
+  //    Creepjs's webDriverIsOn check is a double-bind trap:
+  //      webDriverIsOn = (CSS.supports('border-end-end-radius: initial')
+  //                        && navigator.webdriver === undefined)
+  //                      || !!navigator.webdriver
+  //                      || !!lieProps['Navigator.webdriver']
+  //    Chrome supports the CSS prop, so if webdriver is undefined we fail.
+  //    Only setting it to `false` (matching real user Chrome) passes.
   try {{
-    // Delete any descriptor Chromium set via --enable-automation. Some
-    // builds set it as own property on the instance, others on prototype.
-    try {{ delete Object.getPrototypeOf(navigator).webdriver; }} catch (e) {{}}
-    try {{ delete navigator.webdriver; }} catch (e) {{}}
-    // Now redefine as non-enumerable with undefined getter, so if anything
-    // re-installs it later we still return undefined. `enumerable: false`
-    // makes `'webdriver' in navigator` still return true — so we avoid
-    // defineProperty entirely and rely on the delete above. Verify no
-    // residue with a post-check; if the property reappears (e.g. a browser
-    // extension or the CDP injector), fall back to a hidden stub.
-    if ('webdriver' in navigator) {{
-      // Last-resort: define as non-configurable undefined so at least
-      // access returns undefined even if `in` still sees it.
-      try {{
-        Object.defineProperty(Navigator.prototype, 'webdriver', {{
-          get: () => undefined,
-          enumerable: false,
-          configurable: true,
-        }});
-      }} catch (e) {{}}
-    }}
+    Object.defineProperty(Navigator.prototype, 'webdriver', {{
+      get: () => false,
+      set: () => {{}},
+      enumerable: true,
+      configurable: true,
+    }});
   }} catch (e) {{}}
 
   // 2. navigator.plugins — real Chrome on BOTH macOS and Windows exposes
@@ -459,26 +452,20 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
     }}
   }} catch (e) {{}}
 
-  // 9. WebGL vendor + renderer — host-appropriate GPU identity.
-  //    Each patched function is marked via __lad_mark_native so
-  //    `Function.prototype.toString.call(getParameter)` returns the native
-  //    `function getParameter() {{ [native code] }}` instead of our JS source.
-  try {{
-    const patchGetParameter = (proto) => {{
-      const orig = proto.getParameter;
-      const patched = function getParameter(parameter) {{
-        if (parameter === 37445) return '{gpu_vendor}';
-        if (parameter === 37446) return '{gpu_renderer}';
-        return orig.apply(this, [parameter]);
-      }};
-      if (window.__lad_mark_native) window.__lad_mark_native(patched, 'getParameter');
-      proto.getParameter = patched;
-    }};
-    patchGetParameter(WebGLRenderingContext.prototype);
-    if (typeof WebGL2RenderingContext !== 'undefined') {{
-      patchGetParameter(WebGL2RenderingContext.prototype);
-    }}
-  }} catch (e) {{}}
+  // 9. WebGL vendor + renderer — INTENTIONALLY NOT PATCHED.
+  //    Creepjs's hasBadWebGL check compares main-thread vs worker-thread
+  //    GPU strings. If they differ, flagged. Previous impl only patched
+  //    the main thread (via addScriptToEvaluateOnNewDocument); the worker
+  //    context runs Chrome's actual WebGL which returns the real GPU. That
+  //    mismatch flagged us. Since we can't reliably patch workers for every
+  //    site (data: URL wrapping has known limitations), the safest path is
+  //    to let Chrome's native WebGL values flow through in BOTH contexts.
+  //    Chrome's masked vendor ('Google Inc.') is already bot-neutral —
+  //    real users see the same string without the WEBGL_debug_renderer_info
+  //    extension enabled. Gpu mismatch between main and worker was the
+  //    primary hasBadWebGL trigger; removing the patch restores parity.
+  //    Fingerprint detection stays in Rust for future reinstatement:
+  //    gpu_vendor='{gpu_vendor}' gpu_renderer='{gpu_renderer}'
 
   // 10. Timezone — Intl.DateTimeFormat and Date offsets must both report
   //     the host timezone. CDP Emulation.setTimezoneOverride covers this
@@ -776,12 +763,9 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
     }}
   }} catch (e) {{}}
 
-  // 16. Missing APIs that headless Chrome doesn't expose — Creepjs checks
-  //     for these explicitly in its `noContentIndex`, `noContactsManager`,
-  //     `noDownlinkMax` tests. Stubbing them matches the shape of a real
-  //     Chrome 131 navigator on macOS.
+  // 16. Missing APIs that headless Chrome doesn't expose.
   try {{
-    // navigator.contentIndex — Content Index API (PWA content listings)
+    // navigator.contentIndex — Content Index API
     if (!('contentIndex' in navigator) && 'serviceWorker' in navigator) {{
       const stub = {{
         add: () => Promise.resolve(),
@@ -806,10 +790,30 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
       }});
     }}
 
-    // navigator.connection.downlinkMax — NetworkInformation API
-    if (navigator.connection && !('downlinkMax' in navigator.connection)) {{
+    // navigator.share + navigator.canShare — Web Share API (noWebShare check)
+    if (!('share' in navigator)) {{
+      Object.defineProperty(Navigator.prototype, 'share', {{
+        value: (data) => Promise.resolve(),
+        writable: true,
+        configurable: true,
+      }});
+    }}
+    if (!('canShare' in navigator)) {{
+      Object.defineProperty(Navigator.prototype, 'canShare', {{
+        value: (data) => true,
+        writable: true,
+        configurable: true,
+      }});
+    }}
+
+    // navigator.connection.downlinkMax — NetworkInformation API.
+    // Previous impl used defineProperty on the instance but that failed
+    // silently (eval returned null). Use the prototype instead — it's
+    // configurable even on browsers where the instance isn't.
+    if (navigator.connection) {{
       try {{
-        Object.defineProperty(navigator.connection, 'downlinkMax', {{
+        const proto = Object.getPrototypeOf(navigator.connection);
+        Object.defineProperty(proto, 'downlinkMax', {{
           get: () => Infinity,
           configurable: true,
         }});
@@ -817,28 +821,49 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
     }}
   }} catch (e) {{}}
 
-  // 17. hasKnownBgColor — Creepjs renders an element and reads its computed
-  //     background color, comparing against a list of values that headless
-  //     Chrome uses by default (rgba(0,0,0,0), rgb(255,255,255), etc).
-  //     Override the default document styles with CSS injected into the
-  //     earliest possible point (head) so computed styles differ.
+  // 17. hasKnownBgColor — Creepjs renders a div with `background-color:
+  //     ActiveText` and checks if computed style is rgb(255, 0, 0) — the
+  //     headless Chrome default. Override getComputedStyle to return a
+  //     different color ONLY when the style value would be ActiveText red.
+  //     Cheaper than fighting system-color resolution at the CSSOM layer.
   try {{
-    const applyBgFix = () => {{
-      if (!document.head) {{
-        // Too early — try again after DOMContentLoaded.
-        document.addEventListener('DOMContentLoaded', applyBgFix, {{ once: true }});
-        return;
-      }}
-      if (document.getElementById('__lad_bg_fix')) return;
-      const style = document.createElement('style');
-      style.id = '__lad_bg_fix';
-      // Set an inherited background on :root that's not in the headless
-      // default list. Using a near-white off-white (#fafafa) that real
-      // user themes commonly set.
-      style.textContent = ':root {{ background-color: #fafafa; }}';
-      document.head.appendChild(style);
-    }};
-    applyBgFix();
+    const origGetComputedStyle = window.getComputedStyle;
+    const patched = {{
+      getComputedStyle(elt, pseudoElt) {{
+        const result = origGetComputedStyle.call(this, elt, pseudoElt);
+        try {{
+          // Wrap so accessing .backgroundColor returns the spoofed value
+          // only when the inline style was ActiveText — otherwise native.
+          const inlineBg = elt && elt.style && elt.style.backgroundColor;
+          if (inlineBg === 'ActiveText' || inlineBg === 'activetext') {{
+            return new Proxy(result, {{
+              get(target, prop) {{
+                if (prop === 'backgroundColor') return 'rgb(0, 0, 238)';
+                return Reflect.get(target, prop);
+              }},
+            }});
+          }}
+        }} catch (inner) {{}}
+        return result;
+      }},
+    }}.getComputedStyle;
+    if (window.__lad_mark_native) window.__lad_mark_native(patched, 'getComputedStyle');
+    window.getComputedStyle = patched;
+  }} catch (e) {{}}
+
+  // 18. screen.availHeight / availWidth — must NOT equal height/width
+  //     (that's the `noTaskbar` check: real OS has a taskbar/menubar).
+  try {{
+    const realH = screen.height;
+    const realW = screen.width;
+    Object.defineProperty(Screen.prototype, 'availHeight', {{
+      get: () => Math.max(realH - 25, realH * 0.97 | 0),
+      configurable: true,
+    }});
+    Object.defineProperty(Screen.prototype, 'availWidth', {{
+      get: () => realW,
+      configurable: true,
+    }});
   }} catch (e) {{}}
 }})();
 "#,
