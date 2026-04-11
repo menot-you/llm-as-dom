@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Fake Twitter Shell</title>
+  <title>Fake SPA Shell</title>
 </head>
 <body>
-  <!-- DX-CL2 fixture: simulates a Twitter/X-style React SPA shell.
+  <!-- DX-CL2 fixture: simulates a generic microblog-style React SPA shell.
        - Contains #react-root (framework root marker)
-       - Exposes window.__NEXT_DATA__ (Next.js shell marker)
+       - Exposes window.__NEXT_DATA__ (framework shell marker)
        - Initial HTML has ZERO interactive elements but plenty of visible text
        - Interactive content is injected after 800ms to mimic hydration
 
@@ -16,7 +16,7 @@
   -->
   <div id="react-root">
     <main>
-      <h1>Fake Twitter Shell</h1>
+      <h1>Fake SPA Shell</h1>
       <p>
         This page is rendered by a fake single-page application
         framework. The real interactive content — post composer, timeline,
@@ -29,8 +29,9 @@
         DOM contains heading text, hero copy, and placeholder skeletons,
         but no buttons, inputs, textareas, or links. That combination has
         historically tripped heuristic cloaking detectors into blocking
-        legitimate pages like Twitter, Discord web, Slack web, Notion,
-        Gmail, LinkedIn, Substack, and Medium.
+        legitimate pages built as React/Next.js SPAs — microblog apps,
+        chat apps, knowledge-base apps, webmail, and long-form publishing
+        apps all fall into this pattern.
       </p>
       <p>
         The fix is to (1) raise the visible-text threshold, (2) require an
@@ -42,10 +43,10 @@
     </main>
   </div>
   <script>
-    // Next.js-style hydration marker — probed by ShellMarkers::has_next_data.
+    // Framework hydration marker — probed by ShellMarkers::has_next_data.
     window.__NEXT_DATA__ = { props: { pageProps: {} }, query: {}, buildId: 'test' };
 
-    // Delayed hydration: inject a Twitter-like composer after 800ms.
+    // Delayed hydration: inject a microblog-style composer after 800ms.
     // The LAD extractor's SPA-shell retry (1500ms) must see these elements
     // on the second pass.
     setTimeout(() => {

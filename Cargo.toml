@@ -29,9 +29,10 @@ path = "src/relay/main.rs"
 
 [dependencies]
 # Browser (CDP)
-# NOTE: chromiumoxide pulls async-std transitively (RUSTSEC-2025-0052).
-# Track chromiumoxide releases for an upgrade that drops async-std. (FIX-R3-09)
-chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
+# Upgraded to 0.9 for Chromium 145+ CDP compatibility. chromiumoxide 0.7
+# panics on PermissionBlock enum variant in Network.privateNetworkRequestPolicy
+# which CloakBrowser (Chromium 145) emits, killing the WS handler stream.
+chromiumoxide = { version = "0.9", default-features = false, features = ["rustls", "zip8"] }
 futures = "0.3"
 
 # Async runtime
