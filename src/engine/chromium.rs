@@ -153,19 +153,23 @@ impl BrowserEngine for ChromiumEngine {
             .await
             .map_err(cdp_err)?;
 
-        // LAD_SKIP_JS_STEALTH=1 lets us A/B test the CloakBrowser C++ patches
-        // WITHOUT our JS stealth on top. Our JS layer installs a
-        // Function.prototype.toString proxy that Creepjs flags as
-        // hasToStringProxy, which then cascades via detectProxies mode to
-        // poison the Navigator.webdriver lies check — even though
-        // CloakBrowser's native C++ patches already fix webdriver.
-        let skip_stealth = std::env::var("LAD_SKIP_JS_STEALTH")
+        // JS stealth is OFF by default. Empirical validation on 2026-04-11
+        // showed CloakBrowser (Chromium 145 with 49 C++ fingerprint patches)
+        // scores 0% Headless / 0% Stealth on Creepjs when running alone.
+        // Adding our JS stealth layer REGRESSES scores to 33% / 20%
+        // because Creepjs's lies module detects our
+        // Function.prototype.toString proxy as hasToStringProxy:true, which
+        // cascades via detectProxies mode to flag Navigator.webdriver as
+        // a lie even though CloakBrowser already handles it at C++ level.
+        //
+        // Opt-in: LAD_USE_JS_STEALTH=1 for users running with
+        // LAD_CLOAK_DISABLE=1 or a platform without a CloakBrowser binary.
+        let use_js_stealth = std::env::var("LAD_USE_JS_STEALTH")
             .ok()
             .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
-        if !skip_stealth {
+        if use_js_stealth {
+            tracing::info!("LAD_USE_JS_STEALTH=1 — applying JS stealth on top of engine");
             super::stealth::apply_stealth(&page).await?;
-        } else {
-            tracing::info!("LAD_SKIP_JS_STEALTH=1 — skipping JS stealth layer");
         }
 
         if !url.is_empty() && url != "about:blank" {
