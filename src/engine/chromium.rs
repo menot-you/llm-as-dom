@@ -335,53 +335,89 @@ impl PageHandle for ChromiumPage {
     }
 
     /// FIX-R3-13: Cookie values are NEVER logged. We log only the count.
-    /// The JS expression sent to `page.evaluate` contains cookie values but
-    /// chromiumoxide does not log evaluate expressions at info/warn level.
-    /// If RUST_LOG includes chromiumoxide=debug, CDP traffic may expose values —
-    /// avoid debug-level logging for chromiumoxide in production.
+    ///
+    /// Set cookies via CDP `Network.setCookies` instead of `document.cookie`
+    /// assignment in JS. The JS approach silently drops HttpOnly cookies
+    /// (cannot be set via `document.cookie` by spec), which broke profile
+    /// cookie injection for sites like X that use HttpOnly `auth_token`
+    /// for session state. CDP-level setting bypasses every restriction:
+    /// HttpOnly, Secure, SameSite=None, cross-domain — all work.
     async fn set_cookies(
         &self,
         cookies: &[crate::session::CookieEntry],
     ) -> Result<(), crate::Error> {
-        for cookie in cookies {
-            let mut parts = vec![format!(
-                "{}={}",
-                crate::pilot::js_escape(&cookie.name),
-                crate::pilot::js_escape(&cookie.value)
-            )];
+        use chromiumoxide::cdp::browser_protocol::network::{
+            CookieParam, CookieSameSite, SetCookiesParams, TimeSinceEpoch,
+        };
 
-            if !cookie.domain.is_empty() {
-                parts.push(format!("domain={}", cookie.domain));
-            }
-            if !cookie.path.is_empty() {
-                parts.push(format!("path={}", cookie.path));
-            }
-            if cookie.expires > 0.0 {
-                parts.push(format!("expires={}", cookie.expires));
-            }
-            if cookie.secure {
-                parts.push("secure".to_string());
-            }
-            if let Some(ref ss) = cookie.same_site {
-                parts.push(format!("samesite={ss}"));
-            }
-
-            let cookie_str = parts.join("; ");
-            let js = format!(
-                "document.cookie = '{}'",
-                crate::pilot::js_escape(&cookie_str)
-            );
-            let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
-            let _ = tokio::time::timeout(timeout, self.page.evaluate(js))
-                .await
-                .map_err(|_| crate::Error::Timeout {
-                    timeout_secs: EVAL_JS_TIMEOUT_SECS,
-                })?
-                .map_err(cdp_err)?;
+        if cookies.is_empty() {
+            return Ok(());
         }
 
-        tracing::debug!(count = cookies.len(), "injected cookies via JS");
-        Ok(())
+        // Map our internal CookieEntry to CDP CookieParam. Domain must be
+        // present (without leading dot is fine). If expires <= 0 the cookie
+        // is a session cookie — omit the field entirely.
+        let cdp_cookies: Vec<CookieParam> = cookies
+            .iter()
+            .filter(|c| !c.name.is_empty())
+            .map(|c| {
+                let domain = if c.domain.is_empty() {
+                    None
+                } else {
+                    Some(c.domain.clone())
+                };
+                let path = if c.path.is_empty() {
+                    Some("/".to_string())
+                } else {
+                    Some(c.path.clone())
+                };
+                let expires = if c.expires > 0.0 {
+                    Some(TimeSinceEpoch::new(c.expires))
+                } else {
+                    None
+                };
+                let same_site = c.same_site.as_deref().and_then(|s| match s {
+                    "Strict" => Some(CookieSameSite::Strict),
+                    "Lax" => Some(CookieSameSite::Lax),
+                    "None" => Some(CookieSameSite::None),
+                    _ => None,
+                });
+                CookieParam {
+                    name: c.name.clone(),
+                    value: c.value.clone(),
+                    url: None,
+                    domain,
+                    path,
+                    secure: Some(c.secure),
+                    http_only: Some(c.http_only),
+                    same_site,
+                    expires,
+                    priority: None,
+                    same_party: None,
+                    source_scheme: None,
+                    source_port: None,
+                    partition_key: None,
+                }
+            })
+            .collect();
+
+        let total = cdp_cookies.len();
+        let params = SetCookiesParams::new(cdp_cookies);
+
+        let timeout = std::time::Duration::from_secs(EVAL_JS_TIMEOUT_SECS);
+        match tokio::time::timeout(timeout, self.page.execute(params)).await {
+            Ok(Ok(_)) => {
+                tracing::info!(count = total, "injected cookies via CDP Network.setCookies");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(count = total, error = %e, "CDP setCookies failed");
+                Err(cdp_err(e))
+            }
+            Err(_) => Err(crate::Error::Timeout {
+                timeout_secs: EVAL_JS_TIMEOUT_SECS,
+            }),
+        }
     }
 
     async fn set_input_files(&self, selector: &str, files: &[String]) -> Result<(), crate::Error> {
