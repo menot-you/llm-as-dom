@@ -119,19 +119,30 @@ impl LadServer {
     }
 
     /// Return an existing engine or launch a new one.
-    /// If `request_visible` differs from the current mode, restart the engine.
+    ///
+    /// - `None`: keep current visibility — NEVER restarts the engine.
+    ///   Previous behaviour silently flipped to headless when the caller
+    ///   omitted the param, which destroyed the active_page state and
+    ///   produced the misleading "no active page" error on the next
+    ///   snapshot call. Callers that don't care should pass `None`.
+    /// - `Some(v)`: force visibility `v`. Only restarts if `v` differs
+    ///   from the current mode.
     pub(crate) async fn ensure_engine_visible(
         &self,
-        request_visible: bool,
+        request_visible: Option<bool>,
     ) -> Result<Arc<dyn BrowserEngine>, llm_as_dom::Error> {
         use std::sync::atomic::Ordering;
         let mut engine_lock = self.engine.lock().await;
         let current = self.interactive.load(Ordering::Acquire);
-        let need_restart = engine_lock.is_some() && request_visible != current;
+        // Determine target visibility: None means "keep current"; Some(v)
+        // means "force v". Only restart when target differs from current
+        // AND an engine is actually alive to destroy.
+        let target = request_visible.unwrap_or(current);
+        let need_restart = engine_lock.is_some() && target != current;
         if need_restart {
             tracing::info!(
                 from = current,
-                to = request_visible,
+                to = target,
                 "visibility changed — restarting browser"
             );
             // Drop old engine + active page.
@@ -141,8 +152,8 @@ impl LadServer {
         // Store the new mode atomically. Safe under the engine lock because
         // `ensure_engine_inner` below will read this fresh value to launch
         // the new browser.
-        if request_visible != current {
-            self.interactive.store(request_visible, Ordering::Release);
+        if target != current {
+            self.interactive.store(target, Ordering::Release);
         }
         self.ensure_engine_inner(&mut engine_lock).await
     }

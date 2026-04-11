@@ -16,10 +16,12 @@ pub(crate) struct BrowseParams {
     pub max_steps: u32,
     /// Optional maximum length of the HTML/DOM text embedded into the prompt.
     pub max_length: Option<usize>,
-    /// Open the browser window visibly (default: false = headless).
-    /// When toggled, restarts the browser engine with the new mode.
+    /// Open the browser window visibly. `None` (omitted) inherits the
+    /// current engine state — no restart. `Some(true)` forces headed,
+    /// `Some(false)` forces headless. A visibility toggle destroys the
+    /// active page, so leave this out unless you need the change.
     #[serde(default)]
-    pub visible: bool,
+    pub visible: Option<bool>,
 }
 
 /// Default step limit for browsing goals.
@@ -102,10 +104,12 @@ pub(crate) struct SnapshotParams {
     /// `lad_browse` or `lad_snapshot`), re-extracts the current page without navigating.
     #[serde(default)]
     pub url: Option<String>,
-    /// Open the browser window visibly (default: false = headless).
-    /// When toggled, restarts the browser engine with the new mode.
+    /// Open the browser window visibly. `None` (omitted) inherits the
+    /// current engine state — no restart, active page preserved. Only set
+    /// this to `Some(true)` on the FIRST call of a session when you need
+    /// a visible window. Toggling mid-session destroys the active page.
     #[serde(default)]
-    pub visible: bool,
+    pub visible: Option<bool>,
     /// Hard timeout for the whole snapshot call in milliseconds.
     /// Default: 20000 (20s). Covers engine launch + navigation + content
     /// stabilization. Returns a timeout error instead of hanging if the

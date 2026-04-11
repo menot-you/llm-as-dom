@@ -140,12 +140,11 @@ impl LadServer {
                 )]))
             } else {
                 tracing::info!("lad_snapshot (current page)");
-                let view = self.refresh_active_view().await.map_err(|_| {
-                    rmcp::ErrorData::invalid_params(
-                        "no active page — provide a URL or call lad_browse first".to_string(),
-                        None,
-                    )
-                })?;
+                // DX-02b: propagate the real error from refresh_active_view
+                // instead of swallowing it as "no active page". The previous
+                // catch-all map_err was misleading when the failure was
+                // actually a CDP error, SSRF block, or a11y extract failure.
+                let view = self.refresh_active_view().await?;
                 Ok(CallToolResult::success(vec![Content::text(
                     view.to_prompt(),
                 )]))
