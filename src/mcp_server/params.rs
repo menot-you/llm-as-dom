@@ -22,6 +22,13 @@ pub(crate) struct BrowseParams {
     /// active page, so leave this out unless you need the change.
     #[serde(default)]
     pub visible: Option<bool>,
+    /// Wave 2 — reserved for future multi-tab browsing. Currently accepted
+    /// by the schema but not consumed: `lad_browse` always opens a fresh
+    /// tab and marks it as active. Keeps the shape consistent with all the
+    /// other tool params and avoids a schema-breaking addition in Wave 3.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub tab_id: Option<u32>,
 }
 
 /// Default step limit for browsing goals.
@@ -60,6 +67,10 @@ pub(crate) struct ExtractParams {
     /// nodes. Set to `true` when you need the full view (debugging, audit).
     #[serde(default)]
     pub include_hidden: Option<bool>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    /// Only meaningful when `url` is `None` (reading an already-open tab).
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Wave 1 — default page size for `lad_extract` / `lad_snapshot` pagination.
@@ -77,6 +88,10 @@ pub(crate) struct AssertParams {
     pub url: Option<String>,
     /// Assertions to verify (e.g. ["has login form", "title contains Dashboard"]).
     pub assertions: Vec<String>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    /// Only meaningful when `url` is `None`.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_locate` tool.
@@ -147,6 +162,10 @@ pub(crate) struct SnapshotParams {
     /// Wave 1 — hidden-element gate. See `ExtractParams::include_hidden`.
     #[serde(default)]
     pub include_hidden: Option<bool>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    /// Only meaningful when `url` is `None` (re-reading an already-open tab).
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Default snapshot hard timeout: 20 seconds.
@@ -174,6 +193,9 @@ pub(crate) struct ClickParams {
     /// If true, wait for the page to navigate after clicking before taking a new snapshot. Useful for links and submit buttons.
     #[serde(default)]
     pub wait_for_navigation: bool,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_type` tool.
@@ -191,6 +213,9 @@ pub(crate) struct TypeParams {
     /// If true, press Enter after typing (saves a separate `lad_press_key` call).
     #[serde(default)]
     pub press_enter: bool,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_select` tool.
@@ -207,6 +232,9 @@ pub(crate) struct SelectParams {
     /// If true, wait for the page to navigate after selecting before taking a new snapshot. Useful for dropdowns that auto-submit.
     #[serde(default)]
     pub wait_for_navigation: bool,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_eval` tool.
@@ -214,6 +242,9 @@ pub(crate) struct SelectParams {
 pub(crate) struct EvalParams {
     /// JavaScript expression to evaluate on the active page.
     pub script: String,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_press_key` tool.
@@ -223,6 +254,9 @@ pub(crate) struct PressKeyParams {
     pub key: String,
     /// Optional element ID from snapshot to focus before pressing the key.
     pub element: Option<u32>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_wait` tool.
@@ -244,6 +278,9 @@ pub(crate) struct WaitParams {
     /// Poll interval in ms (default: 500).
     #[serde(default = "default_wait_poll")]
     pub poll_ms: u64,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 fn default_wait_timeout() -> u64 {
@@ -265,6 +302,9 @@ pub(crate) struct NetworkParams {
     /// Filter by request kind: "auth", "api", "navigation", "asset", or "all" (default).
     #[serde(default = "default_network_filter")]
     pub filter: String,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_hover` tool.
@@ -276,6 +316,9 @@ pub(crate) struct HoverParams {
     /// Semantic target spec. Mutually exclusive with `element`.
     #[serde(default)]
     pub target: Option<llm_as_dom::target::TargetSpec>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_dialog` tool.
@@ -285,6 +328,9 @@ pub(crate) struct DialogParams {
     pub action: String,
     /// Optional text to enter for prompt() dialogs (only used with "accept").
     pub text: Option<String>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Default scroll direction.
@@ -309,6 +355,9 @@ pub(crate) struct ScrollParams {
     /// Custom scroll amount in pixels (only for "up"/"down"). Default: 600.
     #[serde(default = "default_scroll_pixels")]
     pub pixels: u32,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_fill_form` tool.
@@ -324,6 +373,9 @@ pub(crate) struct FillFormParams {
     /// from the semantic view. When omitted, searches all elements.
     #[serde(default)]
     pub form_index: Option<u32>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_upload` tool.
@@ -333,6 +385,9 @@ pub(crate) struct UploadParams {
     pub element: u32,
     /// Absolute file paths to upload.
     pub files: Vec<String>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the Wave 1 `lad_jq` tool.
@@ -347,6 +402,9 @@ pub(crate) struct JqParams {
     /// jq expression, e.g. `.title` or
     /// `.elements | map(select(.kind == "button")) | map(.label)`.
     pub query: String,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
 }
 
 /// Parameters for the `lad_clear` tool.
@@ -358,4 +416,29 @@ pub(crate) struct ClearParams {
     /// Semantic target spec. Mutually exclusive with `element`.
     #[serde(default)]
     pub target: Option<llm_as_dom::target::TargetSpec>,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    pub tab_id: Option<u32>,
+}
+
+// ── Wave 2: tab management ──────────────────────────────────
+
+/// Parameters for the `lad_tabs_list` tool. Takes no arguments — listed
+/// as an empty struct so the rmcp macro generates a JSON schema for it.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub(crate) struct TabsListParams {}
+
+/// Parameters for the `lad_tabs_switch` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct TabSwitchParams {
+    /// ID of the tab to make active. Must exist in the current session.
+    pub tab_id: u32,
+}
+
+/// Parameters for the `lad_tabs_close` tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct TabCloseParams {
+    /// ID of the tab to close. If this was the active tab, the active tab
+    /// slot is cleared. Must exist in the current session.
+    pub tab_id: u32,
 }

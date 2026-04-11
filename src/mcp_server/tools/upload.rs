@@ -6,7 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 
 use crate::LadServer;
-use crate::helpers::{build_element_js, check_js_result, mcp_err, no_active_page};
+use crate::helpers::{build_element_js, check_js_result, mcp_err};
 use crate::params::UploadParams;
 
 /// FIX-7: Default delay (ms) after interaction before re-extracting the DOM.
@@ -30,7 +30,7 @@ impl LadServer {
                     .unwrap_or("[invalid]")
             })
             .collect();
-        tracing::info!(element = p.element, files = ?file_names, "lad_upload");
+        tracing::info!(element = p.element, files = ?file_names, tab_id = ?p.tab_id, "lad_upload");
 
         if p.files.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
@@ -71,8 +71,8 @@ impl LadServer {
         let selector = format!(r#"[data-lad-id="{}"]"#, p.element);
 
         {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let guard = self.lock_active_page().await;
+            let ap = guard.resolve(p.tab_id)?;
 
             // Verify element exists and is a file input
             let check_body = format!(
@@ -96,9 +96,9 @@ impl LadServer {
             ap.page.eval_js(&change_js).await.map_err(mcp_err)?;
         }
 
-        // FIX-R8-02: Route upload through refresh_active_view chokepoint.
+        // FIX-R8-02: Route upload through refresh_view_for chokepoint.
         tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_INTERACT_DELAY_MS)).await;
-        let view = self.refresh_active_view().await?;
+        let view = self.refresh_view_for(p.tab_id).await?;
         Ok(CallToolResult::success(vec![Content::text(format!(
             "{}\n\n--- Updated View ---\n{}",
             serde_json::json!({

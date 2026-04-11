@@ -4,7 +4,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 
 use crate::LadServer;
-use crate::helpers::{mcp_err, no_active_page, to_pretty_json};
+use crate::helpers::{mcp_err, to_pretty_json};
 use crate::params::{ExtractParams, JqParams, SnapshotParams};
 
 impl LadServer {
@@ -28,7 +28,9 @@ impl LadServer {
             let (_page, view) = self.navigate_and_extract(url).await?;
             view
         } else {
-            self.refresh_active_view().await.map_err(|_| {
+            // Wave 2: route through the tab-aware refresh so `tab_id` opt-in
+            // works uniformly across extract/snapshot/assert/wait.
+            self.refresh_view_for(p.tab_id).await.map_err(|_| {
                 rmcp::ErrorData::invalid_params(
                     "no active page — provide a URL or call lad_browse/lad_snapshot first"
                         .to_string(),
@@ -179,12 +181,12 @@ impl LadServer {
                 tracing::info!(url = %url, "lad_snapshot (with url)");
                 self.navigate_or_reuse(url).await?
             } else {
-                tracing::info!("lad_snapshot (current page)");
-                // DX-02b: propagate the real error from refresh_active_view
+                tracing::info!(tab_id = ?p.tab_id, "lad_snapshot (current page)");
+                // DX-02b: propagate the real error from refresh_view_for
                 // instead of swallowing it as "no active page". The previous
                 // catch-all map_err was misleading when the failure was
                 // actually a CDP error, SSRF block, or a11y extract failure.
-                self.refresh_active_view().await?
+                self.refresh_view_for(p.tab_id).await?
             };
 
             // Wave 1 — hidden-element gate (default-on). See `retain_visible_elements`.
@@ -229,12 +231,11 @@ impl LadServer {
         params: Parameters<JqParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        // Snapshot the current view under the lock and release immediately
+        // Snapshot the current view under the guard and release immediately
         // so jq execution doesn't hold a mutex across CPU work.
         let view = {
-            let guard = self.active_page.lock().await;
-            let ap = guard.as_ref().ok_or_else(no_active_page)?;
-            ap.view.clone()
+            let guard = self.lock_active_page().await;
+            guard.resolve(p.tab_id)?.view.clone()
         };
 
         let input = serde_json::to_value(&view).map_err(|e| {
@@ -265,11 +266,16 @@ impl LadServer {
         )]))
     }
 
-    /// Take a screenshot of the active page.
+    /// Take a screenshot of the active page (or an explicit tab).
+    ///
+    /// Wave 2: `lad_screenshot` takes no top-level tool params today, so the
+    /// rmcp wrapper invokes this with `tab_id = None` and we always shoot the
+    /// active tab. Switching to an explicit tab requires calling
+    /// `lad_tabs_switch` first.
     pub(crate) async fn tool_lad_screenshot(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         tracing::info!("lad_screenshot");
-        let guard = self.active_page.lock().await;
-        let active = guard.as_ref().ok_or_else(no_active_page)?;
+        let guard = self.lock_active_page().await;
+        let active = guard.resolve(None)?;
         let png = active.page.screenshot_png().await.map_err(mcp_err)?;
         let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
         Ok(CallToolResult::success(vec![Content::image(

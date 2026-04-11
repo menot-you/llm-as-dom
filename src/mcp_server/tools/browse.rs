@@ -125,11 +125,14 @@ impl LadServer {
             }
         }
 
-        // FIX-5: Persist the page and final view into active_page so follow-up
-        // tools (click, type, eval, screenshot) work after lad_browse.
+        // FIX-5: Persist the page and final view so follow-up tools (click,
+        // type, eval, screenshot) work after lad_browse.
         // FIX-R6-02: Use actual browser URL (not requested URL) to handle redirects.
         // FIX-R9-01: Check SSRF BEFORE persisting — if pilot ended on unsafe URL,
         // do NOT store the page (prevents follow-up tools from operating on it).
+        // Wave 2: routes through `insert_tab` which allocates a fresh tab id
+        // and marks it active.
+        let new_tab_id: Option<u32>;
         {
             let browse_final_url = page.url().await.unwrap_or_else(|_| p.url.clone());
             if !llm_as_dom::sanitize::is_safe_url(&browse_final_url) {
@@ -137,9 +140,10 @@ impl LadServer {
                     url = %llm_as_dom::sanitize::redact_url_secrets(&browse_final_url),
                     "lad_browse ended on unsafe URL — NOT persisting active_page"
                 );
-                // FIX-R10-01: ALSO clear any previous active_page — prevent
+                // FIX-R10-01: ALSO clear any previous active tab — prevent
                 // stale page from being used by follow-up tools.
-                *self.active_page.lock().await = None;
+                self.lock_active_page().await.clear_active();
+                new_tab_id = None;
             } else {
                 let final_view = a11y::extract_semantic_view(page.as_ref())
                     .await
@@ -155,18 +159,20 @@ impl LadServer {
                         blocked_reason: None,
                         session_context: None,
                     });
-                let mut active = self.active_page.lock().await;
-                *active = Some(crate::state::ActivePage {
-                    page,
-                    url: browse_final_url,
-                    view: final_view,
-                });
+                let id = self
+                    .insert_tab(crate::state::ActivePage {
+                        page,
+                        url: browse_final_url,
+                        view: final_view,
+                    })
+                    .await;
+                new_tab_id = Some(id);
             }
         }
 
         // Always capture a final screenshot for visual verification.
         tracing::info!("capturing final screenshot");
-        let active_guard = self.active_page.lock().await;
+        let active_guard = self.lock_active_page().await;
         let final_screenshot = if let Some(ap) = active_guard.as_ref() {
             pilot::take_screenshot(ap.page.as_ref()).await
         } else {
@@ -184,6 +190,7 @@ impl LadServer {
         };
 
         // FIX-2: Redact Action::Type values so passwords don't leak to caller.
+        // Wave 2: include `tab_id` so follow-up calls can target this tab.
         let output = serde_json::json!({
             "success": result.success,
             "steps": result.steps.len(),
@@ -191,6 +198,7 @@ impl LadServer {
             "llm_steps": result.llm_hits,
             "duration_secs": result.total_duration.as_secs_f64(),
             "final_action": llm_as_dom::sanitize::redact_action_debug(&format!("{:?}", result.final_action)),
+            "tab_id": new_tab_id,
             "session": session_snapshot,
             "actions": result.steps.iter().map(|s| {
                 serde_json::json!({
@@ -217,8 +225,8 @@ impl LadServer {
         // DX-2: Append the final SemanticView so the agent immediately knows what
         // elements are available — saves a follow-up lad_snapshot call.
         {
-            let guard = self.active_page.lock().await;
-            if let Some(ref ap) = *guard {
+            let guard = self.lock_active_page().await;
+            if let Some(ap) = guard.as_ref() {
                 let view_text = ap.view.to_prompt();
                 if !view_text.is_empty() {
                     content_blocks.push(Content::text(format!(

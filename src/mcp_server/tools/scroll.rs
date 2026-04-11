@@ -6,7 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 
 use crate::LadServer;
-use crate::helpers::{build_element_js, check_js_result, mcp_err, no_active_page};
+use crate::helpers::{build_element_js, check_js_result, mcp_err};
 use crate::params::ScrollParams;
 
 impl LadServer {
@@ -19,7 +19,13 @@ impl LadServer {
         params: Parameters<ScrollParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(direction = %p.direction, element = ?p.element, pixels = p.pixels, "lad_scroll");
+        tracing::info!(
+            direction = %p.direction,
+            element = ?p.element,
+            pixels = p.pixels,
+            tab_id = ?p.tab_id,
+            "lad_scroll"
+        );
 
         let js = if let Some(el_id) = p.element {
             // FIX-R6-04: Use deepQuerySelector to find elements in shadow DOM/iframes.
@@ -61,14 +67,14 @@ impl LadServer {
         };
 
         {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let guard = self.lock_active_page().await;
+            let ap = guard.resolve(p.tab_id)?;
             check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
         }
 
         // Wait for lazy-loaded content to settle
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let view = self.refresh_active_view().await?;
+        let view = self.refresh_view_for(p.tab_id).await?;
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),
         )]))

@@ -4,7 +4,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 
 use crate::LadServer;
-use crate::helpers::{mcp_err, no_active_page, to_pretty_json};
+use crate::helpers::{mcp_err, to_pretty_json};
 use crate::params::{EvalParams, LocateParams, NetworkParams};
 
 use llm_as_dom::{locate, network};
@@ -41,11 +41,11 @@ impl LadServer {
         // FIX-13: Log SHA256 hash of the script for audit trail, NOT the content.
         // Prevents secrets from leaking into tracing output.
         let script_hash = sha256_prefix(&p.script);
-        tracing::info!(script_hash = %script_hash, len = p.script.len(), "lad_eval");
+        tracing::info!(script_hash = %script_hash, len = p.script.len(), tab_id = ?p.tab_id, "lad_eval");
         tracing::warn!(script_hash = %script_hash, len = p.script.len(), "lad_eval: arbitrary JS execution");
 
-        let active = self.active_page.lock().await;
-        let ap = active.as_ref().ok_or_else(no_active_page)?;
+        let guard = self.lock_active_page().await;
+        let ap = guard.resolve(p.tab_id)?;
         let result = ap.page.eval_js(&p.script).await.map_err(mcp_err)?;
 
         Ok(CallToolResult::success(vec![Content::text(
@@ -91,10 +91,10 @@ impl LadServer {
         params: Parameters<NetworkParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(filter = %p.filter, "lad_network");
+        tracing::info!(filter = %p.filter, tab_id = ?p.tab_id, "lad_network");
 
-        let guard = self.active_page.lock().await;
-        let active = guard.as_ref().ok_or_else(no_active_page)?;
+        let guard = self.lock_active_page().await;
+        let active = guard.resolve(p.tab_id)?;
 
         // DX-W3-7: Extract initiatorType for method heuristic, and responseStatus
         // (available on Chrome 109+ via PerformanceResourceTiming).

@@ -9,7 +9,6 @@ use rmcp::model::*;
 use crate::LadServer;
 use crate::helpers::{
     build_element_js, build_element_js_or_target, check_js_result, key_to_code, mcp_err,
-    no_active_page,
 };
 use crate::params::{ClickParams, HoverParams, PressKeyParams, SelectParams, TypeParams};
 
@@ -23,20 +22,25 @@ const DEFAULT_INTERACT_DELAY_MS: u64 = 150;
 const VALUE_SET_DELAY_MS: u64 = 100;
 
 impl LadServer {
-    /// Common pattern: execute JS on active page, wait, refresh view, return prompt.
+    /// Common pattern: execute JS on the target tab, wait, refresh view,
+    /// return prompt.
     ///
     /// FIX-R6-01: After the interaction delay, checks the current browser URL
     /// against SSRF rules before refreshing the view. This prevents click/type/
     /// select/keypress from silently navigating to `localhost` or private IPs
     /// via page-driven links or form submissions.
+    ///
+    /// Wave 2: `tab_id` opts into a specific tab, defaulting to the active tab
+    /// when `None`.
     pub(crate) async fn interact_and_refresh(
         &self,
         js: &str,
         delay_ms: u64,
+        tab_id: Option<u32>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let guard = self.lock_active_page().await;
+            let ap = guard.resolve(tab_id)?;
             check_js_result(&ap.page.eval_js(js).await.map_err(mcp_err)?)?;
         }
 
@@ -44,21 +48,30 @@ impl LadServer {
 
         // FIX-R6-01: SSRF gate — verify the browser hasn't navigated to an unsafe URL
         // as a result of the interaction (e.g. click on a link to localhost).
-        // FIX-R8-01: Invalidate active_page on SSRF so subsequent tools can't
+        // FIX-R8-01: Invalidate the tab on SSRF so subsequent tools can't
         // operate on the unsafe page.
         {
-            let mut active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let mut guard = self.lock_active_page().await;
+            let ap = guard.resolve(tab_id)?;
             let current_url = ap.page.url().await.map_err(mcp_err)?;
             if !llm_as_dom::sanitize::is_safe_url(&current_url) {
-                *active = None;
+                // Drop the specific tab that went unsafe.
+                match tab_id {
+                    Some(id) => {
+                        guard.tabs.remove(&id);
+                        if *guard.active_id == Some(id) {
+                            *guard.active_id = None;
+                        }
+                    }
+                    None => guard.clear_active(),
+                }
                 return Err(mcp_err(format!(
                     "blocked: interaction navigated to unsafe URL {current_url}"
                 )));
             }
         }
 
-        let view = self.refresh_active_view().await?;
+        let view = self.refresh_view_for(tab_id).await?;
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),
         )]))
@@ -93,28 +106,47 @@ impl LadServer {
 
         if p.wait_for_navigation {
             {
-                let mut active = self.active_page.lock().await;
-                let ap = active.as_ref().ok_or_else(no_active_page)?;
+                let mut guard = self.lock_active_page().await;
+                let ap = guard.resolve(p.tab_id)?;
                 check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
 
                 // FIX-R6-01: SSRF gate after navigation
-                // FIX-R8-01: Invalidate active_page on SSRF detection.
+                // FIX-R8-01: Invalidate the tab on SSRF detection.
                 let current_url = ap.page.url().await.map_err(mcp_err)?;
                 if !llm_as_dom::sanitize::is_safe_url(&current_url) {
-                    *active = None;
+                    Self::invalidate_tab_on_ssrf(&mut guard, p.tab_id);
                     return Err(mcp_err(format!(
                         "blocked: click navigated to unsafe URL {current_url}"
                     )));
                 }
             }
-            let view = self.refresh_active_view().await?;
+            let view = self.refresh_view_for(p.tab_id).await?;
             Ok(CallToolResult::success(vec![Content::text(
                 view.to_prompt(),
             )]))
         } else {
-            self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS)
+            self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS, p.tab_id)
                 .await
+        }
+    }
+
+    /// Wave 2 helper: drop either the explicit tab (if provided) or the
+    /// current active tab after an SSRF gate fires. Consolidates the
+    /// repeated "match tab_id { Some(id) => … None => guard.clear_active() }"
+    /// block that would otherwise scatter through every wait-for-nav path.
+    pub(crate) fn invalidate_tab_on_ssrf(
+        guard: &mut crate::ActivePageGuard<'_>,
+        tab_id: Option<u32>,
+    ) {
+        match tab_id {
+            Some(id) => {
+                guard.tabs.remove(&id);
+                if *guard.active_id == Some(id) {
+                    *guard.active_id = None;
+                }
+            }
+            None => guard.clear_active(),
         }
     }
 
@@ -131,9 +163,12 @@ impl LadServer {
         // they used a semantic target spec, we can't pre-inspect — a best-
         // effort name-based heuristic on the spec itself is used instead.
         let log_text = {
-            let active = self.active_page.lock().await;
+            let guard = self.lock_active_page().await;
+            // Resolve without erroring — no active tab should not stop a
+            // "did the user try to type a password?" heuristic.
+            let ap_opt = guard.resolve(p.tab_id).ok();
             let is_sensitive_by_element = p.element.is_some()
-                && active.as_ref().is_some_and(|ap| {
+                && ap_opt.is_some_and(|ap| {
                     let want_id = p.element.unwrap();
                     ap.view.elements.iter().any(|el| {
                         el.id == want_id
@@ -274,8 +309,8 @@ impl LadServer {
             // FIX-R6-05: Form submission via Enter may trigger navigation.
             // Use wait_for_navigation with a timeout instead of a fixed sleep.
             {
-                let mut active = self.active_page.lock().await;
-                let ap = active.as_ref().ok_or_else(no_active_page)?;
+                let mut guard = self.lock_active_page().await;
+                let ap = guard.resolve(p.tab_id)?;
                 check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
 
                 // Wait up to 5s for potential navigation; timeout is fine (page didn't navigate).
@@ -286,21 +321,22 @@ impl LadServer {
                 .await;
 
                 // FIX-R6-01: SSRF gate after potential navigation
-                // FIX-R8-01: Invalidate active_page on SSRF detection.
+                // FIX-R8-01: Invalidate the tab on SSRF detection.
                 let current_url = ap.page.url().await.map_err(mcp_err)?;
                 if !llm_as_dom::sanitize::is_safe_url(&current_url) {
-                    *active = None;
+                    Self::invalidate_tab_on_ssrf(&mut guard, p.tab_id);
                     return Err(mcp_err(format!(
                         "blocked: form submission navigated to unsafe URL {current_url}"
                     )));
                 }
             }
-            let view = self.refresh_active_view().await?;
+            let view = self.refresh_view_for(p.tab_id).await?;
             Ok(CallToolResult::success(vec![Content::text(
                 view.to_prompt(),
             )]))
         } else {
-            self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+            self.interact_and_refresh(&js, VALUE_SET_DELAY_MS, p.tab_id)
+                .await
         }
     }
 
@@ -327,27 +363,28 @@ impl LadServer {
 
         if p.wait_for_navigation {
             {
-                let mut active = self.active_page.lock().await;
-                let ap = active.as_ref().ok_or_else(no_active_page)?;
+                let mut guard = self.lock_active_page().await;
+                let ap = guard.resolve(p.tab_id)?;
                 check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
                 ap.page.wait_for_navigation().await.map_err(mcp_err)?;
 
                 // FIX-R6-01: SSRF gate after navigation
-                // FIX-R8-01: Invalidate active_page on SSRF detection.
+                // FIX-R8-01: Invalidate the tab on SSRF detection.
                 let current_url = ap.page.url().await.map_err(mcp_err)?;
                 if !llm_as_dom::sanitize::is_safe_url(&current_url) {
-                    *active = None;
+                    Self::invalidate_tab_on_ssrf(&mut guard, p.tab_id);
                     return Err(mcp_err(format!(
                         "blocked: select navigated to unsafe URL {current_url}"
                     )));
                 }
             }
-            let view = self.refresh_active_view().await?;
+            let view = self.refresh_view_for(p.tab_id).await?;
             Ok(CallToolResult::success(vec![Content::text(
                 view.to_prompt(),
             )]))
         } else {
-            self.interact_and_refresh(&js, VALUE_SET_DELAY_MS).await
+            self.interact_and_refresh(&js, VALUE_SET_DELAY_MS, p.tab_id)
+                .await
         }
     }
 
@@ -367,22 +404,22 @@ impl LadServer {
             }";
         let js = build_element_js_or_target(p.element, p.target.as_ref(), body)?;
         // Hover needs slightly longer for CSS transitions / dropdown menus.
-        self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS + 50)
+        self.interact_and_refresh(&js, DEFAULT_INTERACT_DELAY_MS + 50, p.tab_id)
             .await
     }
 
-    /// Press a keyboard key on the active page.
+    /// Press a keyboard key on the active page (or an explicit tab).
     /// Optionally focus an element first by its ID from a prior snapshot.
     pub(crate) async fn tool_lad_press_key(
         &self,
         params: Parameters<PressKeyParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(key = %p.key, element = ?p.element, "lad_press_key");
+        tracing::info!(key = %p.key, element = ?p.element, tab_id = ?p.tab_id, "lad_press_key");
 
         {
-            let active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let guard = self.lock_active_page().await;
+            let ap = guard.resolve(p.tab_id)?;
 
             // If element specified, focus it first
             if let Some(id) = p.element {
@@ -410,20 +447,20 @@ impl LadServer {
         tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_INTERACT_DELAY_MS)).await;
 
         // FIX-R6-01: SSRF gate — key presses (e.g. Enter) can trigger navigation
-        // FIX-R8-01: Invalidate active_page on SSRF detection.
+        // FIX-R8-01: Invalidate the tab on SSRF detection.
         {
-            let mut active = self.active_page.lock().await;
-            let ap = active.as_ref().ok_or_else(no_active_page)?;
+            let mut guard = self.lock_active_page().await;
+            let ap = guard.resolve(p.tab_id)?;
             let current_url = ap.page.url().await.map_err(mcp_err)?;
             if !llm_as_dom::sanitize::is_safe_url(&current_url) {
-                *active = None;
+                Self::invalidate_tab_on_ssrf(&mut guard, p.tab_id);
                 return Err(mcp_err(format!(
                     "blocked: key press navigated to unsafe URL {current_url}"
                 )));
             }
         }
 
-        let view = self.refresh_active_view().await?;
+        let view = self.refresh_view_for(p.tab_id).await?;
         Ok(CallToolResult::success(vec![Content::text(
             view.to_prompt(),
         )]))

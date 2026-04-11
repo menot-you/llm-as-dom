@@ -10,6 +10,9 @@ use crate::state::McpSessionState;
 
 impl LadServer {
     /// Close the browser and release all resources.
+    ///
+    /// Wave 2: clears *every* open tab (not just the active one) and resets
+    /// the tab-id allocator back to 1, matching "close the browser" semantics.
     pub(crate) async fn tool_lad_close(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         tracing::info!("lad_close");
 
@@ -19,8 +22,8 @@ impl LadServer {
             ws.stop();
         }
 
-        // Clear active page first
-        *self.active_page.lock().await = None;
+        // Wave 2: drop every open tab and reset the allocator.
+        self.clear_all_tabs().await;
 
         // Close the engine if one was launched
         let mut engine_lock = self.engine.lock().await;

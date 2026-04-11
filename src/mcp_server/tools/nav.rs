@@ -4,7 +4,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
 
 use crate::LadServer;
-use crate::helpers::{mcp_err, no_active_page};
+use crate::helpers::mcp_err;
 use crate::params::DialogParams;
 
 use llm_as_dom::pilot;
@@ -15,11 +15,14 @@ impl LadServer {
     /// FIX-R3-02: Hold a single lock through the entire back-navigate-wait-refresh
     /// cycle to eliminate the stale URL window where concurrent tools could observe
     /// inconsistent state between the history.back() and the view refresh.
+    ///
+    /// Wave 2: operates on the active tab. `lad_back` takes no params today;
+    /// callers that want to rewind a non-active tab should switch to it first.
     pub(crate) async fn tool_lad_back(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         tracing::info!("lad_back");
 
-        let mut active = self.active_page.lock().await;
-        let ap = active.as_mut().ok_or_else(no_active_page)?;
+        let mut guard = self.lock_active_page().await;
+        let ap = guard.resolve_mut(None)?;
 
         ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
 
@@ -31,13 +34,14 @@ impl LadServer {
         }
 
         // FIX-1: Check URL safety after history.back() navigation settles.
-        // FIX-R8-01: Invalidate active_page on SSRF detection.
+        // FIX-R8-01: Invalidate the tab on SSRF detection.
         if let Ok(ref back_url) = ap.page.url().await
             && !llm_as_dom::sanitize::is_safe_url(back_url)
         {
-            *active = None;
+            let err_url = back_url.clone();
+            guard.clear_active();
             return Err(mcp_err(format!(
-                "blocked: history.back() navigated to unsafe URL {back_url}"
+                "blocked: history.back() navigated to unsafe URL {err_url}"
             )));
         }
 
@@ -58,12 +62,13 @@ impl LadServer {
     /// Reload the current page.
     ///
     /// DX-W3-2: Explicit page reload without needing `lad_eval`.
+    /// Wave 2: operates on the active tab.
     pub(crate) async fn tool_lad_refresh(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         tracing::info!("lad_refresh");
 
         {
-            let mut guard = self.active_page.lock().await;
-            let ap = guard.as_mut().ok_or_else(no_active_page)?;
+            let mut guard = self.lock_active_page().await;
+            let ap = guard.resolve_mut(None)?;
             let url = ap.url.clone();
             ap.page.navigate(&url).await.map_err(mcp_err)?;
             ap.page.wait_for_navigation().await.map_err(mcp_err)?;
@@ -71,7 +76,7 @@ impl LadServer {
             // SSRF gate after reload (redirects could happen).
             let final_url = ap.page.url().await.map_err(mcp_err)?;
             if !llm_as_dom::sanitize::is_safe_url(&final_url) {
-                *guard = None;
+                guard.clear_active();
                 return Err(mcp_err(format!(
                     "blocked: reload redirected to unsafe URL {final_url}"
                 )));
@@ -90,10 +95,10 @@ impl LadServer {
         params: Parameters<DialogParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(action = %p.action, text = ?p.text, "lad_dialog");
+        tracing::info!(action = %p.action, text = ?p.text, tab_id = ?p.tab_id, "lad_dialog");
 
-        let active = self.active_page.lock().await;
-        let ap = active.as_ref().ok_or_else(no_active_page)?;
+        let guard = self.lock_active_page().await;
+        let ap = guard.resolve(p.tab_id)?;
 
         // Ensure dialog overrides are installed
         let setup_js = r#"
