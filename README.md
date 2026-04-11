@@ -8,12 +8,12 @@
 
 **Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
 
-[![CI](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/example-org/llm-as-dom/actions/workflows/ci.yml)
-[![docs.rs](https://docs.rs/example-org-mcp-lad/badge.svg)](https://docs.rs/example-org-mcp-lad)
+[![CI](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml)
+[![docs.rs](https://docs.rs/menot-you-mcp-lad/badge.svg)](https://docs.rs/menot-you-mcp-lad)
 
-[![crates.io](https://img.shields.io/crates/v/example-org-mcp-lad.svg)](https://crates.io/crates/example-org-mcp-lad)
-[![npm](https://img.shields.io/npm/v/@example-org/mcp-lad.svg)](https://www.npmjs.com/package/@example-org/mcp-lad)
-[![PyPI](https://img.shields.io/pypi/v/example-org-mcp-lad.svg)](https://pypi.org/project/example-org-mcp-lad/)
+[![crates.io](https://img.shields.io/crates/v/menot-you-mcp-lad.svg)](https://crates.io/crates/menot-you-mcp-lad)
+[![npm](https://img.shields.io/npm/v/@menot-you/mcp-lad.svg)](https://www.npmjs.com/package/@menot-you/mcp-lad)
+[![PyPI](https://img.shields.io/pypi/v/menot-you-mcp-lad.svg)](https://pypi.org/project/menot-you-mcp-lad/)
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-nightly-orange.svg)](https://www.rust-lang.org)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
@@ -41,7 +41,7 @@ lad:          Claude → lad_browse("test login") → { success: true, steps: 3 
 ## Quick Start
 
 ```bash
-cargo install example-org-mcp-lad
+cargo install menot-you-mcp-lad
 
 # See what lad "sees" on your app
 lad --url "http://localhost:3000/login" --extract-only
@@ -423,10 +423,10 @@ The 3 extra WebKit elements are footer links that GitHub serves differently to S
 - **LLM fallback** (optional): Ollama with `qwen2.5:7b`
 
 ```bash
-cargo install example-org-mcp-lad  # installs lad, llm-as-dom-mcp, and lad-relay
+cargo install menot-you-mcp-lad  # installs lad, llm-as-dom-mcp, and lad-relay
 # or: cargo install llm-as-dom
-# or: npx @example-org/mcp-lad
-# or: pip install example-org-mcp-lad
+# or: npx @menot-you/mcp-lad
+# or: pip install menot-you-mcp-lad
 ```
 
 ## Security

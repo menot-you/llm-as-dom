@@ -77,7 +77,7 @@ fn assert_has_button_with_icon() {
 fn assert_has_github_link() {
     let mut view = empty_view();
     let mut el = make_element(semantic::ElementKind::Link, "GitHub");
-    el.href = Some("https://github.com/example-org".into());
+    el.href = Some("https://github.com/menot-you".into());
     view.elements.push(el);
 
     assert!(check_assertion("has link github", &view, ""));
@@ -88,7 +88,7 @@ fn assert_has_github_link() {
 fn assert_has_link_by_href() {
     let mut view = empty_view();
     let mut el = make_element(semantic::ElementKind::Link, "Star us");
-    el.href = Some("https://github.com/example-org".into());
+    el.href = Some("https://github.com/menot-you".into());
     view.elements.push(el);
 
     assert!(check_assertion("has link github", &view, ""));

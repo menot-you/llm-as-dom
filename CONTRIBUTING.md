@@ -5,7 +5,7 @@ Thanks for your interest! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/example-org/llm-as-dom
+git clone https://github.com/menot-you/llm-as-dom
 cd llm-as-dom
 cargo build
 cargo test

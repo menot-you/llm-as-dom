@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Alias: delegates to @example-org/mcp-lad
+// Alias: delegates to @menot-you/mcp-lad
 const { execFileSync } = require("child_process");
 const path = require("path");
 
 const bin = path.join(
   __dirname,
   "node_modules",
-  "@example-org",
+  "@menot-you",
   "mcp-lad",
   "run.js"
 );

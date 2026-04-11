@@ -56,7 +56,7 @@ Codex crashes with SSOT MCP — always strip mcp_servers from ~/.codex/config.to
 ## Key Technical Details for Resume
 
 - Binary: `llm-as-dom-mcp` (MCP server) + `lad` (CLI)
-- Crate: `example-org-mcp-lad` on crates.io
+- Crate: `menot-you-mcp-lad` on crates.io
 - Branch: main, 38+ commits ahead of origin
 - Engine: chromiumoxide 0.7 (Chromium) + Swift bridge (WebKit)
 - MCP: rmcp 1.3, stdio transport
