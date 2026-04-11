@@ -65,9 +65,17 @@ pub const STEALTH_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_
      Chrome/131.0.0.0 Safari/537.36";
 
 /// Chrome command-line flags that disable automation indicators at launch.
+///
+/// The WebRTC flags are the ONLY reliable way to plug the ICE candidate
+/// local-IP leak — JS-level hooks on `RTCPeerConnection.getStats` and
+/// `createOffer` are bypassed because ICE gathering runs in the Chromium
+/// network stack before any page JS executes. See rebrowser-patches #42
+/// and Datadome's 2025 writeup for confirmation.
 pub const STEALTH_FLAGS: &[&str] = &[
     "--disable-blink-features=AutomationControlled",
     "--disable-features=AutomationControlled",
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--force-webrtc-ip-handling-policy",
 ];
 
 /// Runtime-detected host fingerprint that varies the injected JS based on
@@ -206,6 +214,37 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
   // subframes.
   if (window.__lad_stealth_applied) return;
   window.__lad_stealth_applied = true;
+
+  // 0. Function.prototype.toString patch — MUST run before any other hook.
+  //    Creepjs explicitly tests for "prototype lies" by calling
+  //    `Function.prototype.toString.call(patchedFunction)`. If the result
+  //    is our JS source instead of `function getParameter() {{ [native code] }}`
+  //    the fingerprinter flags it. We track every native function we replace
+  //    and map its patched version back to the native toString output.
+  //
+  //    The classic bypass: wrap Function.prototype.toString itself so it
+  //    recognises our patched functions via a WeakMap and returns the
+  //    native-form string for them.
+  try {{
+    const nativeToString = Function.prototype.toString;
+    const nativeMap = new WeakMap();
+    // Helper the rest of this script uses to mark a replacement fn as
+    // "this should look native". Called as `markNative(newFn, originalName)`.
+    window.__lad_mark_native = (fn, name) => {{
+      try {{
+        nativeMap.set(fn, `function ${{name}}() {{ [native code] }}`);
+      }} catch (e) {{}}
+      return fn;
+    }};
+    Function.prototype.toString = function toString() {{
+      try {{
+        if (nativeMap.has(this)) return nativeMap.get(this);
+      }} catch (e) {{}}
+      return nativeToString.call(this);
+    }};
+    // Recursively: toString itself must look native.
+    nativeMap.set(Function.prototype.toString, 'function toString() {{ [native code] }}');
+  }} catch (e) {{}}
 
   // 1. navigator.webdriver → DELETED. Real Chrome doesn't have the property
   //    defined at all. Creepjs and modern detectors check `'webdriver' in
@@ -399,14 +438,19 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
   }} catch (e) {{}}
 
   // 9. WebGL vendor + renderer — host-appropriate GPU identity.
+  //    Each patched function is marked via __lad_mark_native so
+  //    `Function.prototype.toString.call(getParameter)` returns the native
+  //    `function getParameter() {{ [native code] }}` instead of our JS source.
   try {{
     const patchGetParameter = (proto) => {{
       const orig = proto.getParameter;
-      proto.getParameter = function(parameter) {{
+      const patched = function getParameter(parameter) {{
         if (parameter === 37445) return '{gpu_vendor}';
         if (parameter === 37446) return '{gpu_renderer}';
         return orig.apply(this, [parameter]);
       }};
+      if (window.__lad_mark_native) window.__lad_mark_native(patched, 'getParameter');
+      proto.getParameter = patched;
     }};
     patchGetParameter(WebGLRenderingContext.prototype);
     if (typeof WebGL2RenderingContext !== 'undefined') {{
@@ -428,30 +472,110 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
     }};
   }} catch (e) {{}}
 
-  // 11. Canvas fingerprint — inject seeded noise into toDataURL output so
-  //     detector hashes don't match the "headless chromium" canonical hash.
-  //     We tweak a single pixel in the bottom-right corner by ±1 on each
-  //     channel; the noise is visually imperceptible but changes the SHA.
+  // 11. Canvas fingerprint — seeded deterministic farbling on toDataURL /
+  //     getImageData / toBlob. Naive Math.random() noise is detectable (see
+  //     Castle 2024 research). We use a FNV-1a hash of the canvas pixel data
+  //     as the seed so the perturbation is deterministic per canvas content
+  //     but different across canvases — undetectable by "call twice, diff
+  //     the hashes" tests that catch random noise.
   try {{
-    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function(...args) {{
-      const ctx = this.getContext('2d');
-      if (ctx && this.width > 0 && this.height > 0) {{
-        try {{
-          const x = this.width - 1;
-          const y = this.height - 1;
-          const imageData = ctx.getImageData(x, y, 1, 1);
-          const data = imageData.data;
-          // Seeded permutation based on canvas content — deterministic per
-          // canvas, different across canvases. Avoids obvious constants.
-          data[0] = (data[0] + 1) & 0xff;
-          data[1] = (data[1] + 1) & 0xff;
-          data[2] = (data[2] + 1) & 0xff;
-          ctx.putImageData(imageData, x, y);
-        }} catch (inner) {{}}
+    const fnv1a = (bytes) => {{
+      let h = 2166136261 >>> 0;
+      const step = Math.max(1, Math.floor(bytes.length / 256));
+      for (let i = 0; i < bytes.length; i += step) {{
+        h ^= bytes[i];
+        h = Math.imul(h, 16777619) >>> 0;
       }}
+      return h;
+    }};
+    const perturbImageData = (imageData) => {{
+      try {{
+        const d = imageData.data;
+        if (!d || d.length < 8) return imageData;
+        const seed = fnv1a(d);
+        // Pick 3 deterministic pixel indices based on seed.
+        for (let i = 0; i < 3; i++) {{
+          const px = ((seed >> (i * 3)) % Math.max(1, Math.floor(d.length / 4))) * 4;
+          d[px] = (d[px] + ((seed >> i) & 1 ? 1 : -1)) & 0xff;
+          d[px + 1] = (d[px + 1] + ((seed >> (i + 1)) & 1 ? 1 : -1)) & 0xff;
+          d[px + 2] = (d[px + 2] + ((seed >> (i + 2)) & 1 ? 1 : -1)) & 0xff;
+        }}
+      }} catch (inner) {{}}
+      return imageData;
+    }};
+
+    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    const patchedToDataURL = function toDataURL(...args) {{
+      try {{
+        const ctx = this.getContext('2d');
+        if (ctx && this.width > 0 && this.height > 0) {{
+          const w = Math.min(this.width, 256);
+          const h = Math.min(this.height, 256);
+          const imageData = ctx.getImageData(0, 0, w, h);
+          perturbImageData(imageData);
+          ctx.putImageData(imageData, 0, 0);
+        }}
+      }} catch (inner) {{}}
       return origToDataURL.apply(this, args);
     }};
+    if (window.__lad_mark_native) window.__lad_mark_native(patchedToDataURL, 'toDataURL');
+    HTMLCanvasElement.prototype.toDataURL = patchedToDataURL;
+
+    const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    const patchedGetImageData = function getImageData(...args) {{
+      const imageData = origGetImageData.apply(this, args);
+      perturbImageData(imageData);
+      return imageData;
+    }};
+    if (window.__lad_mark_native) window.__lad_mark_native(patchedGetImageData, 'getImageData');
+    CanvasRenderingContext2D.prototype.getImageData = patchedGetImageData;
+  }} catch (e) {{}}
+
+  // 11b. AudioContext fingerprint — Brave-style farbling on
+  //      AnalyserNode.getFloatFrequencyData, AudioBuffer.getChannelData,
+  //      AudioBuffer.copyFromChannel. Adds deterministic seeded noise so
+  //      the AudioContext hash varies per session but is stable per call.
+  //      Creepjs computes a hash by generating a sine wave through an
+  //      AudioContext and reading back the frequency bins — identical
+  //      hashes across users = fingerprint.
+  try {{
+    // Per-session fudge factor ∈ [0.99999, 1.00001], deterministic per
+    // document so it's stable across calls within a page.
+    const fudge = 1.0 + ((Math.sin(Date.now() * 0.0001) * 0.5 + 0.5) * 0.00002 - 0.00001);
+    const farbleFloat32 = (arr) => {{
+      try {{
+        for (let i = 0; i < arr.length; i++) {{
+          arr[i] *= fudge;
+        }}
+      }} catch (e) {{}}
+    }};
+    if (typeof AnalyserNode !== 'undefined') {{
+      const origGFFD = AnalyserNode.prototype.getFloatFrequencyData;
+      const patched = function getFloatFrequencyData(array) {{
+        origGFFD.call(this, array);
+        farbleFloat32(array);
+      }};
+      if (window.__lad_mark_native) window.__lad_mark_native(patched, 'getFloatFrequencyData');
+      AnalyserNode.prototype.getFloatFrequencyData = patched;
+    }}
+    if (typeof AudioBuffer !== 'undefined') {{
+      const origGCD = AudioBuffer.prototype.getChannelData;
+      const patchedGCD = function getChannelData(...args) {{
+        const buf = origGCD.apply(this, args);
+        farbleFloat32(buf);
+        return buf;
+      }};
+      if (window.__lad_mark_native) window.__lad_mark_native(patchedGCD, 'getChannelData');
+      AudioBuffer.prototype.getChannelData = patchedGCD;
+
+      const origCFC = AudioBuffer.prototype.copyFromChannel;
+      const patchedCFC = function copyFromChannel(...args) {{
+        origCFC.apply(this, args);
+        if (args[0] && args[0].length) farbleFloat32(args[0]);
+      }};
+      if (window.__lad_mark_native) window.__lad_mark_native(patchedCFC, 'copyFromChannel');
+      AudioBuffer.prototype.copyFromChannel = patchedCFC;
+    }}
   }} catch (e) {{}}
 
   // 12. Battery API — headless reports level=1.0, charging=true always.
