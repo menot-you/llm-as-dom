@@ -55,9 +55,12 @@ impl LadServer {
             "lad_fill_form"
         );
 
-        if p.fields.is_empty() {
+        // Wave 5b (Pain #15): empty `fields` is valid when `submit=true` —
+        // lets callers type each field with `lad_type` and then submit the
+        // form without re-snapshotting to locate the submit button.
+        if p.fields.is_empty() && !p.submit {
             return Err(rmcp::ErrorData::invalid_params(
-                "fields must not be empty",
+                "fields must not be empty unless submit=true",
                 None,
             ));
         }
@@ -69,6 +72,9 @@ impl LadServer {
         };
 
         // Build JS to fill each field in one eval call.
+        // Wave 5b (Pain #15): fields may be empty when submit=true — the
+        // for-loop over an empty map is a no-op, so we just skip through
+        // to the submit branch below.
         let mut fill_js = String::new();
         let mut matched = 0u32;
         let mut submitted = false;
@@ -119,7 +125,10 @@ impl LadServer {
             }
         }
 
-        if matched == 0 {
+        // Wave 5b (Pain #15): only raise "no match" when fields were actually
+        // provided. An empty `fields` with `submit=true` (pre-filled form
+        // submission) legitimately matches zero.
+        if matched == 0 && !p.fields.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
                 format!(
                     "no form elements matched any field key: {:?}",
@@ -129,14 +138,15 @@ impl LadServer {
             ));
         }
 
-        // Execute all field fills.
-        {
-            let guard = self.lock_active_page().await;
-            let ap = guard.resolve(p.tab_id)?;
-            ap.page.eval_js(&fill_js).await.map_err(mcp_err)?;
+        // Execute all field fills (skipped when fill_js is empty).
+        if !fill_js.is_empty() {
+            {
+                let guard = self.lock_active_page().await;
+                let ap = guard.resolve(p.tab_id)?;
+                ap.page.eval_js(&fill_js).await.map_err(mcp_err)?;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(VALUE_SET_DELAY_MS)).await;
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(VALUE_SET_DELAY_MS)).await;
 
         // Submit if requested.
         if p.submit {

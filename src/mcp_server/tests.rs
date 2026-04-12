@@ -531,7 +531,7 @@ fn extract_params_null_url() {
     assert!(p.url.is_none());
 }
 
-// ── DX-W2-2: checked + options in to_prompt ────────────────
+// ── DX-W2-2 / Wave 5b (Pain #13): checked + options in to_prompt ─────
 
 #[test]
 fn to_prompt_renders_checked_state() {
@@ -541,14 +541,20 @@ fn to_prompt_renders_checked_state() {
     view.elements.push(el);
 
     let prompt = view.to_prompt();
+    // Wave 5b: bare `checked` marker, not `checked=true`.
     assert!(
-        prompt.contains("checked=true"),
-        "prompt should contain checked=true: {prompt}"
+        prompt.contains(" checked"),
+        "prompt should contain bare `checked` marker: {prompt}"
+    );
+    assert!(
+        !prompt.contains("checked=true"),
+        "legacy `checked=true` form must not leak back: {prompt}"
     );
 }
 
 #[test]
-fn to_prompt_renders_unchecked_state() {
+fn to_prompt_omits_unchecked_state() {
+    // Wave 5b (Pain #13): `Some(false)` emits nothing to keep lines terse.
     let mut view = empty_view();
     let mut el = make_element(semantic::ElementKind::Checkbox, "Agree to terms");
     el.checked = Some(false);
@@ -556,8 +562,26 @@ fn to_prompt_renders_unchecked_state() {
 
     let prompt = view.to_prompt();
     assert!(
-        prompt.contains("checked=false"),
-        "prompt should contain checked=false: {prompt}"
+        !prompt.contains("checked"),
+        "prompt should omit `checked` for unchecked elements: {prompt}"
+    );
+}
+
+#[test]
+fn to_prompt_radio_checked_emits_marker() {
+    // Wave 5b (Pain #13): radio buttons use the same marker path as checkboxes.
+    let mut view = empty_view();
+    let mut el = make_element(semantic::ElementKind::Input, "Medium");
+    el.input_type = Some("radio".into());
+    el.name = Some("size".into());
+    el.value = Some("medium".into());
+    el.checked = Some(true);
+    view.elements.push(el);
+
+    let prompt = view.to_prompt();
+    assert!(
+        prompt.contains(" checked"),
+        "radio with checked=Some(true) must emit `checked`: {prompt}"
     );
 }
 
@@ -618,6 +642,49 @@ fn fill_form_params_empty_fields() {
     let json = r#"{"fields":{}}"#;
     let p: FillFormParams = serde_json::from_str(json).unwrap();
     assert!(p.fields.is_empty());
+}
+
+// ── Wave 5b (Pain #15): empty fields + submit=true is valid ────
+
+/// Mirror of the guard in `tool_lad_fill_form` — kept out of the handler
+/// so we can unit-test the invariant without standing up a full LadServer.
+fn fill_form_guard_rejects(p: &FillFormParams) -> Option<&'static str> {
+    if p.fields.is_empty() && !p.submit {
+        Some("fields must not be empty unless submit=true")
+    } else {
+        None
+    }
+}
+
+#[test]
+fn fill_form_guard_allows_empty_fields_when_submitting() {
+    let json = r#"{"fields":{},"submit":true}"#;
+    let p: FillFormParams = serde_json::from_str(json).unwrap();
+    assert!(p.fields.is_empty());
+    assert!(p.submit);
+    assert!(
+        fill_form_guard_rejects(&p).is_none(),
+        "empty fields with submit=true must pass the guard"
+    );
+}
+
+#[test]
+fn fill_form_guard_rejects_empty_fields_without_submit() {
+    let json = r#"{"fields":{}}"#;
+    let p: FillFormParams = serde_json::from_str(json).unwrap();
+    assert!(!p.submit);
+    let reason = fill_form_guard_rejects(&p).expect("guard must reject");
+    assert!(
+        reason.contains("unless submit=true"),
+        "error message should explain the submit=true escape hatch: {reason}"
+    );
+}
+
+#[test]
+fn fill_form_guard_allows_non_empty_fields_without_submit() {
+    let json = r#"{"fields":{"Email":"a@b.c"}}"#;
+    let p: FillFormParams = serde_json::from_str(json).unwrap();
+    assert!(fill_form_guard_rejects(&p).is_none());
 }
 
 // ── DX-W2-4: form_index in to_prompt ──────────────────────

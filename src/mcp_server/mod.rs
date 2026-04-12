@@ -885,7 +885,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Fill multiple form fields at once and optionally submit. Fields are matched by label, name, or placeholder (case-insensitive). Use for login forms, registration, checkout, etc. Example: fields={\"Email\":\"user@test.com\",\"Password\":\"secret\"}, submit=true. Requires a prior lad_snapshot or lad_browse call."
+        description = "Fill multiple form fields at once and optionally submit. Fields are matched by label, name, or placeholder (case-insensitive). Use for login forms, registration, checkout, etc. Example: fields={\"Email\":\"user@test.com\",\"Password\":\"secret\"}, submit=true. Empty `fields` is valid only when `submit=true` — submits a pre-filled form without further input. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_fill_form(
         &self,
