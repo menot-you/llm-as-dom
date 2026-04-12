@@ -154,15 +154,19 @@ impl LadServer {
             capture.requests.values().collect()
         };
 
-        let output = serde_json::json!({
-            "summary": summary,
-            "filter": p.filter,
-            "count": filtered.len(),
-            "requests": filtered.iter().map(|r| {
+        // Wave 5 (Pain #17): build the serialized request list first so we
+        // can detect placeholder status codes (status=0) and attach a
+        // top-level `note` that explains the cross-origin limitation.
+        // TODO(wave6): switch to CDP Network domain for real status codes
+        // and byte counts — `performance.getEntries()` cannot read HTTP
+        // metadata for cross-origin responses.
+        let request_objects: Vec<serde_json::Value> = filtered
+            .iter()
+            .map(|r| {
                 // Match by URL to correlate with performance entries (HashMap has no order)
-                let entry = entries.iter().find(|e| {
-                    e["name"].as_str().is_some_and(|name| name == r.url)
-                });
+                let entry = entries
+                    .iter()
+                    .find(|e| e["name"].as_str().is_some_and(|name| name == r.url));
                 let status = entry
                     .and_then(|e| e["responseStatus"].as_u64())
                     .unwrap_or(r.status as u64);
@@ -177,8 +181,33 @@ impl LadServer {
                     "initiator": initiator,
                     "timestamp_ms": r.timestamp_ms,
                 })
-            }).collect::<Vec<_>>(),
+            })
+            .collect();
+
+        // Attach the cross-origin caveat note when any entry has status=0,
+        // which is the tell-tale for placeholder values. Additive, only
+        // present when relevant — zero-impact on fully same-origin pages.
+        let has_placeholder_status = request_objects
+            .iter()
+            .any(|r| r.get("status").and_then(|s| s.as_u64()) == Some(0));
+
+        let mut output = serde_json::json!({
+            "summary": summary,
+            "filter": p.filter,
+            "count": request_objects.len(),
+            "requests": request_objects,
         });
+        if has_placeholder_status && let Some(obj) = output.as_object_mut() {
+            obj.insert(
+                "note".to_string(),
+                serde_json::Value::String(
+                    "status=0 and total_bytes=0 are placeholder values — \
+                     performance.getEntries() cannot read cross-origin HTTP \
+                     metadata. See README."
+                        .to_string(),
+                ),
+            );
+        }
 
         Ok(CallToolResult::success(vec![Content::text(
             to_pretty_json(&output),

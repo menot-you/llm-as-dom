@@ -319,7 +319,7 @@ llm-as-dom-mcp  # starts MCP server (stdio)
 | Tool | What it does |
 |------|-------------|
 | `lad_eval` | Evaluate arbitrary JavaScript — escape hatch for when semantic tools can't handle a specific interaction |
-| `lad_network` | Inspect network traffic with timing data. Filter by type: auth, api, navigation, asset |
+| `lad_network` | Inspect network traffic. Includes timing data via Performance API. Note: status codes and byte counts are unavailable for cross-origin requests due to `performance.getEntries()` limitations. Future: CDP Network domain integration. Filter by type: auth, api, navigation, asset |
 | `lad_locate` | Map a DOM element back to its source file (React dev source, data-ds, data-lad attributes) |
 
 ### Input

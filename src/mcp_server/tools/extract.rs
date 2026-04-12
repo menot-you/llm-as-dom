@@ -24,6 +24,7 @@ impl LadServer {
         params: Parameters<ExtractParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
+        let include_hidden = p.include_hidden.unwrap_or(false);
         let mut view = if let Some(ref url) = p.url {
             let (_page, view) = self.navigate_and_extract(url).await?;
             view
@@ -39,9 +40,23 @@ impl LadServer {
             })?
         };
 
+        // Wave 5 (Pain #10): when the caller asks for hidden elements, the
+        // default JS walker has already dropped them at Layer 1. Re-extract
+        // with the flag lifted so hidden nodes flow through. Only done when
+        // the flag is explicitly true to avoid an extra roundtrip on the
+        // default path and to keep the signature of
+        // `navigate_or_reuse`/`refresh_active_view` unchanged.
+        if include_hidden {
+            let guard = self.lock_active_page().await;
+            let ap = guard.resolve(p.tab_id)?;
+            view = llm_as_dom::a11y::extract_semantic_view_with_options(ap.page.as_ref(), true)
+                .await
+                .map_err(mcp_err)?;
+        }
+
         // Wave 1 — hidden-element gate. Runs BEFORE scoring/pagination so
         // hidden nodes never contribute to the caller's element budget.
-        if !p.include_hidden.unwrap_or(false) {
+        if !include_hidden {
             view.retain_visible_elements();
         }
 
@@ -188,6 +203,18 @@ impl LadServer {
                 // actually a CDP error, SSRF block, or a11y extract failure.
                 self.refresh_view_for(p.tab_id).await?
             };
+
+            // Wave 5 (Pain #10): re-extract with include_hidden=true when
+            // the caller wants hidden nodes. See `tool_lad_extract` for
+            // rationale — avoids threading the flag through
+            // `navigate_or_reuse` / `refresh_active_view`.
+            if include_hidden {
+                let guard = self.lock_active_page().await;
+                let ap = guard.resolve(p.tab_id)?;
+                view = llm_as_dom::a11y::extract_semantic_view_with_options(ap.page.as_ref(), true)
+                    .await
+                    .map_err(mcp_err)?;
+            }
 
             // Wave 1 — hidden-element gate (default-on). See `retain_visible_elements`.
             if !include_hidden {
