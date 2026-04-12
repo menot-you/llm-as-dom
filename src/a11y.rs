@@ -432,9 +432,13 @@ pub async fn extract_semantic_view_with_options(
                     visibleText += text.substring(0, 100);
                 }
             }
-            // Fallback: collect substantial text from td, span, a when headings/paragraphs yielded little
+            // Fallback: collect substantial text from td, span, a, pre, code,
+            // textarea when headings/paragraphs yielded little.
+            // Wave 5b (Pain #14): added pre/code/textarea so JSON response
+            // pages rendered as <pre>{...}</pre> (e.g. httpbin.org/post)
+            // don't emit empty visible_text.
             if (visibleText.length < 100) {
-                const extraNodes = deepQueryAll(document, 'td, span, a');
+                const extraNodes = deepQueryAll(document, 'td, span, a, pre, code, textarea');
                 for (const node of extraNodes) {
                     const text = node.textContent?.trim();
                     if (text && text.length > 20 && visibleText.length < 500) {
@@ -442,6 +446,20 @@ pub async fn extract_semantic_view_with_options(
                         visibleText += text.substring(0, 100);
                     }
                 }
+            }
+
+            // Last-resort fallback: if still near-empty, fall back to
+            // document.body.innerText so pages with unusual DOM shapes
+            // (SPAs rendering everything into custom elements, etc.) still
+            // report *something*. Same 500-char total cap.
+            // Wave 5b (Pain #14).
+            if (visibleText.length < 50) {
+                try {
+                    const bodyText = document.body?.innerText?.trim();
+                    if (bodyText) {
+                        visibleText = bodyText.substring(0, 500);
+                    }
+                } catch (_) {}
             }
 
             // ── Form metadata ───────────────────────────────────────────

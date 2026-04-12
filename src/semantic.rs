@@ -280,9 +280,13 @@ impl SemanticView {
             if let Some(fi) = el.form_index {
                 let _ = write!(out, " form={fi}");
             }
-            // DX-W2-2: Show checkbox/radio checked state.
-            if let Some(checked) = el.checked {
-                let _ = write!(out, " checked={checked}");
+            // DX-W2-2 / Wave 5b (Pain #13): Show checkbox/radio checked state.
+            // Only emit the bare `checked` marker when Some(true) — unchecked
+            // and "not a checkbox/radio" look identical in the prompt to keep
+            // lines terse. Callers that need the tri-state can read the
+            // JSON `checked` field directly.
+            if el.checked == Some(true) {
+                out.push_str(" checked");
             }
             // DX-W2-2: Show select options.
             if let Some(ref opts) = el.options {

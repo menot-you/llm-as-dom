@@ -34,6 +34,14 @@ fn is_steganographic(c: char) -> bool {
 
 /// FIX-R4-03: Broadened sensitive field name patterns.
 /// Covers OTP, CVV, API key, auth code, MFA, and other credential-adjacent fields.
+///
+/// Wave 5b (Pain #4): matching switched from substring to token-boundary.
+/// Substring matching had nasty false positives — `"pin"` matched
+/// `"topping"`, `"shipping"`, `"clipping"`, `"pinterest_id"` — so public-
+/// facing fields like httpbin's `name="topping"` checkbox were silently
+/// rewritten to `val="[filled]"`. The new matcher tokenizes the field name
+/// on non-alphanumeric boundaries AND camelCase transitions and only masks
+/// when a tokenized component matches one of these patterns.
 const SENSITIVE_NAME_PATTERNS: &[&str] = &[
     "password",
     "passwd",
@@ -53,23 +61,121 @@ const SENSITIVE_NAME_PATTERNS: &[&str] = &[
     "2fa",
 ];
 
+/// Split a field `name` into lowercase tokens for sensitive-field matching.
+///
+/// Boundaries:
+/// 1. Non-alphanumeric runs (`_`, `-`, `.`, space, `/`, etc.) separate tokens.
+/// 2. camelCase / PascalCase transitions (`aB` or `ABc`) split into two
+///    tokens so `"apiKey"` → `["api", "key"]` and `"PinCode"` →
+///    `["pin", "code"]`.
+///
+/// All output tokens are ASCII lowercase. Empty tokens are filtered out.
+///
+/// Wave 5b (Pain #4): only used by `mask_sensitive_value` to sidestep the
+/// substring-matching false positives (`"pin"` hitting `"topping"`).
+fn name_tokens(name: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut prev_lower = false;
+    let mut prev_upper = false;
+
+    let flush = |cur: &mut String, out: &mut Vec<String>| {
+        if !cur.is_empty() {
+            out.push(std::mem::take(cur).to_ascii_lowercase());
+        }
+    };
+
+    let chars: Vec<char> = name.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        if !ch.is_ascii_alphanumeric() {
+            // Non-alphanumeric → hard boundary.
+            flush(&mut current, &mut tokens);
+            prev_lower = false;
+            prev_upper = false;
+            continue;
+        }
+
+        let is_upper = ch.is_ascii_uppercase();
+        let is_lower = ch.is_ascii_lowercase();
+        let next_is_lower = chars.get(i + 1).is_some_and(|c| c.is_ascii_lowercase());
+
+        // Two camelCase / PascalCase split triggers:
+        // 1. `aB` — lower-to-upper boundary (`apiKey` → api|Key).
+        // 2. `ABc` — upper-upper-lower boundary, splits so `APIKey`
+        //    tokenizes as `api|Key` instead of `apikey`.
+        let camel_split = is_upper && prev_lower;
+        let acronym_split = is_upper && prev_upper && next_is_lower;
+        if camel_split || acronym_split {
+            flush(&mut current, &mut tokens);
+        }
+
+        current.push(ch);
+        prev_lower = is_lower;
+        prev_upper = is_upper;
+    }
+    flush(&mut current, &mut tokens);
+
+    tokens
+}
+
+/// Return `true` when `name` contains a sensitive field marker.
+///
+/// Wave 5b (Pain #4): two-tier rule.
+/// 1. Short patterns (`pin`, `otp`, `cvv`, `cvc`, `mfa`, `2fa`, `totp`) must
+///    match a full token — so `name="topping"` does NOT hit `pin`.
+/// 2. Long patterns that contain `_` (e.g. `api_key`, `auth_code`,
+///    `security_code`) keep the old substring behavior against the full
+///    lowercased name — underscored phrases are unambiguous.
+/// 3. Remaining long patterns (`password`, `passwd`, `secret`, `token`,
+///    `verification`, `apikey`) match a full token OR a substring of the
+///    full name — keeps legacy true positives like `name="authToken"` or
+///    `name="user_passwd"` without re-introducing the `pin`/`topping`
+///    false positive.
+fn name_matches_sensitive(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let tokens = name_tokens(name);
+
+    for pat in SENSITIVE_NAME_PATTERNS {
+        // Short patterns → token equality only.
+        let is_short = matches!(*pat, "pin" | "otp" | "totp" | "cvv" | "cvc" | "mfa" | "2fa");
+        if is_short {
+            if tokens.iter().any(|t| t == pat) {
+                return true;
+            }
+            continue;
+        }
+
+        // Underscored patterns → substring on full name (unambiguous).
+        if pat.contains('_') {
+            if lower.contains(pat) {
+                return true;
+            }
+            continue;
+        }
+
+        // Long single-word patterns → token equality OR full-name substring.
+        if tokens.iter().any(|t| t == pat) || lower.contains(pat) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Mask sensitive field values extracted from the DOM.
 ///
 /// Prevents credentials from leaking into LLM prompts.
 /// FIX-10: Also checks element `name` for sensitive patterns, not just `type`.
 /// FIX-R4-03: Broadened to cover OTP, CVV, API key, MFA, etc.
+/// Wave 5b (Pain #4): name matching now uses token boundaries so
+/// `name="topping"` no longer false-positives on the `pin` pattern.
 pub fn mask_sensitive_value(
     input_type: Option<&str>,
     name: Option<&str>,
     value: Option<&str>,
 ) -> Option<String> {
     let is_sensitive = input_type.is_some_and(|t| t.eq_ignore_ascii_case("password"))
-        || name.is_some_and(|n| {
-            let lower = n.to_lowercase();
-            SENSITIVE_NAME_PATTERNS
-                .iter()
-                .any(|pat| lower.contains(pat))
-        });
+        || name.is_some_and(name_matches_sensitive);
     if is_sensitive {
         value.map(|_| "[filled]".to_string())
     } else {
@@ -991,6 +1097,130 @@ mod tests {
             mask_sensitive_value(None, Some("auth_token"), Some("xyz")),
             Some("[filled]".to_string()),
         );
+    }
+
+    // ── Wave 5b (Pain #4): token-boundary matching ─────────────
+
+    #[test]
+    fn does_not_mask_topping_checkbox() {
+        // Regression: httpbin.org/forms/post uses name="topping" for every
+        // pizza checkbox. Substring matching against "pin" masked them.
+        assert_eq!(
+            mask_sensitive_value(Some("checkbox"), Some("topping"), Some("bacon")),
+            Some("bacon".to_string()),
+        );
+    }
+
+    #[test]
+    fn does_not_mask_shipping_address() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("shipping_address"), Some("1 Main St")),
+            Some("1 Main St".to_string()),
+        );
+    }
+
+    #[test]
+    fn does_not_mask_clipping() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("clipping"), Some("yes")),
+            Some("yes".to_string()),
+        );
+    }
+
+    #[test]
+    fn does_not_mask_pinterest_id() {
+        // "pinterest_id" contains substring "pin" but no "pin" token.
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("pinterest_id"), Some("42")),
+            Some("42".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_standalone_pin() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("pin"), Some("1234")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_user_pin() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("user_pin"), Some("1234")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_pin_code_camelcase() {
+        // camelCase: "pinCode" tokenizes to ["pin","code"].
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("pinCode"), Some("1234")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_standalone_otp() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("otp"), Some("123456")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_auth_token_camelcase() {
+        // "authToken" tokenizes to ["auth","token"], "token" is sensitive.
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("authToken"), Some("abc")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_api_key_snake_case() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("api_key"), Some("sk-live")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn masks_credit_card_cvv() {
+        assert_eq!(
+            mask_sensitive_value(Some("text"), Some("credit_card_cvv"), Some("321")),
+            Some("[filled]".to_string()),
+        );
+    }
+
+    #[test]
+    fn name_tokens_splits_snake_case() {
+        assert_eq!(
+            name_tokens("credit_card_cvv"),
+            vec!["credit", "card", "cvv"]
+        );
+    }
+
+    #[test]
+    fn name_tokens_splits_camel_case() {
+        assert_eq!(name_tokens("apiKey"), vec!["api", "key"]);
+    }
+
+    #[test]
+    fn name_tokens_splits_pascal_acronym() {
+        assert_eq!(name_tokens("APIKey"), vec!["api", "key"]);
+    }
+
+    #[test]
+    fn name_tokens_single_word() {
+        assert_eq!(name_tokens("topping"), vec!["topping"]);
+    }
+
+    #[test]
+    fn name_tokens_strips_punctuation() {
+        assert_eq!(name_tokens("user.name"), vec!["user", "name"]);
+        assert_eq!(name_tokens("user-name"), vec!["user", "name"]);
     }
 
     // -- FIX-2: redact_action_debug --
