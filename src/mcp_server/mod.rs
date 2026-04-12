@@ -818,10 +818,13 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Navigate back in browser history (equivalent to clicking the back button). Returns the semantic view of the previous page."
+        description = "Navigate back in browser history (equivalent to clicking the back button). Returns the semantic view of the previous page. Accepts `timeout_ms` (default 10000) — returns a clear error instead of hanging when the page has no history or chromium is stuck."
     )]
-    async fn lad_back(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.tool_lad_back().await
+    async fn lad_back(
+        &self,
+        params: Parameters<BackParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_back(params).await
     }
 
     #[tool(
@@ -842,7 +845,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Inspect network traffic captured during browsing. Uses performance.getEntries() to collect requests with timing data. Optionally filter by type: auth, api, navigation, asset, all."
+        description = "Inspect network traffic captured during browsing. Includes timing data via Performance API. Note: status codes and byte counts are unavailable for cross-origin requests due to `performance.getEntries()` limitations. Future: CDP Network domain integration. Optionally filter by type: auth, api, navigation, asset, all."
     )]
     async fn lad_network(
         &self,
@@ -902,10 +905,13 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Reload the current page. Useful after form submissions or when content needs refreshing. Returns updated semantic view. Requires a prior lad_snapshot or lad_browse call."
+        description = "Reload the current page. Useful after form submissions or when content needs refreshing. Returns updated semantic view. Accepts `timeout_ms` (default 10000) — returns a clear error instead of hanging when the reload never completes. Requires a prior lad_snapshot or lad_browse call."
     )]
-    async fn lad_refresh(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.tool_lad_refresh().await
+    async fn lad_refresh(
+        &self,
+        params: Parameters<RefreshParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.tool_lad_refresh(params).await
     }
 
     #[tool(
@@ -961,7 +967,7 @@ impl ServerHandler for LadServer {
                 .enable_resources_subscribe()
                 .build(),
         )
-        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis (URL optional, format='prompt' for compact output), lad_assert for verification (URL optional), lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional), lad_click/lad_type/lad_select for element interaction, lad_clear to clear input fields (works with React/Vue controlled components), lad_fill_form to fill multiple fields + submit in one call, lad_scroll for scrolling, lad_hover for hover states, lad_screenshot for visual capture, lad_wait for blocking condition checks (supports multiple conditions with mode='any'/'all'), lad_network for traffic inspection (includes HTTP status codes), lad_dialog for JS alert/confirm/prompt handling (auto-accepts by default), lad_refresh to reload the current page, lad_upload for file input uploads. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
+        .with_instructions("lad (LLM-as-DOM) is an AI browser pilot. It navigates web pages autonomously using heuristics + cheap LLM. Use lad_browse for goal-based navigation, lad_extract for page analysis (URL optional, format='prompt' for compact output), lad_assert for verification (URL optional), lad_locate for source mapping, lad_audit for page quality checks, lad_session for session state inspection/reset, lad_snapshot for semantic page snapshots (URL optional), lad_click/lad_type/lad_select for element interaction, lad_clear to clear input fields (works with React/Vue controlled components), lad_fill_form to fill multiple fields + submit in one call, lad_scroll for scrolling, lad_hover for hover states, lad_screenshot for visual capture, lad_wait for blocking condition checks (supports multiple conditions with mode='any'/'all'), lad_network for traffic inspection (timing data via Performance API; note: status codes and byte counts unavailable for cross-origin requests — CDP Network domain deferred), lad_dialog for JS alert/confirm/prompt handling (auto-accepts by default), lad_refresh to reload the current page, lad_upload for file input uploads. Escape hatches: lad_eval for raw JS, lad_press_key for keyboard events, lad_back for history navigation, lad_close for cleanup.")
     }
 
     async fn initialize(

@@ -335,6 +335,64 @@ pub(crate) struct HoverParams {
     pub tab_id: Option<u32>,
 }
 
+/// Wave 5 (Pain #16): default timeout for `lad_back` / `lad_refresh`.
+/// 10s is generous enough to cover a real page reload while still bailing
+/// out quickly when chromium is hung or there is no history to rewind.
+pub(crate) fn default_nav_timeout_ms() -> u64 {
+    10_000
+}
+
+/// Parameters for the `lad_back` tool.
+///
+/// Wave 5 (Pain #16): previously this tool took no parameters and would
+/// block indefinitely when the page had no history or chromium hung. The
+/// timeout gives callers an escape hatch.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct BackParams {
+    /// Hard timeout for the whole back-navigate cycle in milliseconds.
+    /// Default: 10000 (10s).
+    #[serde(default = "default_nav_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub tab_id: Option<u32>,
+}
+
+impl Default for BackParams {
+    fn default() -> Self {
+        Self {
+            timeout_ms: default_nav_timeout_ms(),
+            tab_id: None,
+        }
+    }
+}
+
+/// Parameters for the `lad_refresh` tool.
+///
+/// Wave 5 (Pain #16): same shape as `BackParams`; both wrap a navigation
+/// in `tokio::time::timeout` so a hung chromium can't block the session.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct RefreshParams {
+    /// Hard timeout for the whole refresh cycle in milliseconds.
+    /// Default: 10000 (10s).
+    #[serde(default = "default_nav_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub tab_id: Option<u32>,
+}
+
+impl Default for RefreshParams {
+    fn default() -> Self {
+        Self {
+            timeout_ms: default_nav_timeout_ms(),
+            tab_id: None,
+        }
+    }
+}
+
 /// Parameters for the `lad_dialog` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct DialogParams {
@@ -455,4 +513,52 @@ pub(crate) struct TabCloseParams {
     /// ID of the tab to close. If this was the active tab, the active tab
     /// slot is cleared. Must exist in the current session.
     pub tab_id: u32,
+}
+
+// ── Wave 5 (Pain #16): nav timeout param tests ──────────────────
+#[cfg(test)]
+mod nav_param_tests {
+    use super::*;
+
+    #[test]
+    fn back_params_default_timeout_is_10s() {
+        assert_eq!(BackParams::default().timeout_ms, 10_000);
+        assert!(BackParams::default().tab_id.is_none());
+    }
+
+    #[test]
+    fn refresh_params_default_timeout_is_10s() {
+        assert_eq!(RefreshParams::default().timeout_ms, 10_000);
+        assert!(RefreshParams::default().tab_id.is_none());
+    }
+
+    #[test]
+    fn back_params_roundtrip_preserves_fields() {
+        let json = r#"{"timeout_ms":2500,"tab_id":7}"#;
+        let p: BackParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.timeout_ms, 2500);
+        assert_eq!(p.tab_id, Some(7));
+    }
+
+    #[test]
+    fn refresh_params_roundtrip_preserves_fields() {
+        let json = r#"{"timeout_ms":3000,"tab_id":2}"#;
+        let p: RefreshParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.timeout_ms, 3000);
+        assert_eq!(p.tab_id, Some(2));
+    }
+
+    #[test]
+    fn back_params_empty_object_uses_defaults() {
+        let p: BackParams = serde_json::from_str("{}").unwrap();
+        assert_eq!(p.timeout_ms, 10_000);
+        assert!(p.tab_id.is_none());
+    }
+
+    #[test]
+    fn refresh_params_empty_object_uses_defaults() {
+        let p: RefreshParams = serde_json::from_str("{}").unwrap();
+        assert_eq!(p.timeout_ms, 10_000);
+        assert!(p.tab_id.is_none());
+    }
 }

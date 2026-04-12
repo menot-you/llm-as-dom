@@ -13,15 +13,46 @@ use crate::semantic::{Element, ElementHint, ElementKind, FormMeta, PageState, Se
 /// Stamps each interactive element with a `data-lad-id` attribute so that
 /// subsequent actions can target elements by stable numeric ID.
 /// Also tracks which `<form>` each element belongs to for scoping.
+///
+/// Defaults to dropping hidden elements at the JS-DOM walker layer. Call
+/// [`extract_semantic_view_with_options`] with `include_hidden=true` to bypass
+/// the gate (audit / debugging).
 pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView, crate::Error> {
+    extract_semantic_view_with_options(page, false).await
+}
+
+/// Extract page structure with an explicit `include_hidden` flag.
+///
+/// Wave 5 (Pain #10 fix): threads the flag into the JS DOM walker so Layer 1
+/// no longer drops hidden elements before the Rust-side filter runs. When
+/// `include_hidden=true`, the JS walker keeps every element and Rust-side
+/// `retain_visible_elements` is skipped by the tool entrypoints — the caller
+/// then sees elements with `is_visible: Some(false)` instead of losing them
+/// entirely. Default path (`false`) is byte-for-byte equivalent to the
+/// previous behavior.
+pub async fn extract_semantic_view_with_options(
+    page: &dyn PageHandle,
+    include_hidden: bool,
+) -> Result<SemanticView, crate::Error> {
     let url = page.url().await.unwrap_or_else(|_| "unknown".into());
     let title = page.title().await.unwrap_or_else(|_| String::new());
 
-    let js = r#"
+    // Rust `bool::to_string()` emits the literal JS tokens `true`/`false`.
+    // Kept as an explicit match for clarity; we splice this into the raw JS
+    // string below by replacing a sentinel token rather than going through
+    // `format!` (that would force us to escape every `{`/`}` in the walker).
+    let include_hidden_js = if include_hidden { "true" } else { "false" };
+    let js_template = r#"
         (() => {
             // CHAOS-C3: Override window.close() to prevent hostile pages from
             // killing the browser tab/handle during extraction or navigation.
             try { window.close = function(){}; } catch(_) {}
+
+            // Wave 5 (Pain #10): honor the include_hidden flag. When true,
+            // Layer 1's isVisible() gate becomes a pass-through so hidden
+            // elements reach the Rust side (where is_visible=false flags
+            // them for downstream filtering). Substituted at runtime.
+            const includeHidden = __LAD_INCLUDE_HIDDEN__;
 
             const MAX_ELEMENTS = 300;
             // DX-CE3 (bug 3): include contenteditable roots, [role="textbox"],
@@ -183,7 +214,11 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
             // ── Collect visible elements from a list ───────────────────
             function collectElements(elList, frameIdx) {
                 for (const el of elList) {
-                    if (!isVisible(el)) continue;
+                    // Wave 5 (Pain #10): honor includeHidden. When the caller
+                    // explicitly asks for hidden elements we still compute
+                    // is_visible below (Layer 2 via isVisibleStrict) so Rust
+                    // can tag them without dropping them here.
+                    if (!includeHidden && !isVisible(el)) continue;
 
                     const tag = el.tagName.toLowerCase();
                     const editor = isEditorTarget(el);
@@ -422,7 +457,12 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
         })()
     "#;
 
-    let mut extraction: JsExtraction = crate::engine::eval_js_into(page, js).await?;
+    // Splice the Rust-side `include_hidden` flag into the JS walker. Safe
+    // because `bool::to_string()` only yields "true"/"false" — no escaping
+    // required, no XSS surface (this runs inside our own controlled page).
+    let js = js_template.replace("__LAD_INCLUDE_HIDDEN__", include_hidden_js);
+
+    let mut extraction: JsExtraction = crate::engine::eval_js_into(page, &js).await?;
     let mut shell_markers = crate::cloaking::probe_shell_markers(page).await;
 
     // DX-CL2 (bug 2): Twitter/X and other React SPAs render a shell-only
@@ -437,7 +477,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
             "zero interactive elements on SPA shell — retrying extraction after 1500ms"
         );
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-        extraction = crate::engine::eval_js_into(page, js).await?;
+        extraction = crate::engine::eval_js_into(page, &js).await?;
         shell_markers = crate::cloaking::probe_shell_markers(page).await;
     }
 
