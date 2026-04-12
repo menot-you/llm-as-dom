@@ -292,7 +292,13 @@ pub async fn extract_semantic_view_with_options(
                     }
 
                     // DX-W2-2: Extract checked state for checkbox/radio.
-                    const checked = (kind === 'checkbox' || kind === 'radio') ? !!el.checked : null;
+                    // Wave 5c hotfix (Pain #13 regression): the if/else chain
+                    // above lands <input type=radio|checkbox> in kind='input'
+                    // (line 227 matches first), so gating on `kind` here
+                    // always yielded null for the live cases. Read `el.type`
+                    // directly — it's the canonical source of truth for the
+                    // DOM element, regardless of our semantic kind mapping.
+                    const checked = (el.type === 'checkbox' || el.type === 'radio') ? !!el.checked : null;
 
                     // DX-W2-2: Extract option labels for <select> elements (top 10).
                     let options = null;
