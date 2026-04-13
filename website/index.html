@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+<<<<<<< Updated upstream
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -10,4 +11,165 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
+=======
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>lad — The LLM-as-DOM framework</title>
+    <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+    <meta name="description" content="AI agents shouldn't read HTML. lad compresses your DOM so Claude never parses raw HTML, saving 80% on token counts.">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=2">
+    
+    <!-- Feather Icons for lightweight SVGs -->
+    <script src="https://unpkg.com/feather-icons"></script>
+    <script src="logo-sticker.js"></script>
+</head>
+<body>
+    <!-- Background flares -->
+    <div class="flare flare-orange"></div>
+    <div class="flare flare-purple"></div>
+    
+    <!-- Navigation -->
+    <nav class="navbar animate-in slide-up">
+        <div class="brand">
+            <img src="assets/icon.svg" alt="lad logo marker" style="width: 32px; height: 32px; filter: drop-shadow(0px 0px 8px rgba(216, 92, 49, 0.4));" />
+            <span class="gradient-text">lad</span>
+        </div>
+        <div class="nav-links">
+            <a href="#how-it-works">How it Works</a>
+            <a href="#benchmarks">Benchmarks</a>
+            <a href="https://github.com/menot-you/llm-as-dom" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <logo-sticker class="logo-sticker hero-logo animate-in slide-up">
+            <div class="lab-bg pointer-events-none absolute h-full w-full"></div>
+            <img src="assets/icon.svg" alt="lad abstract logo" />
+        </logo-sticker>
+        <h1 class="animate-in slide-up delay-1">AI agents shouldn't <br><span class="gradient-text">read HTML.</span></h1>
+        <p class="hero-subtitle animate-in slide-up delay-2">
+            Deliver lean, semantically rich, minimal DOM to your LLMs instantly.<br>
+            Test your app 60x cheaper.
+        </p>
+        
+        <div class="hero-actions animate-in slide-up delay-3">
+            <a href="https://github.com/menot-you/llm-as-dom" class="btn btn-primary" target="_blank">Get Started</a>
+            <div class="snippet snippet-hero">
+                <code>cargo install llm-as-dom</code>
+                <i data-feather="copy" class="icon-copy" onclick="copySnippet()"></i>
+            </div>
+        </div>
+    </header>
+
+    <!-- Comparison Showcase -->
+    <section class="showcase">
+        <div class="glass-terminal animate-in fade-in delay-4">
+            <div class="terminal-header">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+                <span class="tab">lad - Semantic View</span>
+            </div>
+            <div class="terminal-body split-view">
+                <div class="pane pane-red">
+                    <span class="pane-title">15,000 Tokens (Raw HTML)</span>
+                    <pre><code>&lt;!-- Playwright Payload --&gt;
+&lt;div class="tw-bg-gray-900 tw-p-4 tw-rounded-lg shadow-xl..."&gt;
+  &lt;form action="/login" method="post"&gt;
+    &lt;label for="user" class="..."&gt;Username&lt;/label&gt;
+    &lt;input type="email" id="user" name="user" class="..." aria-describedby="..."&gt;
+    &lt;!-- 10kb of SVGs --&gt;
+    ...
+&lt;/div&gt;</code></pre>
+                </div>
+                <div class="pane pane-green">
+                    <span class="pane-title">120 Tokens (LAD Schema)</span>
+                    <pre><code># Compressed LAD Semantic View 
+[1] 📋 [Form POST /login]
+    [2] 🔤 [Input Textbox] "Username"
+    [3] 🔑 [Input Password] "Password"
+    [4] 🔘 [Submit Button] "Sign in"
+
+// 310ns heuristics logic. Cost: $0.00
+// Action: lad_browse("test login") </code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features" id="how-it-works">
+        <div class="feature-card">
+            <div class="feature-icon"><i data-feather="zap"></i></div>
+            <h3>Faster Tokenization</h3>
+            <p>Parses standard logic in 310 nanoseconds using Tier-2 Heuristics. Only calls LLMs for true ambiguity.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon"><i data-feather="dollar-sign"></i></div>
+            <h3>Reduced Cost</h3>
+            <p>Spend $0.006 per login test instance compared to $0.36 on raw HTML parsers like Playwright MCP.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon"><i data-feather="cpu"></i></div>
+            <h3>Cross-Engine</h3>
+            <p>Built-in Chromium and native WebKit bridging for zero-install macOS runs testing rendering discrepancies.</p>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <a href="https://menot.sh/" target="_blank" class="award-badge" aria-label="feito com 💛 por menot.you">
+            <div class="award-logo">
+                <img src="assets/icon.svg" alt="menot.you icon" />
+            </div>
+            <div class="award-text">
+                <span class="award-made">feito com 💛 por</span>
+                <span class="award-name">menot.you</span>
+            </div>
+        </a>
+        <p style="margin-top: 1.5rem;">LAD / Open Source HTML compression for AI Agents</p>
+        <p class="footer-links">
+            <a href="https://github.com/menot-you/llm-as-dom">AGPL-3.0 License</a>
+        </p>
+    </footer>
+
+    <script>
+        feather.replace();
+        
+        function copySnippet() {
+            navigator.clipboard.writeText('cargo install llm-as-dom');
+            // Visual feedback could go here
+        }
+        
+        // Intersection Observer for scroll animations
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = "1";
+                    entry.target.style.transform = "translateY(0)";
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+        
+        document.querySelectorAll('.feature-card').forEach(el => {
+            el.style.opacity = "0";
+            el.style.transform = "translateY(20px)";
+            el.style.transition = "all 0.6s cubic-bezier(0.16, 1, 0.3, 1)";
+            observer.observe(el);
+        });
+    </script>
+</body>
+>>>>>>> Stashed changes
 </html>

@@ -1,0 +1,24 @@
+[package]
+name = "lad-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+llm_as_dom = { path = ".." }
+
+[[bin]]
+name = "fuzz_parse_action"
+path = "fuzz_targets/fuzz_parse_action.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_semantic_view"
+path = "fuzz_targets/fuzz_semantic_view.rs"
+test = false
+doc = false
