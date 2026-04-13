@@ -2,3 +2,16 @@
 .mcp.json
 .DS_Store
 webkit-bridge/.build/
+
+# IDEs and Context
+.idea/
+.claude/
+.nott/
+
+# Tools & Builds
+.playwright-mcp/
+.wrangler/
+python/dist/
+
+# Artifacts
+*.png

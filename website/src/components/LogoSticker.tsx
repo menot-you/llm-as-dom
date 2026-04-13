@@ -6,6 +6,8 @@ const maxRotate = 0.25;
 const minRotate = -0.25;
 const maxScale = 1;
 const minScale = 0.97;
+
+// Original holographic colors for the overlay
 const colors = [
   "hsl(358, 100%, 62%)", "hsl(30, 100%, 50%)", "hsl(60, 100%, 50%)", 
   "hsl(96, 100%, 50%)", "hsl(233, 85%, 47%)", "hsl(271, 85%, 47%)", 
@@ -17,7 +19,10 @@ interface LogoStickerProps {
   iconSrc?: string;
 }
 
-export const LogoSticker: React.FC<LogoStickerProps> = ({ className = "", iconSrc = "/icon.svg" }) => {
+export const LogoSticker = ({ 
+  className = "", 
+  iconSrc = "/icon.svg",
+}: LogoStickerProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [firstOverlayPosition, setFirstOverlayPosition] = useState<number>(0);
   const [matrix, setMatrix] = useState<string>(identityMatrix);
@@ -149,7 +154,7 @@ export const LogoSticker: React.FC<LogoStickerProps> = ({ className = "", iconSr
         setDisableInOutOverlayAnimation(false);
         
         leaveTimeoutRef1.current = setTimeout(() => {
-          setFirstOverlayPosition((prev) => -prev / 4);
+          setFirstOverlayPosition((prev: number) => -prev / 4);
         }, 150);
         
         leaveTimeoutRef2.current = setTimeout(() => {
@@ -170,38 +175,93 @@ export const LogoSticker: React.FC<LogoStickerProps> = ({ className = "", iconSr
       onMouseEnter={onMouseEnter} 
       onMouseMove={onMouseMove} 
       onMouseLeave={onMouseLeave}
+      style={{
+        display: "inline-block",
+        perspective: "700px",
+        cursor: "pointer",
+        width: 104, // Default bounds matching CSS
+        height: 104,
+      }}
     >
       <div 
-        className="logo-sticker-inner" 
-        style={{ transform: `perspective(700px) matrix3d(${matrix})` }} 
         ref={ref}
+        style={{ 
+          transform: `matrix3d(${matrix})`,
+          width: "100%",
+          height: "100%",
+          position: "relative",
+          transformOrigin: "center center",
+          transition: "transform 200ms ease-out",
+          filter: "drop-shadow(0 20px 30px rgba(216, 92, 49, 0.4))",
+        }} 
       >
-        <div className="lab-bg pointer-events-none absolute w-full h-full" />
-        <img src={iconSrc} alt="lad abstract logo" className="logo-sticker-img" />
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 260" className="overlay-svg">
-          <defs>
-            <filter id="blur1">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="3" />
-            </filter>
-          </defs>
-          <g style={{ mixBlendMode: "overlay" }}>
-            {Array.from({ length: 10 }).map((_, i) => (
-              <g
-                key={i}
-                style={{
-                  transform: `rotate(${firstOverlayPosition + i * 10}deg)`,
-                  transformOrigin: "center center",
-                  transition: !disableInOutOverlayAnimation ? "transform 200ms ease-out" : "none",
-                  animation: !disableOverlayAnimation ? `overlayAnimation${i + 1} 5s infinite` : "none",
-                  willChange: "transform"
-                }}
-              >
-                <polygon points="0,0 260,260 260,0 0,260" fill={colors[i]} filter="url(#blur1)" opacity="0.5" />
-              </g>
-            ))}
-          </g>
-        </svg>
+        {/* Base Original Logo */}
+        <img 
+          src={iconSrc} 
+          alt="LAD Logo" 
+          style={{
+            width: "100%",
+            height: "100%",
+            position: "absolute",
+            inset: 0,
+            objectFit: "contain",
+          }}
+        />
+
+        {/* Holographic Overlay Layer exactly masked to the logo's alpha shape */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            WebkitMaskImage: `url(${iconSrc})`,
+            WebkitMaskSize: "contain",
+            WebkitMaskRepeat: "no-repeat",
+            WebkitMaskPosition: "center",
+            maskImage: `url(${iconSrc})`,
+            maskSize: "contain",
+            maskRepeat: "no-repeat",
+            maskPosition: "center",
+            mixBlendMode: "color-dodge", // "color-dodge" or "overlay" are best for shine over original colors
+            pointerEvents: "none",
+            zIndex: 1,
+            opacity: 0.85
+          }}
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            viewBox="-50 -50 200 200" 
+            style={{ 
+              width: "100%", 
+              height: "100%",
+              overflow: "visible"
+            }}
+          >
+            <defs>
+              <filter id="blur1">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="8" />
+              </filter>
+            </defs>
+            <g>
+              {Array.from({ length: 10 }).map((_, i) => (
+                <g
+                  key={i}
+                  style={{
+                    transform: `rotate(${firstOverlayPosition + i * 10}deg)`,
+                    transformOrigin: "50% 50%",
+                    transition: !disableInOutOverlayAnimation ? "transform 200ms ease-out" : "none",
+                    animation: !disableOverlayAnimation ? `overlayAnimation${i + 1} 5s infinite` : "none",
+                    willChange: "transform"
+                  }}
+                >
+                  {/* Narrow hourglass polygons (sunburst rays) intersecting at center */}
+                  <polygon points="0,40 100,45 100,55 0,60" fill={colors[i]} filter="url(#blur1)" opacity="0.6" />
+                </g>
+              ))}
+            </g>
+          </svg>
+        </div>
       </div>
 
       <style>{`

@@ -1,0 +1,5 @@
+language: "en-US"
+profile: "assertive"
+reviews:
+  path_excludes:
+    - "fixtures/**"

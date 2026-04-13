@@ -1,0 +1,11 @@
+[workspace]
+changelog_config = "release-plz.toml"
+
+[changelog]
+include = [
+    "feat",
+    "fix",
+    "refactor",
+    "perf",
+    "docs"
+]

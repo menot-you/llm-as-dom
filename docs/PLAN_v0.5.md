@@ -279,7 +279,7 @@ W1 ∥ W2 → W3 → W4 → W5
 [x] W1: Drop + crash detection + handshake + pending fix
 [x] W2: NSDate + autorelease + Set + httpOnly + isolation + version
 [x] W3: selector wired + webkit integration tests
-[ ] W4: CI macOS job + version bump + push + tag + verify pipeline
+[x] W4: CI macOS job + version bump + push + tag + verify pipeline
 [ ] Posts: publish from docs/POST_MULTI_ENGINE.md
 [ ] W5: observer + lad_watch (separate release)
 ```
