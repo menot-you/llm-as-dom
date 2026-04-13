@@ -1,0 +1,8 @@
+[      89ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ https://cdn.21st.dev/bundled/1690.html:1098
+[      98ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
+[     102ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
+[     105ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html:1189
+[     105ms] [LOG] window.location.search  @ https://cdn.21st.dev/bundled/1690.html:1189
+[     105ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html:1189
+[     105ms] [LOG] window.location.search  @ https://cdn.21st.dev/bundled/1690.html:1189
+[     108ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840

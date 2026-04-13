@@ -1,0 +1,18 @@
+[      37ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ https://cdn.21st.dev/bundled/1690.html?theme=light:1098
+[      48ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html?theme=light:840
+[      51ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html?theme=light:840
+[      55ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html?theme=light:1189
+[      55ms] [LOG] window.location.search ?theme=light @ https://cdn.21st.dev/bundled/1690.html?theme=light:1189
+[      55ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html?theme=light:1189
+[      55ms] [LOG] window.location.search ?theme=light @ https://cdn.21st.dev/bundled/1690.html?theme=light:1189
+[      58ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html?theme=light:840
+[     338ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://cdn.21st.dev/favicon.ico:0
+[    6851ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ https://cdn.21st.dev/bundled/1690.html:1098
+[    6862ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
+[    6865ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
+[    6869ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html:1189
+[    6869ms] [LOG] window.location.search  @ https://cdn.21st.dev/bundled/1690.html:1189
+[    6870ms] [LOG] isDarkMode false @ https://cdn.21st.dev/bundled/1690.html:1189
+[    6870ms] [LOG] window.location.search  @ https://cdn.21st.dev/bundled/1690.html:1189
+[    6872ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840
+[  158845ms] [ERROR] Accessing element.ref was removed in React 19. ref is now a regular prop. It will be removed from the JSX Element type in a future release. @ https://cdn.21st.dev/bundled/1690.html:840

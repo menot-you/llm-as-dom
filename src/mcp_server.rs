@@ -40,6 +40,38 @@ fn default_max_steps() -> u32 {
     10
 }
 
+/// Check if a URL is safe to fetch (SSRF protection).
+fn is_safe_url(url: &str) -> bool {
+    let allow_local = std::env::var("LAD_ALLOW_LOCAL_URLS").unwrap_or_default() == "true";
+    if allow_local {
+        return true;
+    }
+
+    if let Ok(parsed) = url::Url::parse(url) {
+        if parsed.scheme() == "file" {
+            return false;
+        }
+        if let Some(host) = parsed.host_str() {
+            let host_lower = host.to_lowercase();
+            // Basic SSRF blocks:
+            if host_lower == "localhost" 
+                || host_lower == "127.0.0.1" 
+                || host_lower == "[::1]"
+                || host_lower == "0.0.0.0" 
+            {
+                return false;
+            }
+            if host_lower.starts_with("169.254.") 
+                || host_lower.starts_with("10.")  
+                || host_lower.starts_with("192.168.") 
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Parameters for the `lad_extract` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ExtractParams {
@@ -196,6 +228,10 @@ impl LadServer {
         &self,
         url: &str,
     ) -> Result<(Box<dyn PageHandle>, semantic::SemanticView), rmcp::ErrorData> {
+        if !is_safe_url(url) {
+            return Err(rmcp::ErrorData::invalid_params("SEC-002: SSRF defense active - Disallowed URL. Set LAD_ALLOW_LOCAL_URLS=true to bypass.", None));
+        }
+
         let engine = self.ensure_engine().await.map_err(mcp_err)?;
         let page = engine.new_page(url).await.map_err(mcp_err)?;
         page.wait_for_navigation().await.map_err(mcp_err)?;
@@ -308,6 +344,10 @@ impl LadServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
         tracing::info!(url = %p.url, goal = %p.goal, "lad_browse");
+
+        if !is_safe_url(&p.url) {
+            return Err(rmcp::ErrorData::invalid_params("SEC-002: SSRF defense active - Disallowed URL. Set LAD_ALLOW_LOCAL_URLS=true to bypass.", None));
+        }
 
         tracing::info!(url = %p.url, "launching page");
         let engine = self.ensure_engine().await.map_err(mcp_err)?;

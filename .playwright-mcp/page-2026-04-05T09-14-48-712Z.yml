@@ -1,0 +1,53 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e4]:
+    - generic [ref=e5]:
+      - img "lad logo marker" [ref=e6]
+      - generic [ref=e7]: lad
+    - generic [ref=e8]:
+      - link "How it Works" [ref=e9] [cursor=pointer]:
+        - /url: "#how-it-works"
+      - link "Benchmarks" [ref=e10] [cursor=pointer]:
+        - /url: "#benchmarks"
+      - link "GitHub" [ref=e11] [cursor=pointer]:
+        - /url: https://github.com/menot-you/llm-as-dom
+  - banner [ref=e12]:
+    - img "lad abstract logo" [ref=e13]
+    - heading "AI agents shouldn't read HTML." [level=1] [ref=e14]:
+      - text: AI agents shouldn't
+      - text: read HTML.
+    - paragraph [ref=e15]:
+      - text: Deliver lean, semantically rich, minimal DOM to your LLMs instantly.
+      - text: Test your app 60x cheaper.
+    - generic [ref=e16]:
+      - link "Get Started" [ref=e17] [cursor=pointer]:
+        - /url: https://github.com/menot-you/llm-as-dom
+      - generic [ref=e18]:
+        - code [ref=e19]: cargo install llm-as-dom
+        - img [ref=e20] [cursor=pointer]
+  - generic [ref=e24]:
+    - generic [ref=e29]: lad - Semantic View
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: 15,000 Tokens (Raw HTML)
+        - code [ref=e34]: <!-- Playwright Payload --> <div class="tw-bg-gray-900 tw-p-4 tw-rounded-lg shadow-xl..."> <form action="/login" method="post"> <label for="user" class="...">Username</label> <input type="email" id="user" name="user" class="..." aria-describedby="..."> <!-- 10kb of SVGs --> ... </div>
+      - generic [ref=e35]:
+        - generic [ref=e36]: 120 Tokens (LAD Schema)
+        - code [ref=e38]: "# Compressed LAD Semantic View [1] 📋 [Form POST /login] [2] 🔤 [Input Textbox] \"Username\" [3] 🔑 [Input Password] \"Password\" [4] 🔘 [Submit Button] \"Sign in\" // 310ns heuristics logic. Cost: $0.00 // Action: lad_browse(\"test login\")"
+  - generic [ref=e39]:
+    - generic [ref=e40]:
+      - img [ref=e42]
+      - heading "Faster Tokenization" [level=3] [ref=e44]
+      - paragraph [ref=e45]: Parses standard logic in 310 nanoseconds using Tier-2 Heuristics. Only calls LLMs for true ambiguity.
+    - generic [ref=e46]:
+      - img [ref=e48]
+      - heading "Reduced Cost" [level=3] [ref=e50]
+      - paragraph [ref=e51]: Spend $0.006 per login test instance compared to $0.36 on raw HTML parsers like Playwright MCP.
+    - generic [ref=e52]:
+      - img [ref=e54]
+      - heading "Cross-Engine" [level=3] [ref=e57]
+      - paragraph [ref=e58]: Built-in Chromium and native WebKit bridging for zero-install macOS runs testing rendering discrepancies.
+  - contentinfo [ref=e59]:
+    - paragraph [ref=e60]: LAD / Open Source HTML compression for AI Agents
+    - paragraph [ref=e61]:
+      - link "AGPL-3.0 License" [ref=e62] [cursor=pointer]:
+        - /url: https://github.com/menot-you/llm-as-dom

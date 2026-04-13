@@ -1,0 +1,184 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - text: "skip to:"
+          - link "skip to content" [ref=e8] [cursor=pointer]:
+            - /url: "#main"
+            - text: content
+          - link "skip to package search" [ref=e9] [cursor=pointer]:
+            - /url: "#search"
+            - text: package search
+        - generic [ref=e10]:
+          - generic [ref=e11]: ❤
+          - navigation "Product Navigation" [ref=e12]:
+            - list [ref=e13]:
+              - listitem [ref=e14]:
+                - link "Pro" [ref=e15] [cursor=pointer]:
+                  - /url: /products/pro
+              - listitem [ref=e16]:
+                - link "Teams" [ref=e17] [cursor=pointer]:
+                  - /url: /products/teams
+              - listitem [ref=e18]:
+                - link "Pricing" [ref=e19] [cursor=pointer]:
+                  - /url: /products
+              - listitem [ref=e20]:
+                - link "Documentation" [ref=e21] [cursor=pointer]:
+                  - /url: https://docs.npmjs.com
+      - generic [ref=e23]:
+        - generic [ref=e24]: npm
+        - link "Npm" [ref=e26] [cursor=pointer]:
+          - /url: /
+          - img [ref=e27]
+        - generic [ref=e30]:
+          - generic [ref=e32]:
+            - img [ref=e34]
+            - combobox "Search packages" [ref=e40]
+          - button "Search" [ref=e42]
+        - navigation [ref=e44]:
+          - button "Profile menu" [ref=e45]:
+            - generic [ref=e46]: Menu
+            - img [ref=e47]
+            - img [ref=e49]
+    - main [ref=e52]:
+      - generic [ref=e53]:
+        - complementary [ref=e54]:
+          - heading "Sidebar" [level=2] [ref=e55]
+          - generic [ref=e56]:
+            - navigation "Settings navigation" [ref=e57]:
+              - list [ref=e58]:
+                - listitem [ref=e59]:
+                  - link "Profile" [ref=e60] [cursor=pointer]:
+                    - /url: /~menot-you
+                    - img [ref=e61]
+                    - text: Profile
+                - listitem [ref=e63]:
+                  - link "Packages" [ref=e64] [cursor=pointer]:
+                    - /url: /settings/menot-you/packages
+                    - img [ref=e65]
+                    - text: Packages
+                - listitem [ref=e67]:
+                  - link "Account" [ref=e68] [cursor=pointer]:
+                    - /url: /settings/menot-you/profile
+                    - img [ref=e69]
+                    - text: Account
+                - listitem [ref=e71]:
+                  - link "Billing Info" [ref=e72] [cursor=pointer]:
+                    - /url: /settings/menot-you/billing
+                    - img [ref=e73]
+                    - text: Billing Info
+                - listitem [ref=e75]:
+                  - link "Access Tokens" [ref=e76] [cursor=pointer]:
+                    - /url: /settings/menot-you/tokens
+                    - img [ref=e77]
+                    - text: Access Tokens
+            - generic [ref=e79]:
+              - heading "Organizations" [level=3] [ref=e80]
+              - link "Create New Organization" [ref=e81] [cursor=pointer]:
+                - /url: /org/create
+                - text: +
+                - generic [ref=e82]: Create New Organization
+            - paragraph [ref=e83]: None
+        - generic [ref=e312]:
+          - generic [ref=e313]:
+            - generic [ref=e314]:
+              - heading "Access Tokens" [level=1] [ref=e315]
+              - link "Generate New Token" [ref=e317] [cursor=pointer]:
+                - /url: /settings/menot-you/tokens/granular-access-tokens/new
+              - button "Delete Selected Tokens" [ref=e319]
+            - generic [ref=e320]:
+              - alert [ref=e321]:
+                - paragraph [ref=e322]: Token successfully generated
+                - paragraph [ref=e323]: Make sure to copy your token. It will never be displayed again.
+                - paragraph [ref=e324]: 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
+              - generic [ref=e325]:
+                - textbox "Newly generated token" [ref=e326]: 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
+                - button "Copy" [ref=e327]:
+                  - img [ref=e328]
+            - table [ref=e332]:
+              - rowgroup [ref=e333]:
+                - row "Select all Name Bypass 2FA Created Last used Expires Delete" [ref=e334]:
+                  - columnheader "Select all" [ref=e335]:
+                    - checkbox "Select all" [ref=e336]
+                  - columnheader "Name" [ref=e337]
+                  - columnheader "Bypass 2FA" [ref=e338]
+                  - columnheader "Created" [ref=e339]
+                  - columnheader "Last used" [ref=e340]
+                  - columnheader "Expires" [ref=e341]
+                  - columnheader "Delete" [ref=e342]:
+                    - generic [ref=e343]: Delete
+              - rowgroup [ref=e344]:
+                - row "label for npm_zhU0......PUQD llm-as-dom-ci npm_zhU0......PUQD Apr 3, 2026 Jul 2, 2026 Delete token ending in PUQD" [ref=e345]:
+                  - cell "label for npm_zhU0......PUQD" [ref=e346]:
+                    - checkbox "label for npm_zhU0......PUQD" [ref=e347]
+                  - cell "llm-as-dom-ci npm_zhU0......PUQD" [ref=e348]:
+                    - generic [ref=e349]:
+                      - link "llm-as-dom-ci" [ref=e350] [cursor=pointer]:
+                        - /url: /settings/menot-you/tokens/granular-access-tokens/1ef43c4f-2f8c-4fa2-a614-a5a3ab275aa0
+                      - code [ref=e352]: npm_zhU0......PUQD
+                  - cell [ref=e353]
+                  - cell "Apr 3, 2026" [ref=e354]:
+                    - time [ref=e355]: Apr 3, 2026
+                  - cell [ref=e356]
+                  - cell "Jul 2, 2026" [ref=e357]:
+                    - time [ref=e358]: Jul 2, 2026
+                  - cell "Delete token ending in PUQD" [ref=e359]:
+                    - button "Delete token ending in PUQD" [ref=e361] [cursor=pointer]: ×
+            - generic [ref=e364]: Rows 1 to 1 of 1
+          - paragraph [ref=e365]:
+            - link "📋 Read the Documentation" [ref=e366] [cursor=pointer]:
+              - /url: https://docs.npmjs.com/about-authentication-tokens
+    - contentinfo [ref=e132]:
+      - heading "Footer" [level=2] [ref=e133]
+      - generic [ref=e134]:
+        - generic [ref=e135]:
+          - link "Visit npm GitHub page" [ref=e137] [cursor=pointer]:
+            - /url: https://github.com/npm
+            - img [ref=e138]
+          - link "GitHub" [ref=e142] [cursor=pointer]:
+            - /url: https://github.com
+            - img [ref=e143]
+        - generic [ref=e145]:
+          - heading "Support" [level=3] [ref=e146]
+          - list "Support" [ref=e147]:
+            - listitem [ref=e148]:
+              - link "Help" [ref=e149] [cursor=pointer]:
+                - /url: https://docs.npmjs.com
+            - listitem [ref=e150]:
+              - link "Advisories" [ref=e151] [cursor=pointer]:
+                - /url: https://github.com/advisories
+            - listitem [ref=e152]:
+              - link "Status" [ref=e153] [cursor=pointer]:
+                - /url: http://status.npmjs.org/
+            - listitem [ref=e154]:
+              - link "Contact npm" [ref=e155] [cursor=pointer]:
+                - /url: /support
+        - generic [ref=e156]:
+          - heading "Company" [level=3] [ref=e157]
+          - list "Company" [ref=e158]:
+            - listitem [ref=e159]:
+              - link "About" [ref=e160] [cursor=pointer]:
+                - /url: /about
+            - listitem [ref=e161]:
+              - link "Blog" [ref=e162] [cursor=pointer]:
+                - /url: https://github.blog/tag/npm/
+            - listitem [ref=e163]:
+              - link "Press" [ref=e164] [cursor=pointer]:
+                - /url: /press
+        - generic [ref=e165]:
+          - heading "Terms & Policies" [level=3] [ref=e166]
+          - list "Terms & Policies" [ref=e167]:
+            - listitem [ref=e168]:
+              - link "Policies" [ref=e169] [cursor=pointer]:
+                - /url: /policies/
+            - listitem [ref=e170]:
+              - link "Terms of Use" [ref=e171] [cursor=pointer]:
+                - /url: /policies/terms
+            - listitem [ref=e172]:
+              - link "Code of Conduct" [ref=e173] [cursor=pointer]:
+                - /url: /policies/conduct
+            - listitem [ref=e174]:
+              - link "Privacy" [ref=e175] [cursor=pointer]:
+                - /url: /policies/privacy
+  - generic [ref=e177]: New Granular Access Token

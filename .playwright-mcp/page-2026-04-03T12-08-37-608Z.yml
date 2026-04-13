@@ -1,0 +1,122 @@
+- generic [active] [ref=e1]:
+  - region "Notifications (F8)":
+    - list
+  - generic [ref=e2]:
+    - navigation:
+      - generic:
+        - button "Expand":
+          - img
+      - generic:
+        - generic:
+          - generic [ref=e3]:
+            - img "Claude Console" [ref=e4]
+            - button "Collapse" [ref=e18] [cursor=pointer]:
+              - img [ref=e19]
+          - generic [ref=e21]:
+            - generic [ref=e22]:
+              - list [ref=e23]:
+                - listitem [ref=e24]: Build
+                - listitem [ref=e25]:
+                  - link "Dashboard" [ref=e26] [cursor=pointer]:
+                    - /url: /dashboard
+                    - generic [ref=e27]: Dashboard
+                - listitem [ref=e28]:
+                  - link "Workbench" [ref=e29] [cursor=pointer]:
+                    - /url: /workbench
+                    - generic [ref=e30]: Workbench
+                - listitem [ref=e31]:
+                  - link "Files" [ref=e32] [cursor=pointer]:
+                    - /url: /workspaces/default/files
+                    - generic [ref=e33]: Files
+                - listitem [ref=e34]:
+                  - link "Skills" [ref=e35] [cursor=pointer]:
+                    - /url: /workspaces/default/skills
+                    - generic [ref=e36]: Skills
+              - list [ref=e37]:
+                - listitem [ref=e40]: Analytics
+                - listitem [ref=e41]:
+                  - link "Usage" [ref=e42] [cursor=pointer]:
+                    - /url: /usage
+                    - generic [ref=e43]: Usage
+                - listitem [ref=e44]:
+                  - link "Cost" [ref=e45] [cursor=pointer]:
+                    - /url: /workspaces/default/cost
+                    - generic [ref=e46]: Cost
+                - listitem [ref=e47]:
+                  - link "Logs" [ref=e48] [cursor=pointer]:
+                    - /url: /workspaces/default/logs
+                    - generic [ref=e49]: Logs
+                - listitem [ref=e50]:
+                  - link "Batches" [ref=e51] [cursor=pointer]:
+                    - /url: /workspaces/default/batches
+                    - generic [ref=e52]: Batches
+              - list [ref=e53]:
+                - listitem [ref=e56]: Claude Code
+                - listitem [ref=e57]:
+                  - link "Usage" [ref=e58] [cursor=pointer]:
+                    - /url: /claude-code
+                    - generic [ref=e59]: Usage
+                - listitem [ref=e60]:
+                  - link "Preferences" [ref=e61] [cursor=pointer]:
+                    - /url: /claude-code/preferences
+                    - generic [ref=e62]: Preferences
+              - list [ref=e63]:
+                - listitem [ref=e66]: Manage
+                - listitem [ref=e67]:
+                  - link "API keys" [ref=e68] [cursor=pointer]:
+                    - /url: /settings/keys
+                    - generic [ref=e69]: API keys
+                - listitem [ref=e70]:
+                  - link "Limits" [ref=e71] [cursor=pointer]:
+                    - /url: /settings/limits
+                    - generic [ref=e72]: Limits
+                - listitem [ref=e73]:
+                  - link "Settings" [ref=e74] [cursor=pointer]:
+                    - /url: /settings/organization
+                    - generic [ref=e75]: Settings
+            - generic [ref=e76]:
+              - link "Documentation" [ref=e78] [cursor=pointer]:
+                - /url: /docs/en/home
+                - img [ref=e79]
+                - generic [ref=e81]: Documentation
+              - button "Tiago do Couto Overlord‘s Individual Org" [ref=e83] [cursor=pointer]:
+                - generic [ref=e84]:
+                  - img [ref=e87]
+                  - generic [ref=e89]:
+                    - generic [ref=e90]: Tiago do Couto
+                    - generic [ref=e91]: Overlord‘s Individual Org
+                  - img [ref=e93]
+    - navigation [ref=e98]:
+      - button "Organization Overlord‘s Individual Org" [ref=e99] [cursor=pointer]:
+        - generic [ref=e104]:
+          - img [ref=e105]
+          - generic [ref=e107]:
+            - generic [ref=e108]: Organization
+            - generic [ref=e109]: Overlord‘s Individual Org
+        - img [ref=e111]
+      - list [ref=e113]:
+        - listitem [ref=e114]:
+          - link "Profile" [ref=e115] [cursor=pointer]:
+            - /url: /settings/profile
+        - listitem [ref=e116]:
+          - link "Appearance" [ref=e117] [cursor=pointer]:
+            - /url: /settings/appearance
+        - listitem [ref=e118]:
+          - link "Organization" [ref=e119] [cursor=pointer]:
+            - /url: /settings/organization
+        - listitem [ref=e120]:
+          - link "Workspaces" [ref=e121] [cursor=pointer]:
+            - /url: /settings/workspaces
+        - listitem [ref=e122]:
+          - link "Billing" [ref=e123] [cursor=pointer]:
+            - /url: /settings/billing
+        - listitem [ref=e124]:
+          - link "Limits" [ref=e125] [cursor=pointer]:
+            - /url: /settings/limits
+        - listitem [ref=e126]:
+          - link "API keys" [ref=e127] [cursor=pointer]:
+            - /url: /settings/keys
+        - listitem [ref=e128]:
+          - link "Privacy controls" [ref=e129] [cursor=pointer]:
+            - /url: /settings/privacy
+  - alert [ref=e132]

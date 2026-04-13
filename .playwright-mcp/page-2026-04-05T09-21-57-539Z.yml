@@ -1,0 +1,225 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e4]:
+      - main [ref=e5]:
+        - generic [ref=e6]:
+          - generic [ref=e13]:
+            - generic [ref=e15]:
+              - button "Open sidebar" [ref=e19] [cursor=pointer]:
+                - img
+              - generic [ref=e21]:
+                - button "Components" [ref=e22] [cursor=pointer]
+                - generic [ref=e23]: /
+                - generic [ref=e24]:
+                  - button "shugar" [ref=e25] [cursor=pointer]
+                  - generic [ref=e26]: /
+                  - generic [ref=e27]: Product Hunt Badge
+              - generic [ref=e28]:
+                - generic:
+                  - button "Search":
+                    - img
+                    - generic: Search
+                    - generic:
+                      - img
+                      - generic: K
+                - generic [ref=e29]:
+                  - button "Copy prompt" [ref=e30] [cursor=pointer]:
+                    - img [ref=e31]
+                    - generic [ref=e35]: Copy prompt
+                  - button "Copy code" [ref=e36] [cursor=pointer]:
+                    - generic [ref=e37]:
+                      - generic:
+                        - img
+                      - img [ref=e39]
+                    - generic [ref=e43]: Copy code
+                  - button "View code" [ref=e44] [cursor=pointer]:
+                    - img [ref=e45]
+                    - generic [ref=e48]: View code
+            - generic [ref=e49]:
+              - generic [ref=e50]:
+                - generic [ref=e52]:
+                  - button [ref=e53] [cursor=pointer]:
+                    - img
+                  - button [ref=e54] [cursor=pointer]:
+                    - generic [ref=e55]:
+                      - generic:
+                        - img
+                      - generic [ref=e56]:
+                        - img
+                  - button [ref=e57] [cursor=pointer]:
+                    - img
+                - generic [ref=e59]:
+                  - button [ref=e60] [cursor=pointer]:
+                    - img
+                  - button [ref=e61] [cursor=pointer]:
+                    - img
+                  - button [ref=e63] [cursor=pointer]:
+                    - img
+                - generic [ref=e69]:
+                  - iframe [ref=e70]:
+                    
+                  - paragraph [ref=e72]: "[3/3] Starting"
+              - generic [ref=e75]:
+                - heading "Product Hunt Badge" [level=3] [ref=e76]
+                - paragraph [ref=e77]: Product Hunt Badge Inspired by https://gethorse.com/
+                - heading "Created by" [level=3] [ref=e78]
+                - generic [ref=e79]:
+                  - link "tigran tumasov" [ref=e80] [cursor=pointer]:
+                    - /url: /community/shugar
+                    - img "tigran tumasov" [ref=e82]
+                  - generic [ref=e83]:
+                    - link "tigran tumasov" [ref=e84] [cursor=pointer]:
+                      - /url: /community/shugar
+                    - paragraph [ref=e85]: "@shugar"
+                - heading "Installation" [level=3] [ref=e86]
+                - button "Click to copy code or select text" [ref=e88] [cursor=pointer]:
+                  - code [ref=e91]:
+                    - generic [ref=e92]: npx shadcn@latest add https://21st.dev/r/shugar/award-badge
+                - generic [ref=e93]:
+                  - heading "How to use" [level=3] [ref=e94]
+                  - generic [ref=e95]:
+                    - button "Copy prompt" [ref=e96] [cursor=pointer]:
+                      - img [ref=e97]
+                      - text: Copy prompt
+                    - button "Copy code" [ref=e101] [cursor=pointer]:
+                      - generic [ref=e102]:
+                        - generic:
+                          - img
+                        - img [ref=e104]
+                      - text: Copy code
+                    - button "View code" [ref=e108] [cursor=pointer]:
+                      - img [ref=e109]
+                      - text: View code
+                  - button "Click to copy code or select text" [ref=e113] [cursor=pointer]:
+                    - code [ref=e116]:
+                      - generic [ref=e117]: import React from "react";
+                      - generic [ref=e118]: "import { AwardBadge } from \"@/components/ui/award-badge\";"
+                      - generic [ref=e119]: const demoLink = "https://www.producthunt.com/golden-kitty-awards/hall-of-fame?year=2024#bootstrapped-small-teams-2";
+                      - generic [ref=e120]: "export const GoldenKitty = () => {"
+                      - generic [ref=e121]: return (
+                      - generic [ref=e122]: <div className="grid grid-cols-1 gap-4">
+                      - generic [ref=e123]: "<AwardBadge type=\"golden-kitty\" link={demoLink} />"
+                      - generic [ref=e124]: </div>
+                      - generic [ref=e125]: );
+                      - generic [ref=e126]: "};"
+                      - generic [ref=e127]: "export const ProductOfTheDay = () => {"
+                      - generic [ref=e128]: return (
+                      - generic [ref=e129]: <div className="grid grid-cols-1 gap-4">
+                      - generic [ref=e130]: "<AwardBadge type=\"product-of-the-day\" place={1} link={demoLink} />"
+                      - generic [ref=e131]: </div>
+                      - generic [ref=e132]: );
+                      - generic [ref=e133]: "};"
+                      - generic [ref=e134]: "export const ProductOfTheMonth = () => {"
+                      - generic [ref=e135]: return (
+                      - generic [ref=e136]: <div className="grid grid-cols-1 gap-4">
+                      - generic [ref=e137]: "<AwardBadge type=\"product-of-the-month\" place={2} link={demoLink} />"
+                      - generic [ref=e138]: </div>
+                      - generic [ref=e139]: );
+                      - generic [ref=e140]: "};"
+                      - generic [ref=e141]: "export const ProductOfTheWeek = () => {"
+                      - generic [ref=e142]: return (
+                      - generic [ref=e143]: <div className="grid grid-cols-1 gap-4">
+                      - generic [ref=e144]: "<AwardBadge type=\"product-of-the-week\" place={3} link={demoLink} />"
+                      - generic [ref=e145]: </div>
+                      - generic [ref=e146]: );
+                      - generic [ref=e147]: "};"
+                - heading "Website" [level=3] [ref=e148]
+                - link "gethorse.com/" [ref=e150] [cursor=pointer]:
+                  - /url: https://gethorse.com/
+                  - text: gethorse.com/
+                  - img [ref=e151]
+                - generic [ref=e156]:
+                  - generic [ref=e157]: Created 11/03/2025
+                  - generic [ref=e158]: Updated 11/03/2025
+          - generic [ref=e162]:
+            - generic [ref=e163]:
+              - generic [ref=e166]:
+                - button "21st logo 21st" [ref=e168] [cursor=pointer]:
+                  - generic [ref=e169]:
+                    - generic [ref=e171]:
+                      - img "21st logo"
+                    - generic [ref=e173]: 21st
+                    - img
+                - button "Close sidebar" [ref=e175] [cursor=pointer]:
+                  - img
+              - generic [ref=e178]:
+                - img
+                - textbox "Search" [ref=e179] [cursor=pointer]
+                - generic:
+                  - img
+                  - generic: K
+            - generic [ref=e180]:
+              - generic [ref=e183]:
+                - link "Home" [ref=e185] [cursor=pointer]:
+                  - /url: /
+                  - img [ref=e186]
+                  - generic [ref=e189]: Home
+                - generic [ref=e190]:
+                  - heading "Explore" [level=3] [ref=e192]
+                  - generic [ref=e193]:
+                    - button "Components" [ref=e194] [cursor=pointer]:
+                      - img [ref=e195]
+                      - generic [ref=e197]: Components
+                      - img [ref=e199]
+                    - link "Agent Templates" [ref=e201] [cursor=pointer]:
+                      - /url: /community/templates
+                      - img [ref=e202]
+                      - generic [ref=e204]: Agent Templates
+                    - link "MCP" [ref=e205] [cursor=pointer]:
+                      - /url: /mcp
+                      - img [ref=e206]
+                      - generic [ref=e212]: MCP
+                - generic [ref=e213]:
+                  - heading "Build" [level=3] [ref=e215]
+                  - generic [ref=e216]:
+                    - button "Agents" [ref=e217] [cursor=pointer]:
+                      - img [ref=e218]
+                      - generic [ref=e233]: Agents
+                      - img [ref=e235]
+                    - link "1Code" [ref=e237] [cursor=pointer]:
+                      - /url: /1code
+                      - generic [ref=e238]:
+                        - img [ref=e239]
+                        - img [ref=e241]
+                      - generic [ref=e243]: 1Code
+                      - img [ref=e244]
+                    - link "Magic Chat" [ref=e248] [cursor=pointer]:
+                      - /url: /magic
+                      - img [ref=e249]
+                      - generic [ref=e253]: Magic Chat
+                      - img [ref=e254]
+              - generic [ref=e260]:
+                - generic [ref=e263]:
+                  - generic [ref=e264]:
+                    - generic [ref=e265]: 21st Agents SDK
+                    - paragraph [ref=e266]: The fastest way to build and deploy AI agents.
+                  - link [ref=e267] [cursor=pointer]:
+                    - /url: https://21st.dev/agents
+                  - generic [ref=e268]:
+                    - link [ref=e269] [cursor=pointer]:
+                      - /url: https://21st.dev/agents
+                      - text: Read more
+                    - button [ref=e270] [cursor=pointer]: Dismiss
+                - generic [ref=e273]:
+                  - generic [ref=e274]:
+                    - generic [ref=e275]: We're in YC
+                    - paragraph [ref=e276]: 21st is backed by Y Combinator. Excited for what's ahead!
+                  - link [ref=e277] [cursor=pointer]:
+                    - /url: https://www.ycombinator.com/companies/1code-21stdev
+                  - generic [ref=e278]:
+                    - link "Read more" [ref=e279] [cursor=pointer]:
+                      - /url: https://www.ycombinator.com/companies/1code-21stdev
+                    - button "Dismiss" [ref=e280] [cursor=pointer]
+              - generic [ref=e282]:
+                - generic [ref=e283]:
+                  - button "Toggle theme" [ref=e284] [cursor=pointer]:
+                    - img
+                  - button "Settings" [ref=e285] [cursor=pointer]:
+                    - img
+                - button "Log in" [ref=e286] [cursor=pointer]:
+                  - generic [ref=e287]: Log in
+    - region "Notifications alt+T"
+  - alert [ref=e288]
+  - generic:
+    - iframe
+    - iframe

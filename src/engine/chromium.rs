@@ -46,12 +46,15 @@ impl ChromiumEngine {
 
         builder = builder
             .arg("--disable-gpu")
-            .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
             .arg(format!(
                 "--user-data-dir={}",
                 config.user_data_dir.display()
             ));
+
+        if std::env::var("LAD_CHROME_NO_SANDBOX").unwrap_or_default() == "true" {
+            builder = builder.arg("--no-sandbox");
+        }
 
         let browser_config = builder.build().map_err(crate::Error::Browser)?;
 

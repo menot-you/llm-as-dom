@@ -1,0 +1,1 @@
+[   33637ms] [ERROR] Blocked script execution in 'https://llm-as-dom.menot.sh/' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://llm-as-dom.menot.sh/:0

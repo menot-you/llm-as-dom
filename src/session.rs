@@ -221,19 +221,22 @@ impl SessionState {
 /// Extract host and path from a URL string.
 /// Returns `("", "/")` on parse failure.
 fn parse_host_path(url: &str) -> (String, String) {
-    // Strip scheme: "https://foo.com/bar" -> "foo.com/bar"
-    let without_scheme = url.find("://").map(|i| &url[i + 3..]).unwrap_or(url);
-
-    // Split host from path at first '/'
-    let (host_port, path) = match without_scheme.find('/') {
-        Some(i) => (&without_scheme[..i], &without_scheme[i..]),
-        None => (without_scheme, "/"),
+    let parsed = match url::Url::parse(url) {
+        Ok(p) => p,
+        Err(_) => {
+            // fallback: might be a url without scheme
+            let with_scheme = format!("http://{}", url);
+            match url::Url::parse(&with_scheme) {
+                Ok(p) => p,
+                Err(_) => return (String::new(), "/".to_string()),
+            }
+        }
     };
 
-    // Strip port: "foo.com:8080" -> "foo.com"
-    let host = host_port.split(':').next().unwrap_or(host_port);
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+    let path = parsed.path().to_string();
 
-    (host.to_lowercase(), path.to_string())
+    (host, if path.is_empty() { "/".to_string() } else { path })
 }
 
 /// Cookie domain matching per RFC 6265 (simplified).

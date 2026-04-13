@@ -1,0 +1,258 @@
+- generic [active] [ref=e1]:
+  - link "Pular para o conteúdo principal" [ref=e2] [cursor=pointer]:
+    - /url: "#content"
+  - generic:
+    - generic: 
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "PyPI" [ref=e8] [cursor=pointer]:
+          - /url: /
+          - img "PyPI" [ref=e9]
+        - search [ref=e10]:
+          - generic [ref=e11]: Pesquisar PyPI
+          - textbox "Pesquisar PyPI" [ref=e12]:
+            - /placeholder: "Digite "
+          - button "Pesquisar" [ref=e13]:
+            - generic [ref=e15]: Pesquisar
+      - navigation "Navegação principal" [ref=e18]:
+        - button "Ver menu" [ref=e19] [cursor=pointer]:
+          - img "User Image" [ref=e20]
+          - text: menot-you
+  - main [ref=e23]:
+    - generic [ref=e24]:
+      - navigation "Migalhas de pão" [ref=e25]:
+        - list [ref=e26]:
+          - listitem [ref=e27]: Sua conta
+      - generic [ref=e28]:
+        - navigation "Navegação da conta" [ref=e31]:
+          - list [ref=e32]:
+            - listitem [ref=e33]:
+              - link "Seus projetos" [ref=e34] [cursor=pointer]:
+                - /url: /manage/projects/
+                - text: Seus projetos
+            - listitem [ref=e36]:
+              - link "Suas organizações" [ref=e37] [cursor=pointer]:
+                - /url: /manage/organizations/
+                - text: Suas organizações
+            - listitem [ref=e39]:
+              - link "Configurações da conta" [ref=e40] [cursor=pointer]:
+                - /url: /manage/account/
+                - text: Configurações da conta
+            - listitem [ref=e42]:
+              - link "Publicação" [ref=e43] [cursor=pointer]:
+                - /url: /manage/account/publishing/
+                - text: Publicação
+        - generic [ref=e45]:
+          - navigation "Navegação da conta":
+            - list:
+              - listitem
+              - listitem
+              - listitem
+              - listitem
+          - generic [ref=e46]:
+            - heading "Criar token de API" [level=1] [ref=e47]
+            - generic [ref=e48]:
+              - heading "Token para \"llm-as-dom-mcp-ci\"" [level=2] [ref=e49]
+              - paragraph [ref=e50]:
+                - strong [ref=e51]: "Permissões:"
+                - text: Enviar pacotes
+                - strong [ref=e52]: "Escopo:"
+                - text: Toda a conta (todos projetos)
+              - code [ref=e53]: pypi-AgEIcHlwaS5vcmcCJGJmOTZkMzZkLTI2MGUtNDk2Ny05NWFiLWVjZWJmYmM5Y2MyMwACKlszLCI0MWFlOGQwMy1lMDRmLTQ1MjktYmM4My0xNmNkMDA5ZTA1MDQiXQAABiAdGAx1c7Dvepcxfvdg-JVju7hwiiEmW0bVbyZ4kX8k3w
+              - generic [ref=e54]:
+                - paragraph [ref=e56]:
+                  - text: Por motivos de segurança, este token vai aparecer apenas uma vez.
+                  - strong [ref=e57]: Copie-o agora.
+                - button "Copia o token para a área de transferência" [ref=e58] [cursor=pointer]: Copiar token
+                - link "Remover token" [ref=e59] [cursor=pointer]:
+                  - /url: "#remove-API-token--bf96d36d-260e-4967-95ab-ecebfbc9cc23"
+              - heading "Usando este token" [level=2] [ref=e60]
+              - paragraph [ref=e61]: "Para usar um token de API:"
+              - list [ref=e62]:
+                - listitem [ref=e63]:
+                  - text: Definir seu nome de usuário para
+                  - code [ref=e64]: __token__
+                - listitem [ref=e65]:
+                  - text: Definir sua senha para o valor do token, incluindo o prefixo
+                  - code [ref=e66]: pypi-
+              - paragraph [ref=e67]:
+                - text: Por exemplo, se você está usando
+                - link "Twine" [ref=e68] [cursor=pointer]:
+                  - /url: https://pypi.org/project/twine/
+                - text: para enviar seus projetos para o PyPI, configure seu arquivo
+                - code [ref=e69]: $HOME/.pypirc
+                - text: "para algo como isso:"
+              - generic [ref=e70]: "[pypi] username = __token__ password = pypi-AgEIcHlwaS5vcmcCJGJmOTZkMzZkLTI2MGUtNDk2Ny05NWFiLWVjZWJmYmM5Y2MyMwACKlszLCI0MWFlOGQwMy1lMDRmLTQ1MjktYmM4My0xNmNkMDA5ZTA1MDQiXQAABiAdGAx1c7Dvepcxfvdg-JVju7hwiiEmW0bVbyZ4kX8k3w"
+              - paragraph [ref=e71]:
+                - text: Para mais instruções sobre como usar este token,
+                - link "visite a página de ajuda do PyPI" [ref=e72] [cursor=pointer]:
+                  - /url: /help#apitoken
+                - text: .
+            - separator [ref=e73]
+            - link "Criar outro token" [ref=e74] [cursor=pointer]:
+              - /url: .
+  - contentinfo [ref=e75]:
+    - generic [ref=e77]:
+      - generic [ref=e78]:
+        - heading "Ajuda" [level=2] [ref=e79]
+        - navigation "Navegação de ajuda" [ref=e80]:
+          - list [ref=e81]:
+            - listitem [ref=e82]:
+              - link "Instalando pacotes" [ref=e83] [cursor=pointer]:
+                - /url: https://packaging.python.org/tutorials/installing-packages/
+            - listitem [ref=e84]:
+              - link "Enviando pacotes" [ref=e85] [cursor=pointer]:
+                - /url: https://packaging.python.org/tutorials/packaging-projects/
+            - listitem [ref=e86]:
+              - link "Guia de usuário" [ref=e87] [cursor=pointer]:
+                - /url: https://packaging.python.org/
+            - listitem [ref=e88]:
+              - link "Retenção do nome do projeto" [ref=e89] [cursor=pointer]:
+                - /url: https://www.python.org/dev/peps/pep-0541/
+            - listitem [ref=e90]:
+              - link "FAQs" [ref=e91] [cursor=pointer]:
+                - /url: /help/
+      - generic [ref=e92]:
+        - heading "Sobre o PyPI" [level=2] [ref=e93]
+        - navigation "Sobre a navegação do PyPI" [ref=e94]:
+          - list [ref=e95]:
+            - listitem [ref=e96]:
+              - link "Blog do PyPI" [ref=e97] [cursor=pointer]:
+                - /url: https://blog.pypi.org
+            - listitem [ref=e98]:
+              - link "Painel de infraestrutura" [ref=e99] [cursor=pointer]:
+                - /url: https://dtdg.co/pypi
+            - listitem [ref=e100]:
+              - link "Estatísticas" [ref=e101] [cursor=pointer]:
+                - /url: /stats/
+            - listitem [ref=e102]:
+              - link "Logotipos e marcas registradas" [ref=e103] [cursor=pointer]:
+                - /url: /trademarks/
+            - listitem [ref=e104]:
+              - link "Nossos patrocinadores" [ref=e105] [cursor=pointer]:
+                - /url: /sponsors/
+      - generic [ref=e106]:
+        - heading "Contribuindo para o PyPI" [level=2] [ref=e107]
+        - navigation "Como contribuir para navegação" [ref=e108]:
+          - list [ref=e109]:
+            - listitem [ref=e110]:
+              - link "Bugs e feedback" [ref=e111] [cursor=pointer]:
+                - /url: /help/#feedback
+            - listitem [ref=e112]:
+              - link "Contribuir no GitHub" [ref=e113] [cursor=pointer]:
+                - /url: https://github.com/pypi/warehouse
+            - listitem [ref=e114]:
+              - link "Traduzir o PyPI" [ref=e115] [cursor=pointer]:
+                - /url: https://hosted.weblate.org/projects/pypa/warehouse/
+            - listitem [ref=e116]:
+              - link "Patrocinar o PyPI" [ref=e117] [cursor=pointer]:
+                - /url: /sponsors/
+            - listitem [ref=e118]:
+              - link "Créditos por desenvolvimento" [ref=e119] [cursor=pointer]:
+                - /url: https://github.com/pypi/warehouse/graphs/contributors
+      - generic [ref=e120]:
+        - heading "Usando o PyPI" [level=2] [ref=e121]
+        - navigation "Usando a navegação do PyPI" [ref=e122]:
+          - list [ref=e123]:
+            - listitem [ref=e124]:
+              - link "Termos de Serviço" [ref=e125] [cursor=pointer]:
+                - /url: https://policies.python.org/pypi.org/Terms-of-Service/
+            - listitem [ref=e126]:
+              - link "Relatar problema de segurança" [ref=e127] [cursor=pointer]:
+                - /url: /security/
+            - listitem [ref=e128]:
+              - link "Código de conduta" [ref=e129] [cursor=pointer]:
+                - /url: https://policies.python.org/python.org/code-of-conduct/
+            - listitem [ref=e130]:
+              - link "Aviso de Privacidade" [ref=e131] [cursor=pointer]:
+                - /url: https://policies.python.org/pypi.org/Privacy-Notice/
+            - listitem [ref=e132]:
+              - link "Política de Uso Aceitável" [ref=e133] [cursor=pointer]:
+                - /url: https://policies.python.org/pypi.org/Acceptable-Use-Policy/
+    - separator [ref=e134]
+    - generic [ref=e135]:
+      - paragraph [ref=e136]:
+        - text: "Status:"
+        - link "All Systems Operational" [ref=e137] [cursor=pointer]:
+          - /url: https://status.python.org/
+      - paragraph [ref=e138]:
+        - text: Desenvolvido e mantido pela comunidade Python, para a comunidade Python.
+        - link "Doe hoje!" [ref=e139] [cursor=pointer]:
+          - /url: https://donate.pypi.org
+      - paragraph [ref=e140]:
+        - text: "\"PyPI\", \"Python Package Index\", e os logotipos dos blocos são"
+        - link "marcas registradas" [ref=e141] [cursor=pointer]:
+          - /url: /trademarks/
+        - text: da
+        - link "Python Software Foundation" [ref=e142] [cursor=pointer]:
+          - /url: https://www.python.org/psf-landing
+        - text: .
+      - paragraph [ref=e143]:
+        - text: © 2026
+        - link "Python Software Foundation" [ref=e144] [cursor=pointer]:
+          - /url: https://www.python.org/psf-landing/
+        - link "Mapa do site" [ref=e145] [cursor=pointer]:
+          - /url: /sitemap/
+  - list [ref=e148]:
+    - listitem [ref=e149]:
+      - button "English" [ref=e150]
+    - listitem [ref=e151]:
+      - button "español" [ref=e152]
+    - listitem [ref=e153]:
+      - button "français" [ref=e154]
+    - listitem [ref=e155]:
+      - button "日本語" [ref=e156]
+    - listitem [ref=e157]:
+      - button "português (Brasil)"
+    - listitem [ref=e158]:
+      - button "українська" [ref=e159]
+    - listitem [ref=e160]:
+      - button "Ελληνικά" [ref=e161]
+    - listitem [ref=e162]:
+      - button "Deutsch" [ref=e163]
+    - listitem [ref=e164]:
+      - button "中文 (简体)" [ref=e165]
+    - listitem [ref=e166]:
+      - button "中文 (繁體)" [ref=e167]
+    - listitem [ref=e168]:
+      - button "русский" [ref=e169]
+    - listitem [ref=e170]:
+      - button "עברית" [ref=e171]
+    - listitem [ref=e172]:
+      - button "Esperanto" [ref=e173]
+    - listitem [ref=e174]:
+      - button "한국어" [ref=e175]
+  - generic [ref=e176]:
+    - link "AWS Cloud computing and Security Sponsor" [ref=e177] [cursor=pointer]:
+      - /url: https://aws.amazon.com/
+      - generic [ref=e178]: AWS
+      - generic [ref=e179]: Cloud computing and Security Sponsor
+    - link "Datadog Monitoring" [ref=e180] [cursor=pointer]:
+      - /url: https://www.datadoghq.com/
+      - generic [ref=e181]: Datadog
+      - generic [ref=e182]: Monitoring
+    - link "Depot Continuous Integration" [ref=e183] [cursor=pointer]:
+      - /url: https://depot.dev
+      - generic [ref=e184]: Depot
+      - generic [ref=e185]: Continuous Integration
+    - link "Fastly CDN" [ref=e186] [cursor=pointer]:
+      - /url: https://www.fastly.com/
+      - generic [ref=e187]: Fastly
+      - generic [ref=e188]: CDN
+    - link "Google Download Analytics" [ref=e189] [cursor=pointer]:
+      - /url: https://careers.google.com/
+      - generic [ref=e190]: Google
+      - generic [ref=e191]: Download Analytics
+    - link "Pingdom Monitoring" [ref=e192] [cursor=pointer]:
+      - /url: https://www.pingdom.com/
+      - generic [ref=e193]: Pingdom
+      - generic [ref=e194]: Monitoring
+    - link "Sentry Error logging" [ref=e195] [cursor=pointer]:
+      - /url: https://sentry.io/for/python/?utm_source=pypi&utm_medium=paid-community&utm_campaign=python-na-evergreen&utm_content=static-ad-pypi-sponsor-learnmore
+      - generic [ref=e196]: Sentry
+      - generic [ref=e197]: Error logging
+    - link "StatusPage Status page" [ref=e198] [cursor=pointer]:
+      - /url: https://statuspage.io
+      - generic [ref=e199]: StatusPage
+      - generic [ref=e200]: Status page

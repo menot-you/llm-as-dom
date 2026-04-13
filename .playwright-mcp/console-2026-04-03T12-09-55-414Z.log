@@ -1,0 +1,6 @@
+[     648ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ https://www.npmjs.com/login?next=%2Fsettings%2F~%2Ftokens:0
+[   71208ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ https://www.npmjs.com/login?next=%2Fsettings%2F~%2Ftokens:0
+[  110681ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ https://www.npmjs.com/login?next=%2Fsettings%2F~%2Ftokens:0
+[  112547ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ https://www.npmjs.com/signup?next=%2Fsettings%2F~%2Ftokens:0
+[  160879ms] SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin "https://www.npmjs.com" from accessing a cross-origin frame.
+    at https://static-production.npmjs.com/commons.96dca116e61ece0bdca4.js:295:77106
