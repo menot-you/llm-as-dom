@@ -45,7 +45,7 @@ pub fn try_selector(
             // selector logic unless it's an exact ID or Attribute match, which score >=0.95.
             // In selector.rs, a natural language "click X" match scores up to 0.95, which is high enough
             // to trigger the 0.6 threshold, but we slightly penalize fuzzy matches.
-            confidence: (m.confidence * 0.95).max(0.7),
+            confidence: (m.confidence * 0.95).min(0.9),
             reason: format!("selector '{}' matched element {}", target, m.element_id),
         });
     }

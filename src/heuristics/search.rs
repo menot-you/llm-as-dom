@@ -61,13 +61,16 @@ pub fn try_search(
 /// Extract the search query from a goal string (case-insensitive prefix match).
 ///
 /// Supports patterns: "search for X", "search X", "find X", "look up X".
-/// Preserves the original case of the extracted query.
+///
+/// FIX-16: Slices the lowered string instead of the original to avoid
+/// byte-index panics when non-ASCII characters change byte length
+/// during lowercasing. Goal matching is case-insensitive anyway.
 fn extract_search_query(goal: &str) -> Option<String> {
     let lower = goal.to_lowercase();
     let prefixes = ["search for ", "search ", "find ", "look up "];
     for prefix in &prefixes {
         if let Some(pos) = lower.find(prefix) {
-            let rest = goal[pos + prefix.len()..].trim();
+            let rest = lower[pos + prefix.len()..].trim();
             if !rest.is_empty() {
                 return Some(rest.to_string());
             }
@@ -99,5 +102,22 @@ mod tests {
     #[test]
     fn no_search_returns_none() {
         assert_eq!(extract_search_query("login as admin"), None);
+    }
+
+    // FIX-16: Non-ASCII goals must not panic
+    #[test]
+    fn extract_search_query_non_ascii_no_panic() {
+        // Contains chars that stay the same size when lowered
+        let result = extract_search_query("search for café résumé");
+        assert_eq!(result, Some("café résumé".into()));
+    }
+
+    #[test]
+    fn extract_search_query_german_sharp_s() {
+        // German sharp-s: the OLD code would panic because slicing
+        // `goal[pos + prefix.len()..]` when `lower` has different byte
+        // offsets from `goal`. Now we slice `lower` consistently.
+        let result = extract_search_query("Search for Straße");
+        assert_eq!(result, Some("straße".into()));
     }
 }

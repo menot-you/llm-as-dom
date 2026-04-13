@@ -94,8 +94,16 @@ impl SessionState {
         Self::default()
     }
 
+    /// Maximum number of cookies stored per session.
+    ///
+    /// CHAOS-C1: Prevents unbounded cookie growth from hostile sites.
+    const COOKIE_CAP: usize = 500;
+
     /// Add or update a cookie. Replaces existing cookie with same
     /// `(name, domain, path)` triple.
+    ///
+    /// CHAOS-C1: If the cookie jar exceeds [`Self::COOKIE_CAP`], the oldest
+    /// entry is evicted (FIFO) before inserting the new one.
     pub fn add_cookie(&mut self, cookie: CookieEntry) {
         if let Some(existing) = self
             .cookies
@@ -104,6 +112,10 @@ impl SessionState {
         {
             *existing = cookie;
         } else {
+            // CHAOS-C1: Evict oldest cookie when at capacity.
+            if self.cookies.len() >= Self::COOKIE_CAP {
+                self.cookies.remove(0);
+            }
             self.cookies.push(cookie);
         }
     }
@@ -142,10 +154,7 @@ impl SessionState {
         form_submitted: bool,
         auth_related: bool,
     ) {
-        let timestamp_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let timestamp_ms = epoch_millis();
 
         self.navigation_history.push(NavigationEntry {
             url,
@@ -205,11 +214,7 @@ impl SessionState {
     /// Remove cookies whose `expires` timestamp is in the past.
     /// Session cookies (expires == 0.0) are kept.
     pub fn clear_expired_cookies(&mut self) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-
+        let now = epoch_secs_f64();
         self.cookies.retain(|c| c.expires == 0.0 || c.expires > now);
     }
 }
@@ -221,22 +226,19 @@ impl SessionState {
 /// Extract host and path from a URL string.
 /// Returns `("", "/")` on parse failure.
 fn parse_host_path(url: &str) -> (String, String) {
-    let parsed = match url::Url::parse(url) {
-        Ok(p) => p,
-        Err(_) => {
-            // fallback: might be a url without scheme
-            let with_scheme = format!("http://{}", url);
-            match url::Url::parse(&with_scheme) {
-                Ok(p) => p,
-                Err(_) => return (String::new(), "/".to_string()),
-            }
-        }
+    // Strip scheme: "https://foo.com/bar" -> "foo.com/bar"
+    let without_scheme = url.find("://").map(|i| &url[i + 3..]).unwrap_or(url);
+
+    // Split host from path at first '/'
+    let (host_port, path) = match without_scheme.find('/') {
+        Some(i) => (&without_scheme[..i], &without_scheme[i..]),
+        None => (without_scheme, "/"),
     };
 
-    let host = parsed.host_str().unwrap_or("").to_lowercase();
-    let path = parsed.path().to_string();
+    // Strip port: "foo.com:8080" -> "foo.com"
+    let host = host_port.split(':').next().unwrap_or(host_port);
 
-    (host, if path.is_empty() { "/".to_string() } else { path })
+    (host.to_lowercase(), path.to_string())
 }
 
 /// Cookie domain matching per RFC 6265 (simplified).
@@ -267,6 +269,35 @@ fn path_matches(cookie_path: &str, request_path: &str) -> bool {
         return cookie_path.ends_with('/') || after.starts_with('/');
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// Clock helpers (CHAOS-C7)
+// ---------------------------------------------------------------------------
+
+/// Get current Unix epoch in milliseconds with a safety warning.
+///
+/// CHAOS-C7: Logs a tracing::warn if the system clock is before epoch
+/// (which causes `duration_since(UNIX_EPOCH)` to return Duration::ZERO).
+fn epoch_millis() -> u64 {
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| {
+            tracing::warn!("system clock is before Unix epoch — timestamps will be 0");
+            std::time::Duration::ZERO
+        });
+    dur.as_millis() as u64
+}
+
+/// Get current Unix epoch in fractional seconds with a safety warning.
+fn epoch_secs_f64() -> f64 {
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| {
+            tracing::warn!("system clock is before Unix epoch — timestamps will be 0");
+            std::time::Duration::ZERO
+        });
+    dur.as_secs_f64()
 }
 
 // ---------------------------------------------------------------------------
@@ -585,5 +616,37 @@ mod tests {
         assert!(!path_matches("/foo", "/foobar"));
         assert!(!path_matches("/foo", "/bar"));
         assert!(path_matches("/", "/anything"));
+    }
+
+    // ── CHAOS-C1: Cookie LRU cap ──────────────────────────────
+
+    #[test]
+    fn test_cookie_cap_evicts_oldest() {
+        let mut state = SessionState::new();
+        // Fill to capacity
+        for i in 0..SessionState::COOKIE_CAP {
+            state.add_cookie(make_cookie(&format!("c{i}"), "example.com", "/"));
+        }
+        assert_eq!(state.cookies.len(), SessionState::COOKIE_CAP);
+
+        // Adding one more should evict the oldest (c0)
+        state.add_cookie(make_cookie("overflow", "example.com", "/"));
+        assert_eq!(state.cookies.len(), SessionState::COOKIE_CAP);
+        assert_eq!(state.cookies[0].name, "c1"); // c0 was evicted
+        assert_eq!(state.cookies.last().unwrap().name, "overflow");
+    }
+
+    #[test]
+    fn test_cookie_cap_upsert_does_not_evict() {
+        let mut state = SessionState::new();
+        for i in 0..SessionState::COOKIE_CAP {
+            state.add_cookie(make_cookie(&format!("c{i}"), "example.com", "/"));
+        }
+        // Updating an existing cookie should not trigger eviction
+        let mut updated = make_cookie("c0", "example.com", "/");
+        updated.value = "updated".to_string();
+        state.add_cookie(updated);
+        assert_eq!(state.cookies.len(), SessionState::COOKIE_CAP);
+        assert_eq!(state.cookies[0].value, "updated");
     }
 }

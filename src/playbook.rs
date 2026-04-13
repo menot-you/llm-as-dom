@@ -324,6 +324,10 @@ mod tests {
                     form_index: Some(0),
                     context: None,
                     hint: None,
+                    checked: None,
+                    options: None,
+                    frame_index: None,
+                    is_visible: None,
                 },
                 Element {
                     id: 1,
@@ -338,6 +342,10 @@ mod tests {
                     form_index: Some(0),
                     context: None,
                     hint: None,
+                    checked: None,
+                    options: None,
+                    frame_index: None,
+                    is_visible: None,
                 },
                 Element {
                     id: 2,
@@ -352,6 +360,10 @@ mod tests {
                     form_index: Some(0),
                     context: None,
                     hint: None,
+                    checked: None,
+                    options: None,
+                    frame_index: None,
+                    is_visible: None,
                 },
             ],
             forms: vec![],
@@ -591,6 +603,10 @@ mod tests {
             form_index: Some(0),
             context: None,
             hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
         });
 
         let step = PlaybookStep {

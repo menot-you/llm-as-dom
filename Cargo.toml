@@ -1,8 +1,7 @@
 [package]
-name = "llm-as-dom"
-version = "0.5.0"
+name = "menot-you-mcp-lad"
+version = "0.11.0"
 edition = "2024"
-rust-version = "1.85"
 description = "AI browser pilot — test your app 60x cheaper. Heuristics + cheap LLM navigate so expensive models never parse HTML."
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/menot-you/llm-as-dom"
@@ -22,11 +21,18 @@ path = "src/main.rs"
 
 [[bin]]
 name = "llm-as-dom-mcp"
-path = "src/mcp_server.rs"
+path = "src/mcp_server/mod.rs"
+
+[[bin]]
+name = "lad-relay"
+path = "src/relay/main.rs"
 
 [dependencies]
 # Browser (CDP)
-chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
+# Upgraded to 0.9 for Chromium 145+ CDP compatibility. chromiumoxide 0.7
+# panics on PermissionBlock enum variant in Network.privateNetworkRequestPolicy
+# which CloakBrowser (Chromium 145) emits, killing the WS handler stream.
+chromiumoxide = { version = "0.9", default-features = false, features = ["rustls", "zip8"] }
 futures = "0.3"
 
 # Async runtime
@@ -61,14 +67,49 @@ cbc = { version = "0.1", features = ["alloc"] }
 pbkdf2 = { version = "0.12", features = ["hmac"] }
 sha1 = { version = "0.10", default-features = false }
 
+# URL parsing (SSRF protection in sanitize module)
+url = "2"
+
+# Regex (case-insensitive injection pattern matching, FIX-6)
+regex = "1"
+
+# Cryptographic hashing (FIX-13: audit trail for lad_eval scripts)
+sha2 = "0.10"
+
+# CSPRNG for prompt boundary generation (FIX-R3-06)
+getrandom = "0.2"
+
+# Secure temp directory creation (FIX-R3-12)
+tempfile = "3"
+
+# WebSocket (relay transport)
+tokio-tungstenite = "0.26"
+
+# QR code rendering (relay terminal output)
+qrcode = "0.14"
+
+# Bonjour/mDNS discovery (relay)
+mdns-sd = "0.12"
+flume = "0.11"
+hostname = "0.4"
+http = "1"
+
 # Misc
 async-trait = "0.1"
 thiserror = "2"
 url = "2.5.8"
 
+# Wave 1: jq engine for the `lad_jq` MCP tool.
+# jaq is a pure-Rust jq interpreter split into several small crates; we need
+# the core engine, the stdlib (length, map, select...), and the JSON value
+# backend with serde support so we can feed `serde_json::Value` through.
+jaq-core = "3.0"
+jaq-std = "3.0"
+jaq-json = { version = "2.0", features = ["serde"] }
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-tempfile = "3"
+proptest = "1"
 
 [[bench]]
 name = "core"

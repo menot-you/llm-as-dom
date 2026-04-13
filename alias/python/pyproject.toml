@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-as-dom"
+version = "0.10.0"
+description = "AI browser pilot — test your app 60x cheaper. (Alias for menot-you-mcp-lad)"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.9"
+dependencies = ["menot-you-mcp-lad==0.10.0"]
+keywords = ["browser", "automation", "mcp", "ai-agent", "headless", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/menot-you/llm-as-dom"
+Repository = "https://github.com/menot-you/llm-as-dom"
+
+[project.scripts]
+llm-as-dom = "llm_as_dom:main"

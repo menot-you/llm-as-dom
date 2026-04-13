@@ -2,8 +2,17 @@
 //!
 //! Decouples the pilot, a11y, session, and network modules from any
 //! specific browser engine (Chromium, WebKit, etc.).
+//!
+//! Wave 3: Chromium gained an `attach` constructor that connects to an
+//! already-running browser via CDP (see `chromium_attach`). The trait
+//! gained [`BrowserEngine::adopt_existing_pages`] so attach callers can
+//! surface pre-existing tabs as LAD tabs on the first CDP handshake.
 
 pub mod chromium;
+pub mod chromium_attach;
+pub mod cloak_bootstrap;
+pub mod singleton_lock;
+pub mod stealth;
 pub mod webkit;
 pub(crate) mod webkit_proto;
 
@@ -19,16 +28,31 @@ pub struct EngineConfig {
     pub interactive: bool,
     /// User data directory for browser profile isolation.
     pub user_data_dir: std::path::PathBuf,
+    /// Handle to the temporary directory to ensure it is dropped when the engine is dropped.
+    pub temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
     /// Browser window dimensions (width, height).
     pub window_size: (u32, u32),
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
+        // FIX-R3-12: Use tempfile::Builder for cryptographically random directory
+        // names with 0o700 permissions, replacing the predictable PID-based path.
+        let td = tempfile::Builder::new()
+            .prefix("lad-browser-")
+            .tempdir()
+            .ok();
+        let user_data_dir = td
+            .as_ref()
+            .map(|t| t.path().to_path_buf())
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("lad-browser-{}", std::process::id()))
+            });
         Self {
             visible: false,
             interactive: false,
-            user_data_dir: std::env::temp_dir().join(format!("lad-browser-{}", std::process::id())),
+            user_data_dir,
+            temp_dir: td.map(std::sync::Arc::new),
             window_size: (1280, 800),
         }
     }
@@ -45,6 +69,17 @@ pub trait BrowserEngine: Send + Sync {
 
     /// Shut down the browser and release resources.
     async fn close(&self) -> Result<(), crate::Error>;
+
+    /// Wave 3: return any pages that already exist on the browser,
+    /// wrapped as `PageHandle` trait objects. The default implementation
+    /// returns an empty vec for engines that don't support adoption
+    /// (WebKit, future backends). Chromium overrides this to enumerate
+    /// `chromiumoxide::Browser::pages()` — used by the CDP attach path
+    /// (`lad_session attach_cdp`) to surface the user's already-open
+    /// tabs as LAD tabs on the first handshake.
+    async fn adopt_existing_pages(&self) -> Result<Vec<Box<dyn PageHandle>>, crate::Error> {
+        Ok(Vec::new())
+    }
 }
 
 /// A page handle — the single abstraction over browser-specific page types.
@@ -81,6 +116,23 @@ pub trait PageHandle: Send + Sync {
         cookies: &[crate::session::CookieEntry],
     ) -> Result<(), crate::Error>;
 
+    /// Set files on a `<input type="file">` element via CDP or engine-native API.
+    ///
+    /// `selector` is a CSS selector identifying the file input.
+    /// `files` are absolute file paths on the host filesystem.
+    ///
+    /// Default implementation returns an error — only engines with CDP
+    /// or equivalent support override this.
+    async fn set_input_files(
+        &self,
+        _selector: &str,
+        _files: &[String],
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::Backend(
+            "file upload not supported on this engine".into(),
+        ))
+    }
+
     /// Enable network traffic monitoring. Returns `false` if unsupported.
     async fn enable_network_monitoring(&self) -> Result<bool, crate::Error> {
         Ok(false)
@@ -105,6 +157,21 @@ pub async fn eval_js_into<T: DeserializeOwned>(
     script: &str,
 ) -> Result<T, crate::Error> {
     let value = page.eval_js(script).await?;
-    serde_json::from_value(value)
-        .map_err(|e| crate::Error::Backend(format!("JS result parse failed: {e:?}")))
+    // DX-16 FIX: CDP may return the JSON as a string (from JSON.stringify)
+    // or as an already-parsed object. Try direct deserialization first,
+    // then fall back to parsing the string as JSON.
+    match serde_json::from_value::<T>(value.clone()) {
+        Ok(v) => Ok(v),
+        Err(_) => {
+            // If it's a string containing JSON, parse the string.
+            if let Some(s) = value.as_str() {
+                serde_json::from_str(s)
+                    .map_err(|e| crate::Error::Backend(format!("JS result parse failed: {e:?}")))
+            } else {
+                Err(crate::Error::Backend(format!(
+                    "JS result parse failed: expected string or object, got {value}"
+                )))
+            }
+        }
+    }
 }

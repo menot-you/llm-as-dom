@@ -106,6 +106,10 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
         }
     }
 
@@ -123,6 +127,10 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
         }
     }
 

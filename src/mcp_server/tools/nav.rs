@@ -1,0 +1,210 @@
+//! Navigation tools: `lad_back`, `lad_dialog`.
+
+use std::time::Duration;
+
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::*;
+
+use crate::LadServer;
+use crate::helpers::mcp_err;
+use crate::params::{BackParams, DialogParams, RefreshParams};
+
+use llm_as_dom::pilot;
+
+impl LadServer {
+    /// Navigate back in browser history.
+    ///
+    /// FIX-R3-02: Hold a single lock through the entire back-navigate-wait-refresh
+    /// cycle to eliminate the stale URL window where concurrent tools could observe
+    /// inconsistent state between the history.back() and the view refresh.
+    ///
+    /// Wave 2: operates on the active tab. Wave 5 (Pain #16): accepts a
+    /// `timeout_ms` so an empty history or a hung chromium can't block the
+    /// MCP session indefinitely.
+    pub(crate) async fn tool_lad_back(
+        &self,
+        params: Parameters<BackParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(timeout_ms = p.timeout_ms, tab_id = ?p.tab_id, "lad_back");
+
+        let timeout_ms = p.timeout_ms;
+        let work = async {
+            let mut guard = self.lock_active_page().await;
+            let ap = guard.resolve_mut(None)?;
+
+            ap.page.eval_js("history.back()").await.map_err(mcp_err)?;
+
+            // CHAOS-14: Use wait_for_navigation instead of fixed sleep to eliminate
+            // the SSRF race window where concurrent tools could observe stale state.
+            if let Err(e) = ap.page.wait_for_navigation().await {
+                tracing::warn!(error = %e, "wait_for_navigation after history.back() failed, falling back to sleep");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+
+            // FIX-1: Check URL safety after history.back() navigation settles.
+            // FIX-R8-01: Invalidate the tab on SSRF detection.
+            if let Ok(ref back_url) = ap.page.url().await
+                && !llm_as_dom::sanitize::is_safe_url(back_url)
+            {
+                let err_url = back_url.clone();
+                guard.clear_active();
+                return Err(mcp_err(format!(
+                    "blocked: history.back() navigated to unsafe URL {err_url}"
+                )));
+            }
+
+            // Refresh view and URL while still holding the lock
+            let view = llm_as_dom::a11y::extract_semantic_view(ap.page.as_ref())
+                .await
+                .map_err(mcp_err)?;
+            if let Ok(url) = ap.page.url().await {
+                ap.url = url;
+            }
+            ap.view = view.clone();
+
+            Ok::<CallToolResult, rmcp::ErrorData>(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        };
+
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), work).await {
+            Ok(result) => result,
+            Err(_) => Err(mcp_err(format!(
+                "lad_back timed out after {timeout_ms}ms — page may have no \
+                 history or chromium hung. Try lad_close + lad_browse fresh."
+            ))),
+        }
+    }
+
+    /// Reload the current page.
+    ///
+    /// DX-W3-2: Explicit page reload without needing `lad_eval`.
+    /// Wave 2: operates on the active tab. Wave 5 (Pain #16): accepts a
+    /// `timeout_ms` so a hung reload can't block the MCP session.
+    pub(crate) async fn tool_lad_refresh(
+        &self,
+        params: Parameters<RefreshParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(timeout_ms = p.timeout_ms, tab_id = ?p.tab_id, "lad_refresh");
+
+        let timeout_ms = p.timeout_ms;
+        let work = async {
+            {
+                let mut guard = self.lock_active_page().await;
+                let ap = guard.resolve_mut(None)?;
+                let url = ap.url.clone();
+                ap.page.navigate(&url).await.map_err(mcp_err)?;
+                ap.page.wait_for_navigation().await.map_err(mcp_err)?;
+
+                // SSRF gate after reload (redirects could happen).
+                let final_url = ap.page.url().await.map_err(mcp_err)?;
+                if !llm_as_dom::sanitize::is_safe_url(&final_url) {
+                    guard.clear_active();
+                    return Err(mcp_err(format!(
+                        "blocked: reload redirected to unsafe URL {final_url}"
+                    )));
+                }
+            }
+
+            let view = self.refresh_active_view().await?;
+            Ok::<CallToolResult, rmcp::ErrorData>(CallToolResult::success(vec![Content::text(
+                view.to_prompt(),
+            )]))
+        };
+
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), work).await {
+            Ok(result) => result,
+            Err(_) => Err(mcp_err(format!(
+                "lad_refresh timed out after {timeout_ms}ms — reload may be \
+                 hung or chromium is stuck. Try lad_close + lad_browse fresh."
+            ))),
+        }
+    }
+
+    /// Handle JavaScript dialogs (alert, confirm, prompt).
+    pub(crate) async fn tool_lad_dialog(
+        &self,
+        params: Parameters<DialogParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = params.0;
+        tracing::info!(action = %p.action, text = ?p.text, tab_id = ?p.tab_id, "lad_dialog");
+
+        let guard = self.lock_active_page().await;
+        let ap = guard.resolve(p.tab_id)?;
+
+        // Ensure dialog overrides are installed
+        let setup_js = r#"
+            if (!window.__lad_dialogs) {
+                window.__lad_dialogs = [];
+                window.__lad_dialog_auto = 'accept';
+                window.__lad_dialog_response = '';
+
+                window.alert = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'alert', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                };
+                window.confirm = function(msg) {
+                    window.__lad_dialogs.push({
+                        type: 'confirm', message: String(msg),
+                        timestamp: Date.now()
+                    });
+                    return window.__lad_dialog_auto === 'accept';
+                };
+                window.prompt = function(msg, def) {
+                    window.__lad_dialogs.push({
+                        type: 'prompt', message: String(msg),
+                        default: def || '', timestamp: Date.now()
+                    });
+                    if (window.__lad_dialog_auto !== 'accept') return null;
+                    return window.__lad_dialog_response || def || '';
+                };
+            }
+        "#;
+        ap.page.eval_js(setup_js).await.map_err(mcp_err)?;
+
+        match p.action.as_str() {
+            "accept" => {
+                let text_escaped = pilot::js_escape(p.text.as_deref().unwrap_or(""));
+                let js = format!(
+                    "window.__lad_dialog_auto = 'accept'; \
+                     window.__lad_dialog_response = '{text_escaped}';",
+                );
+                ap.page.eval_js(&js).await.map_err(mcp_err)?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "dialogs will be auto-accepted"}"#.to_string(),
+                )]))
+            }
+            "dismiss" => {
+                ap.page
+                    .eval_js("window.__lad_dialog_auto = 'dismiss';")
+                    .await
+                    .map_err(mcp_err)?;
+                Ok(CallToolResult::success(vec![Content::text(
+                    r#"{"status": "dialogs will be auto-dismissed"}"#.to_string(),
+                )]))
+            }
+            "status" => {
+                let result = ap
+                    .page
+                    .eval_js("JSON.stringify(window.__lad_dialogs || [])")
+                    .await
+                    .map_err(mcp_err)?;
+                let text = result.as_str().unwrap_or("[]");
+                Ok(CallToolResult::success(vec![Content::text(
+                    text.to_string(),
+                )]))
+            }
+            other => Err(rmcp::ErrorData::invalid_params(
+                format!(
+                    "unknown dialog action '{}' — use 'accept', 'dismiss', or 'status'",
+                    other
+                ),
+                None,
+            )),
+        }
+    }
+}

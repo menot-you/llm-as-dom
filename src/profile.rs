@@ -102,16 +102,24 @@ pub fn extract_cookies_from_profile(
         )));
     }
 
-    // Chrome locks the Cookies file when running. Copy to temp.
-    let tmp = std::env::temp_dir().join(format!("lad-cookies-{}", std::process::id()));
-    std::fs::copy(&cookies_db, &tmp).map_err(|e| {
+    // Chrome locks the Cookies file when running. Copy to a secure temp file.
+    // FIX-R4-06: Use tempfile::NamedTempFile instead of predictable PID-based path,
+    // preventing symlink attacks on the temp directory.
+    let temp = tempfile::Builder::new()
+        .prefix("lad-cookies-")
+        .suffix(".db")
+        .tempfile()
+        .map_err(|e| crate::Error::ActionFailed(format!("failed to create temp file: {e}")))?;
+    let temp_path = temp.path().to_path_buf();
+    std::fs::copy(&cookies_db, &temp_path).map_err(|e| {
         crate::Error::ActionFailed(format!(
             "failed to copy Cookies DB (is Chrome running?): {e}"
         ))
     })?;
 
-    let result = extract_cookies_from_db(&tmp, decryption_key.as_ref());
-    let _ = std::fs::remove_file(&tmp);
+    let result = extract_cookies_from_db(&temp_path, decryption_key.as_ref());
+    // NamedTempFile auto-deletes on drop, but explicit cleanup is fine too.
+    drop(temp);
     result
 }
 

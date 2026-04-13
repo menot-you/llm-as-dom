@@ -20,7 +20,7 @@ function getPlatform() {
   throw new Error(
     `Unsupported platform: ${platform}-${arch}. ` +
       `Supported: darwin-arm64, linux-x64. ` +
-      `Install from source: cargo install llm-as-dom`
+      `Install from source: cargo install menot-you-mcp-lad`
   );
 }
 
@@ -59,7 +59,7 @@ async function main() {
     console.log(`llm-as-dom: installed ${BINARY} (${(data.length / 1024 / 1024).toFixed(1)} MB)`);
   } catch (err) {
     console.error(`llm-as-dom: failed to download binary — ${err.message}`);
-    console.error(`llm-as-dom: you can install from source: cargo install llm-as-dom`);
+    console.error(`llm-as-dom: you can install from source: cargo install menot-you-mcp-lad`);
     // Don't fail the install — the run.js wrapper will show a helpful error
   }
 }
