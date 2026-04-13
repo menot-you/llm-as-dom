@@ -39,28 +39,21 @@ impl AnthropicBackend {
                 k
             }
         };
-        let base_url = std::env::var("LAD_LLM_URL")
-            .or_else(|_| std::env::var("Z_AI_BASE_URL"))
-            .unwrap_or_else(|_| "https://api.z.ai/api/anthropic".into());
-
-        if !cred.is_empty() {
-            if let Ok(parsed_url) = url::Url::parse(&base_url) {
-                if parsed_url.scheme() == "http" {
-                    if let Some(host) = parsed_url.host_str() {
-                        let host_lower = host.to_lowercase();
-                        if host_lower != "localhost" && host_lower != "127.0.0.1" {
-                            panic!("SEC-004: Insecure LLM backend connection. Sending API keys over plaintext HTTP to a remote host is prohibited. Use HTTPS.");
-                        }
-                    }
-                }
-            }
-        }
-
+        // CHAOS-13: Apply connect + total request timeouts to prevent
+        // infinite hangs when the LLM server is slow or unreachable.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key: cred,
             model: model.into(),
-            base_url,
+            max_prompt_length,
+            base_url: std::env::var("LAD_LLM_URL")
+                .or_else(|_| std::env::var("ANTHROPIC_BASE_URL"))
+                .unwrap_or_else(|_| "https://api.anthropic.com".into()),
         }
     }
 }

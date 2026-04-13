@@ -94,6 +94,9 @@ jobs:
       - name: Build llm-as-dom-mcp
         run: cargo build --release --bin llm-as-dom-mcp
 
+      - name: Build lad-relay
+        run: cargo build --release --bin lad-relay
+
       - name: Upload binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -101,6 +104,7 @@ jobs:
           path: |
             target/release/lad
             target/release/llm-as-dom-mcp
+            target/release/lad-relay
 
   # ── Fixture Tests ──────────────────────────────────────────────────
   fixture-tests:
@@ -170,8 +174,8 @@ jobs:
           name: llm-benchmark-results
           path: bench/results.json
 
-  # auto-tag removed (using release-plz)
   # ── Release (cross-platform binaries) ──────────────────────────────
+  # Tags are created by release.yml (workflow_dispatch), not auto-tag.
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -212,6 +216,7 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/lad dist/lad-${{ matrix.artifact }} || true
           cp target/${{ matrix.target }}/release/llm-as-dom-mcp dist/llm-as-dom-mcp-${{ matrix.artifact }} || true
+          cp target/${{ matrix.target }}/release/lad-relay dist/lad-relay-${{ matrix.artifact }} || true
           cp target/${{ matrix.target }}/release/lad-webkit-bridge dist/lad-webkit-bridge-${{ matrix.artifact }} 2>/dev/null || true
 
       - name: Upload release artifacts
@@ -282,9 +287,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-release
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -293,16 +295,16 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
-      - name: Sync version from Cargo.toml
+      - name: Sync version from VERSION file
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(cat VERSION)
           cd npm
           node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
 
       - name: Publish llm-as-dom-mcp
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: cd npm && npm publish --access public --provenance || echo "Version may already be published"
+        run: cd npm && npm publish --access public || echo "Version may already be published"
 
   # ── Publish to PyPI ────────────────────────────────────────────────
   publish-pypi:
@@ -310,8 +312,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-release
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -319,18 +319,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync version from Cargo.toml
+      - name: Sync version from VERSION file
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(cat VERSION)
           sed -i "s/^version = .*/version = \"${VERSION}\"/" python/pyproject.toml
-          sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" python/llm_as_dom_mcp/__init__.py
+          sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" python/menot_you_mcp_lad/__init__.py
 
-      - name: Build python package
+      - name: Build and publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
-          pip install build
-          cd python && python -m build
-
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: python/dist/
+          pip install build twine
+          cd python && python -m build && twine upload dist/* || echo "Version may already be published"

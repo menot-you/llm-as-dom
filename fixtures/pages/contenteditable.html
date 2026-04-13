@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Contenteditable Fixture</title>
+  <style>
+    body { font-family: system-ui; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+    #composer {
+      min-height: 120px;
+      padding: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      outline: none;
+    }
+    #composer:empty::before {
+      content: attr(aria-placeholder);
+      color: #888;
+    }
+    textarea {
+      width: 100%;
+      min-height: 80px;
+      padding: .5rem;
+      margin-top: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    button {
+      margin-top: 1rem;
+      padding: .5rem 1rem;
+      background: #1d9bf0;
+      color: white;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Contenteditable Fixture</h1>
+
+  <!-- DX-CE3 (bug 3) main target: a microblog-style composer rendered as a
+       contenteditable div with aria-label="Post text". The LAD extractor
+       must classify this as Input / input_type=contenteditable and the
+       type handler must write through document.execCommand('insertText'). -->
+  <div id="composer"
+       contenteditable="true"
+       role="textbox"
+       aria-multiline="true"
+       aria-label="Post text"
+       aria-placeholder="What is happening?"
+       data-testid="tweetTextarea_0"></div>
+
+  <!-- Regression: a plain textarea so we can verify the existing
+       native-value-setter path still works. -->
+  <label for="fallback-area">Fallback Textarea</label>
+  <textarea id="fallback-area" name="fallback" placeholder="Plain textarea"></textarea>
+
+  <button type="button">Post</button>
+
+  <script>
+    // Spy: mirror the composer's live state into a global so the test can
+    // read it via eval_js. Using an event listener (not a MutationObserver)
+    // is fine here — both 'input' and 'beforeinput' fire for execCommand.
+    const composer = document.getElementById('composer');
+    window.__composerInput = 0;
+    composer.addEventListener('input', () => { window.__composerInput += 1; });
+    composer.addEventListener('beforeinput', (e) => {
+      // Mark that a beforeinput event with an inputType landed — this is
+      // the exact signal Draft.js/Lexical/ProseMirror listen for.
+      window.__composerBeforeInputType = e.inputType || 'unknown';
+    });
+  </script>
+</body>
+</html>

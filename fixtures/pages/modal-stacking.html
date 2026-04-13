@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Modal Stacking Fixture</title>
+  <style>
+    body { font-family: system-ui; margin: 0; padding: 0; }
+    main { padding: 2rem; }
+    main button { display: block; margin: 0.5rem 0; padding: .5rem 1rem; }
+    .backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      min-width: 320px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.2);
+    }
+    .modal h2 { margin-top: 0; }
+    .modal button {
+      padding: .5rem 1rem;
+      border: none;
+      background: #e74c3c;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .hidden-bucket { display: none; }
+    .collapsed-row { visibility: collapse; }
+    .ghost {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 500;
+    }
+    .ghost button {
+      pointer-events: none;
+      padding: .5rem 1rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- DX-MZ4 fixture: simulates a popular microblog modal stacking bug.
+       When a role=dialog aria-modal=true is open, every element here
+       *outside* the dialog should be excluded from extraction:
+         1. Background button (normal visible, but made inert by the
+            [inert] attribute on main)
+         2. Hidden bucket (display:none)
+         3. Collapsed row (visibility:collapse)
+         4. Ghost overlay (pointer-events:none)
+       After DX-MZ4, only the modal's Close button should be collected. -->
+  <main inert>
+    <h1>Background content</h1>
+    <button id="bg-primary" type="button">Background Button</button>
+    <button id="bg-secondary" type="button">Another Background Button</button>
+    <div class="hidden-bucket">
+      <button id="hidden-btn" type="button">Hidden Button</button>
+    </div>
+    <table>
+      <tr class="collapsed-row">
+        <td><button id="collapsed-btn" type="button">Collapsed Button</button></td>
+      </tr>
+    </table>
+  </main>
+
+  <div class="ghost">
+    <button id="ghost-btn" type="button">Ghost Button</button>
+  </div>
+
+  <div class="backdrop" role="dialog" aria-modal="true" aria-label="Example dialog">
+    <div class="modal">
+      <h2>Modal Dialog</h2>
+      <p>Click the close button below.</p>
+      <button id="close-btn" type="button">Close</button>
+    </div>
+  </div>
+</body>
+</html>

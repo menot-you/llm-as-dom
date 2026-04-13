@@ -77,7 +77,7 @@ impl BridgeConnection {
             )),
             Err(_) => {
                 self.pending.lock().await.remove(&id);
-                Err(crate::Error::Timeout)
+                Err(crate::Error::Timeout { timeout_secs: 30 })
             }
         }
     }
@@ -88,6 +88,7 @@ pub struct WebKitEngine {
     conn: Arc<BridgeConnection>,
     reader_task: tokio::task::JoinHandle<()>,
     child: Option<Child>,
+    _temp_dir: Option<std::sync::Arc<tempfile::TempDir>>,
 }
 
 impl WebKitEngine {
@@ -157,6 +158,7 @@ impl WebKitEngine {
             conn,
             reader_task,
             child: Some(child),
+            _temp_dir: config.temp_dir,
         })
     }
 

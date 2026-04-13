@@ -61,13 +61,13 @@ const OAUTH_PATTERNS: &[(&str, OAuthProvider)] = &[
 
 /// Callback URL parameter patterns that indicate OAuth completion.
 const CALLBACK_PARAMS: &[&str] = &[
-    "code",
-    "access_token",
-    "token",
-    "id_token",
-    "state",
-    "oauth_token",
-    "oauth_verifier",
+    "code=",
+    "access_token=",
+    "token=",
+    "id_token=",
+    "state=",
+    "oauth_token=",
+    "oauth_verifier=",
 ];
 
 /// Consent page keywords in visible text.
@@ -86,49 +86,16 @@ pub const CONSENT_KEYWORDS: &[&str] = &[
 
 /// Detect if a URL belongs to a known OAuth provider.
 pub fn detect_provider(url: &str) -> Option<OAuthProvider> {
-    let parsed = url::Url::parse(url).ok()?;
-    let host = parsed.host_str()?.to_lowercase();
-    let path = parsed.path().to_lowercase();
-
+    let url_lower = url.to_lowercase();
     OAUTH_PATTERNS
         .iter()
-        .find(|(pattern, _)| {
-            let mut parts = pattern.splitn(2, '/');
-            let pat_host = parts.next().unwrap();
-            let pat_path = parts.next().unwrap_or("");
-
-            let host_match = host == pat_host || host.ends_with(&format!(".{}", pat_host));
-            let path_match = if pat_path.is_empty() {
-                true
-            } else {
-                path.strip_prefix('/').unwrap_or(&path).starts_with(pat_path)
-            };
-
-            host_match && path_match
-        })
+        .find(|(pattern, _)| url_lower.contains(pattern))
         .map(|(_, provider)| *provider)
 }
 
 /// Check if a URL contains OAuth callback parameters.
 pub fn is_callback_url(url: &str) -> bool {
-    let parsed = match url::Url::parse(url) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    let has_query_param = parsed
-        .query_pairs()
-        .any(|(k, _)| CALLBACK_PARAMS.contains(&k.as_ref()));
-
-    let has_fragment_param = if let Some(fragment) = parsed.fragment() {
-        CALLBACK_PARAMS.iter().any(|param| {
-            fragment.contains(&format!("{}=", param))
-        })
-    } else {
-        false
-    };
-
-    has_query_param || has_fragment_param
+    CALLBACK_PARAMS.iter().any(|param| url.contains(param))
 }
 
 /// Check if visible text suggests a consent/authorization page.

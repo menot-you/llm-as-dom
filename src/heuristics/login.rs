@@ -103,7 +103,7 @@ pub fn try_form_fill(
                         el.id
                     ),
                 }),
-                confidence: 0.70,
+                confidence: 0.45, // below threshold — defer to LLM for non-login goals
                 reason: "generic text field, guessing username".into(),
             });
         }
@@ -249,7 +249,8 @@ pub fn try_detect_done(view: &SemanticView, goal: &str) -> Option<super::Heurist
             action: Some(Action::Done {
                 result: serde_json::json!({
                     "success": true,
-                    "url": view.url,
+                    // FIX-5: Redact URL secrets from login result.
+                    "url": crate::sanitize::redact_url_secrets(&view.url),
                     "title": view.title,
                     "signal": "success text in page",
                 }),
@@ -260,39 +261,75 @@ pub fn try_detect_done(view: &SemanticView, goal: &str) -> Option<super::Heurist
         });
     }
 
-    // URL-based detection: navigated away from login page.
+    // FIX-R4-04: URL-based detection: navigated away from login page.
+    // Tightened to require:
+    // 1. URL changed away from login
+    // 2. Page has at least SOME interactive elements (not empty/error page)
+    // 3. Minimum confidence reduced to 0.70 so LLM can override if needed
     if (goal.contains("login") || goal.contains("sign in"))
         && view.page_hint != "login page"
         && !view.url.to_lowercase().contains("login")
+        && !view.elements.is_empty()
+        && !view.visible_text.trim().is_empty()
     {
         return Some(super::HeuristicResult {
             action: Some(Action::Done {
                 result: serde_json::json!({
                     "success": true,
-                    "url": view.url,
+                    "url": crate::sanitize::redact_url_secrets(&view.url),
                     "title": view.title,
                 }),
-                reasoning: "heuristic: URL no longer contains login — navigation succeeded".into(),
+                reasoning: "heuristic: URL no longer contains login and page has content — navigation succeeded".into(),
             }),
-            confidence: 0.85,
-            reason: "left login page".into(),
+            confidence: 0.70,
+            reason: "left login page (page has content)".into(),
         });
     }
 
     None
 }
 
+/// Stop words that indicate a credential value should not be extracted
+/// (the word is a connector, not the actual value).
+const CREDENTIAL_STOP_WORDS: &[&str] = &[
+    "with", "and", "then", "password", "pass", "in", "the", "to", "a", "for", "on", "my", "this",
+];
+
 /// Extract a value that follows a keyword in the goal string.
 ///
 /// e.g. `"login as testuser with pw test123"` returns `"testuser"` for prefix `"as "`.
+///
+/// FIX-R4-05: Supports quoted multi-word values:
+///   - `password "my complex pass"` -> `"my complex pass"`
+///   - `password 'my complex pass'` -> `"my complex pass"`
+///   - Unquoted: takes everything until the next recognized keyword or end of string.
 pub fn extract_credential(goal: &str, prefixes: &[&str]) -> Option<String> {
     for prefix in prefixes {
         if let Some(pos) = goal.find(prefix) {
             let after = &goal[pos + prefix.len()..];
-            let value = after.split_whitespace().next();
+            let trimmed = after.trim_start();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // FIX-R4-05: Check for quoted values first.
+            if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+                let quote = trimmed.chars().next().unwrap();
+                let inner = &trimmed[1..];
+                if let Some(end) = inner.find(quote) {
+                    let val = &inner[..end];
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+                // No closing quote -- fall through to unquoted parsing.
+            }
+
+            // Unquoted: take the first whitespace-delimited token.
+            let value = trimmed.split_whitespace().next();
             if let Some(v) = value
                 && !v.is_empty()
-                && !["with", "and", "then", "password", "pass"].contains(&v)
+                && !CREDENTIAL_STOP_WORDS.contains(&v)
             {
                 return Some(v.to_string());
             }
@@ -451,17 +488,127 @@ mod tests {
     #[test]
     fn detect_done_url_change_still_works() {
         // Classic case: URL changed away from login.
-        let view = view_with_text(
+        // FIX-R4-04: Now requires non-empty elements and visible text.
+        let mut view = view_with_text(
             "https://example.com/dashboard",
             "Dashboard",
             "content page",
             "Your projects",
         );
+        // Add at least one element so the page is not considered empty.
+        view.elements.push(crate::semantic::Element {
+            id: 1,
+            kind: crate::semantic::ElementKind::Button,
+            label: "Create project".into(),
+            name: None,
+            value: None,
+            placeholder: None,
+            href: None,
+            input_type: None,
+            disabled: false,
+            form_index: None,
+            context: None,
+            hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
+        });
         let result = try_detect_done(&view, "login as user pw pass").unwrap();
         if let Some(Action::Done { result: val, .. }) = &result.action {
             assert_eq!(val["success"], true);
         } else {
             panic!("expected Done action");
         }
+    }
+
+    #[test]
+    fn detect_done_empty_page_does_not_pass() {
+        // FIX-R4-04: An empty page after URL change should NOT be treated as success.
+        let view = view_with_text("https://example.com/error", "", "content page", "");
+        let result = try_detect_done(&view, "login as user pw pass");
+        assert!(
+            result.is_none(),
+            "empty page should not be detected as login success"
+        );
+    }
+
+    // ── W4b: extract_credential stop list ────────────────────────────
+
+    #[test]
+    fn extract_credential_ignores_prepositions() {
+        // "enter email in waitlist" — "in" should not be extracted
+        let v = extract_credential("enter email in waitlist", &["email "]);
+        assert_eq!(v, None);
+    }
+
+    #[test]
+    fn extract_credential_ignores_articles() {
+        let v = extract_credential("type user the field", &["user "]);
+        assert_eq!(v, None);
+    }
+
+    #[test]
+    fn extract_credential_still_works_for_real_values() {
+        let v = extract_credential("login as alice@test.com pw secret", &["as "]);
+        assert_eq!(v, Some("alice@test.com".into()));
+    }
+
+    // -- FIX-R4-05: multi-word password support --
+
+    #[test]
+    fn extract_credential_double_quoted() {
+        let v = extract_credential(r#"password "my complex pass""#, &["password "]);
+        assert_eq!(v, Some("my complex pass".into()));
+    }
+
+    #[test]
+    fn extract_credential_single_quoted() {
+        let v = extract_credential("password 'multi word'", &["password "]);
+        assert_eq!(v, Some("multi word".into()));
+    }
+
+    #[test]
+    fn extract_credential_unquoted_still_works() {
+        let v = extract_credential("password simple", &["password "]);
+        assert_eq!(v, Some("simple".into()));
+    }
+
+    // ── W4c: generic text field confidence ───────────────────────────
+
+    #[test]
+    fn generic_text_field_confidence_below_threshold() {
+        let view = {
+            let mut v = view_with_text("https://example.com", "Home", "content page", "");
+            v.elements.push(crate::semantic::Element {
+                id: 1,
+                kind: crate::semantic::ElementKind::Input,
+                label: "Search".into(),
+                name: Some("q".into()),
+                value: None,
+                placeholder: None,
+                href: None,
+                input_type: Some("text".into()),
+                disabled: false,
+                form_index: None,
+                context: None,
+                hint: None,
+                checked: None,
+                options: None,
+                frame_index: None,
+                is_visible: None,
+            });
+            v
+        };
+        let result = try_form_fill(&view, "enter testuser in search", &[]);
+        // Should either be None (deferred) or have confidence < 0.60
+        if let Some(r) = result {
+            assert!(
+                r.confidence < 0.60,
+                "generic text field confidence should be below threshold, got {}",
+                r.confidence
+            );
+        }
+        // None is also acceptable — means it deferred
     }
 }

@@ -14,7 +14,8 @@
 ```
 src/
 ├── main.rs              CLI binary (lad --engine chromium|webkit)
-├── mcp_server.rs        MCP binary (llm-as-dom-mcp), 6 semantic tools
+├── mcp_server.rs        MCP binary (llm-as-dom-mcp), 22 semantic tools
+├── lib.rs               Library root
 │
 ├── engine/              Browser engine abstraction
 │   ├── mod.rs           BrowserEngine + PageHandle traits, EngineConfig
@@ -23,11 +24,22 @@ src/
 │   └── webkit_proto.rs  Wire protocol types for WebKit bridge
 │
 ├── a11y.rs              DOM extraction + ghost-ID stamping via JS injection
+│                        (deepQueryAll for shadow DOM, same-origin iframe traversal)
 ├── semantic.rs          SemanticView data model + prompt serialization
-├── pilot.rs             5-tier observe → decide → act loop
 ├── session.rs           Cookie/navigation/auth state across pages
 ├── network.rs           Network traffic capture + classification
 ├── playbook.rs          Tier 0: trained playbook replay
+│
+├── pilot/               5-tier observe → decide → act loop (split from pilot.rs)
+│   ├── mod.rs           Types, traits, re-exports (DecisionSource, PilotBackend, etc.)
+│   ├── runner.rs        Main pilot loop: observe → decide → act → repeat
+│   ├── decide.rs        5-tier dispatch: playbook → hints → heuristics → LLM → escalate
+│   ├── action.rs        Action enum + execution (click, type, select, navigate, etc.)
+│   ├── captcha.rs       Challenge detection + handling (Cloudflare, CAPTCHA, WAF)
+│   └── util.rs          Helpers (JS escaping, etc.)
+│
+├── watch.rs             Persistent page monitoring with semantic diffing
+├── observer.rs          SemanticView differ (added/removed/changed elements)
 │
 ├── heuristics/          Tier 2: 11 rule-based modules
 │   ├── mod.rs           Router: try_resolve() dispatches to all modules
@@ -40,12 +52,15 @@ src/
 │   ├── mfa.rs           MFA/2FA detection + TOTP support
 │   ├── ecommerce.rs     Cart, checkout, product interaction
 │   ├── validation.rs    Form validation error detection
-│   └── multistep.rs     Multi-step wizard detection
+│   ├── multistep.rs     Multi-step wizard detection
+│   └── selector.rs      Semantic selector engine for heuristic matching
 │
-├── backend/             LLM backends
-│   ├── mod.rs
-│   ├── ollama.rs        Ollama/Qwen integration
-│   ├── zai.rs           Z.AI / OpenAI-compatible API
+├── backend/             LLM backends (5 adapters)
+│   ├── mod.rs           PilotBackend trait + backend registry
+│   ├── generic.rs       Generic/Ollama integration (local models)
+│   ├── anthropic.rs     Anthropic (Claude) API
+│   ├── openai.rs        OpenAI-compatible API
+│   ├── zai.rs           Z.AI (GLM) API
 │   └── playbook.rs      Playbook backend helpers
 │
 ├── audit.rs             Page quality auditing (a11y, forms, links)
@@ -59,7 +74,7 @@ src/
 webkit-bridge/           Swift macOS sidecar app
 ├── Package.swift
 └── Sources/
-    └── main.swift       WKWebView + stdin/stdout NDJSON bridge (~300 LOC)
+    └── main.swift       WKWebView + stdin/stdout NDJSON bridge (~576 LOC)
 ```
 
 ## Engine Abstraction
@@ -199,35 +214,156 @@ Bot challenges (Cloudflare, CAPTCHA, WAF) are detected and classified:
 
 ## MCP Protocol
 
-The MCP server (`llm-as-dom-mcp`) uses `rmcp 1.3` with stdio transport.
+The MCP server (`llm-as-dom-mcp`) uses `rmcp 1.3` with stdio transport. Exposes **21 tools** across 9 categories.
 
 ```
 Client (Claude)                    llm-as-dom-mcp
     │                                 │
     ├─ initialize ───────────────────►│
-    │◄──── capabilities (6 tools) ────┤
+    │◄──── capabilities (23 tools) ───┤
     │                                 │
-    ├─ tools/call: lad_browse ───────►│
-    │              { url, goal }      ├── ensure_engine (lazy, once)
-    │                                 ├── navigate + pilot loop
-    │◄──── { success, steps, ... } ───┤  (+ screenshot)
+    │  ── Autonomous ──────────────── │
+    ├─ lad_browse { url, goal } ─────►│── pilot loop (heuristics → LLM)
+    │◄──── { success, steps, ... } ───┤
     │                                 │
-    ├─ tools/call: lad_extract ──────►│
-    │              { url, what }      ├── navigate + extract SemanticView
-    │◄──── { elements, text, ... } ───┤
+    │  ── Extraction ──────────────── │
+    ├─ lad_extract { url, what } ────►│── SemanticView (never raw HTML)
+    ├─ lad_snapshot ─────────────────►│── elements with IDs for click/type
+    ├─ lad_screenshot ───────────────►│── base64 PNG
     │                                 │
-    ├─ tools/call: lad_assert ───────►│
-    │              { url, asserts[] } ├── navigate + check assertions
-    │◄──── { all_pass, results[] } ───┤
+    │  ── Interaction ─────────────── │
+    ├─ lad_click { id } ────────────►│── click element by ghost-ID
+    ├─ lad_type { id, text } ───────►│── type into element
+    ├─ lad_select { id, value } ────►│── dropdown selection
+    ├─ lad_press_key { key, id? } ──►│── keyboard input
     │                                 │
-    ├─ tools/call: lad_locate ───────►│
-    │              { url, selector }  ├── source-map lookup
-    │◄──── { file, line, ... } ───────┤
+    │  ── Waiting ─────────────────── │
+    ├─ lad_wait { condition } ──────►│── block until condition met
+    ├─ lad_watch { action } ────────►│── start/events/stop monitoring
+    │                                 │   (push via MCP resource notifications)
     │                                 │
-    ├─ tools/call: lad_audit ────────►│
-    │              { url, categories }├── a11y/forms/links audit
-    │◄──── { issues[], summary } ─────┤
+    │  ── Verification ────────────── │
+    ├─ lad_assert { url, asserts[] }►│── check semantic assertions
+    ├─ lad_audit { url, categories }►│── a11y/forms/links audit
+    │                                 │
+    │  ── Navigation ──────────────── │
+    ├─ lad_back ─────────────────────►│── browser history back
+    │                                 │
+    │  ── Debugging ───────────────── │
+    ├─ lad_eval { script } ─────────►│── raw JS escape hatch
+    ├─ lad_network { filter? } ─────►│── network traffic inspection
+    ├─ lad_locate { url, selector } ►│── source-map lookup
+    │                                 │
+    │  ── Lifecycle ───────────────── │
+    ├─ lad_close ────────────────────►│── release all resources
+    ├─ lad_session { action } ──────►│── get/clear session state
 ```
+
+## Watch System
+
+The watch system provides persistent page monitoring with semantic diffing.
+
+### Components
+
+```
+lad_watch(start)
+    │
+    ▼
+┌──────────────────────┐
+│  WatchState           │  Spawns a tokio task
+│  ├── url              │
+│  ├── interval_ms      │
+│  └── JoinHandle       │
+└──────────┬───────────┘
+           │  polling loop
+           ▼
+┌──────────────────────┐      ┌──────────────────────┐
+│  a11y.rs + semantic  │─────►│  observer::diff()     │
+│  (extract view)      │      │  (old vs new view)    │
+└──────────────────────┘      └──────────┬───────────┘
+                                         │ non-empty diff
+                                         ▼
+                              ┌──────────────────────┐
+                              │  EventBuffer          │
+                              │  (ring buffer, 1000)  │
+                              │  monotonic seq nums   │
+                              └──────────┬───────────┘
+                                         │
+                                         ▼
+                              ┌──────────────────────┐
+                              │  Peer::notify_        │
+                              │  resource_updated     │
+                              │  (watch://url)        │
+                              └──────────────────────┘
+```
+
+### Lifecycle
+
+1. **Start** — `lad_watch(action="start", url="...", interval_ms=2000)` spawns a background task
+2. **Poll** — every tick, extract `SemanticView` from the page
+3. **Diff** — `observer::diff(old, new)` computes added/removed/changed elements
+4. **Store** — non-empty diffs become `WatchEvent`s in the ring buffer (FIFO, cap 1,000)
+5. **Notify** — MCP resource notification pushed via `Peer::notify_resource_updated` for `watch://url`
+6. **Query** — `lad_watch(action="events", since_seq=N)` returns events newer than sequence N
+7. **Stop** — `lad_watch(action="stop")` cancels the background task and cleans up
+
+### Observer
+
+`observer.rs` diffs two `SemanticView`s using `lad-id` as the primary key:
+
+- **Added** — elements in new view not present in old
+- **Removed** — elements in old view not present in new
+- **Changed** — same `lad-id` but different value, disabled state, label, or attributes
+- **Notifications** — human-readable descriptions of changes ("Text changed in 'Search'", "Element 'Submit' disabled")
+
+## Pilot Module Split
+
+The original `pilot.rs` was split into 5 sub-modules for maintainability:
+
+| Module | Responsibility | LOC |
+|--------|---------------|-----|
+| `pilot/mod.rs` | Types (`DecisionSource`, `PilotBackend` trait), re-exports | ~100 |
+| `pilot/runner.rs` | Main loop: observe → decide → act → check termination | ~296 |
+| `pilot/decide.rs` | 5-tier dispatch: playbook → hints → heuristics → LLM → escalate | ~200 |
+| `pilot/action.rs` | `Action` enum + `execute_action()` with retry logic | ~200 |
+| `pilot/captcha.rs` | Challenge detection (Cloudflare, CAPTCHA, WAF) + resolution | ~258 |
+| `pilot/util.rs` | Helpers: JS escaping, etc. | ~50 |
+
+Public API surface is unchanged — `pilot::run_pilot()`, `pilot::Action`, `pilot::DecisionSource`.
+
+## Shadow DOM + iframe Support
+
+`a11y.rs` handles complex DOM structures that trip up naive extractors:
+
+### Shadow DOM
+
+`deepQueryAll(root, selector)` recursively traverses shadow roots:
+
+```javascript
+function deepQueryAll(root, sel) {
+    const results = [...root.querySelectorAll(sel)];
+    for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+            results.push(...deepQueryAll(el.shadowRoot, sel));
+        }
+    }
+    return results;
+}
+```
+
+All element queries (interactive elements, forms, text nodes) use `deepQueryAll` instead of `querySelectorAll`, ensuring Web Components with shadow DOM are fully visible to heuristics.
+
+### Same-origin iframe Traversal
+
+Same-origin iframes are traversed via `contentDocument`:
+
+1. Enumerate all `<iframe>` elements on the page
+2. Attempt `iframes[i].contentDocument` access (catches cross-origin `SecurityError`)
+3. Run `deepQueryAll` inside the iframe document
+4. Elements from iframes get a `frame_index` field (`Option<u32>`) identifying which iframe they belong to
+5. Cross-origin iframes are silently skipped
+
+This means lad can interact with embedded forms, login widgets, and payment iframes as long as they share the origin.
 
 ## Extending
 
@@ -238,7 +374,7 @@ Client (Claude)                    llm-as-dom-mcp
 3. Register in `engine/mod.rs`
 4. Add CLI flag in `main.rs`
 
-The WebKit adapter is the reference implementation — 296 lines of Rust + 300 lines of Swift.
+The WebKit adapter is the reference implementation — 428 lines of Rust + 576 lines of Swift.
 
 ### Add a new LLM backend
 

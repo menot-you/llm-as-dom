@@ -332,6 +332,12 @@ fn match_natural(el: &Element, description: &str) -> Option<SelectorMatch> {
         }
     }
 
+    // Exact full-label match bonus: "About" == "about" scores higher than "About Us" containing "about"
+    if label_lower == desc_lower {
+        score += 0.2;
+        reasons.push("exact label match".into());
+    }
+
     // Submit button special case
     score += score_submit_hints(&desc_lower, el, &label_lower, &mut reasons);
 
@@ -452,6 +458,10 @@ mod tests {
             form_index: None,
             context: None,
             hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
         }
     }
 

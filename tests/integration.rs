@@ -48,6 +48,10 @@ fn input_element(
         form_index: form,
         context: None,
         hint: None,
+        checked: None,
+        options: None,
+        frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -65,6 +69,10 @@ fn button_element(id: u32, label: &str, form: Option<u32>) -> Element {
         form_index: form,
         context: None,
         hint: None,
+        checked: None,
+        options: None,
+        frame_index: None,
+        is_visible: None,
     }
 }
 
@@ -83,13 +91,17 @@ fn link_element(id: u32, label: &str, href: &str) -> Element {
         form_index: None,
         context: None,
         hint: None,
+        checked: None,
+        options: None,
+        frame_index: None,
+        is_visible: None,
     }
 }
 
 // ── Browser tests (#[ignore]) ────────────────────────────────────────
 
 /// Launches a real browser, extracts example.com, asserts elements > 0.
-#[ignore]
+#[ignore = "requires Chrome + network — run with `cargo test -- --ignored`"]
 #[tokio::test]
 async fn test_extract_example_com() {
     use llm_as_dom::engine::chromium::ChromiumEngine;
@@ -119,7 +131,7 @@ async fn test_extract_example_com() {
 }
 
 /// Extracts HN login page, asserts page_hint == "login page".
-#[ignore]
+#[ignore = "requires Chrome + network — run with `cargo test -- --ignored`"]
 #[tokio::test]
 async fn test_extract_classifies_login_page() {
     use llm_as_dom::engine::chromium::ChromiumEngine;
@@ -663,6 +675,10 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "field".into(),
                     value: "email".into(),
                 }),
+                checked: None,
+                options: None,
+                frame_index: None,
+                is_visible: None,
             },
             Element {
                 id: 1,
@@ -680,6 +696,10 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "field".into(),
                     value: "password".into(),
                 }),
+                checked: None,
+                options: None,
+                frame_index: None,
+                is_visible: None,
             },
             Element {
                 id: 2,
@@ -697,6 +717,10 @@ fn hinted_login_view() -> SemanticView {
                     hint_type: "action".into(),
                     value: "submit".into(),
                 }),
+                checked: None,
+                options: None,
+                frame_index: None,
+                is_visible: None,
             },
         ],
         forms: vec![],
@@ -1137,6 +1161,10 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 form_index: None,
                 context: None,
                 hint: None,
+                checked: None,
+                options: None,
+                frame_index: None,
+                is_visible: None,
             },
             Element {
                 id: 1,
@@ -1151,6 +1179,10 @@ fn test_playbook_step_produces_action_for_matching_view() {
                 form_index: None,
                 context: None,
                 hint: None,
+                checked: None,
+                options: None,
+                frame_index: None,
+                is_visible: None,
             },
         ],
         forms: vec![],
@@ -1212,6 +1244,10 @@ fn test_hints_active_when_heuristics_disabled() {
                 hint_type: "field".into(),
                 value: "email".into(),
             }),
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
         }],
         forms: vec![],
         visible_text: "".into(),
@@ -1243,7 +1279,22 @@ fn test_both_disabled_falls_to_llm() {
     assert!(!config.use_hints);
     assert!(!config.use_heuristics);
     // With both disabled, only Tier 0 (playbook) and Tier 3 (LLM) remain.
-    // Since playbook_dir is None, only LLM would fire in a real run.
+    // Verify that try_resolve returns no action (confidence below threshold)
+    // when heuristics are conceptually disabled.
+    // We simulate by calling try_hints with a view that has no hints,
+    // confirming the hint path also returns nothing.
+    use llm_as_dom::heuristics::hints::try_hints;
+    let view = mock_view(
+        vec![input_element(0, "Email", "email", Some("email"), None)],
+        "login page",
+    );
+    let hint_result = try_hints(&view, "click something", &[]);
+    // No hints on elements → no resolution from hint tier
+    assert!(
+        hint_result.action.is_none(),
+        "with no hints, try_hints should return None, got {:?}",
+        hint_result.action
+    );
 }
 
 /// Default PilotConfig has both hints and heuristics enabled.
@@ -1478,12 +1529,27 @@ fn multistep_form_waits_when_unfilled() {
     // Only one field filled — should NOT advance
     let r = heuristics::try_resolve(&view, "fill wizard form", &[0]);
     // The multi-step heuristic should not fire; other heuristics might match
-    // but the key assertion is that "Continue" button is NOT the result
-    if let Some(Action::Click { element, .. }) = &r.action {
-        assert_ne!(
-            *element, 2,
-            "should NOT click Continue with unfilled fields"
-        );
+    // but the key assertion is that "Continue" button (element 2) is NOT clicked.
+    match &r.action {
+        Some(Action::Click { element, .. }) => {
+            assert_ne!(
+                *element, 2,
+                "should NOT click Continue with unfilled fields"
+            );
+        }
+        Some(Action::Type { .. }) => {
+            // Filling another field is acceptable
+        }
+        None => {
+            // No action is acceptable — heuristic defers to LLM
+        }
+        Some(other) => {
+            // Any other action that isn't clicking Continue is fine
+            assert!(
+                !matches!(other, Action::Click { element: 2, .. }),
+                "should NOT advance with unfilled fields, got {other:?}"
+            );
+        }
     }
 }
 
@@ -1541,12 +1607,11 @@ fn non_mfa_page_does_not_escalate() {
 
     let r = heuristics::try_resolve(&view, "view dashboard", &[]);
     // Should not produce an MFA escalation
-    if let Some(Action::Escalate { reason }) = &r.action {
-        assert!(
-            !reason.contains("MFA") && !reason.contains("2FA"),
-            "normal page should not trigger MFA escalation"
-        );
-    }
+    assert!(
+        !matches!(&r.action, Some(Action::Escalate { reason }) if reason.contains("MFA") || reason.contains("2FA")),
+        "normal dashboard page should not trigger MFA escalation, got {:?}",
+        r.action
+    );
 }
 
 // ── E-commerce tests ───────────────────────────────────────────────
@@ -1654,13 +1719,12 @@ fn clean_form_no_validation_escalation() {
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
-    // Should not escalate on a clean form
-    if let Some(Action::Escalate { reason }) = &r.action {
-        assert!(
-            !reason.contains("validation"),
-            "clean form should not trigger validation escalation"
-        );
-    }
+    // Should not escalate on a clean form (no validation errors in visible_text)
+    assert!(
+        !matches!(&r.action, Some(Action::Escalate { reason }) if reason.contains("validation")),
+        "clean form should not trigger validation escalation, got {:?}",
+        r.action
+    );
 }
 
 // ── Heuristic wiring order tests ───────────────────────────────────
@@ -1858,4 +1922,654 @@ fn multistep_module_direct_advance() {
         Action::Click { element, .. } => assert_eq!(element, 0),
         other => panic!("expected Click, got {other:?}"),
     }
+}
+
+// ── Shadow DOM extraction test (browser required) ────────────────────
+
+/// Extracts elements from a fixture page containing shadow DOM web components.
+///
+/// The fixture `shadow-dom.html` has:
+/// - 2 light-DOM elements (button + input)
+/// - 4 shadow-DOM elements inside `<my-login-form>` (email, password, button, link)
+/// - 2 deeply nested shadow-DOM elements inside `<my-outer-component>` -> `<my-inner-widget>`
+///   (outer button, deep input, deep button)
+///
+/// Total: at least 9 interactive elements should be found.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_shadow_dom_elements() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use llm_as_dom::semantic::ElementKind;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/shadow-dom.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // Light DOM elements
+    let light_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Light DOM Button"));
+    assert!(light_btn.is_some(), "light DOM button should be found");
+
+    let light_input = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("light-input"));
+    assert!(light_input.is_some(), "light DOM input should be found");
+
+    // Shadow DOM elements from <my-login-form>
+    let shadow_email = view
+        .elements
+        .iter()
+        .find(|e| e.placeholder.as_deref() == Some("shadow@example.com"));
+    assert!(
+        shadow_email.is_some(),
+        "shadow DOM email input should be extracted"
+    );
+
+    let shadow_pass = view.elements.iter().find(|e| {
+        e.input_type.as_deref() == Some("password") && e.name.as_deref() == Some("password")
+    });
+    assert!(
+        shadow_pass.is_some(),
+        "shadow DOM password input should be extracted"
+    );
+
+    let shadow_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Shadow Sign In") && e.kind == ElementKind::Button);
+    assert!(
+        shadow_btn.is_some(),
+        "shadow DOM submit button should be extracted"
+    );
+
+    let shadow_link = view
+        .elements
+        .iter()
+        .find(|e| e.href.as_deref() == Some("/shadow-forgot"));
+    assert!(shadow_link.is_some(), "shadow DOM link should be extracted");
+
+    // Deeply nested shadow DOM (outer -> inner)
+    let outer_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Outer Shadow Button"));
+    assert!(
+        outer_btn.is_some(),
+        "outer shadow DOM button should be extracted"
+    );
+
+    let deep_input = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("deep-field"));
+    assert!(
+        deep_input.is_some(),
+        "deeply nested shadow DOM input should be extracted"
+    );
+
+    let deep_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Deep Button"));
+    assert!(
+        deep_btn.is_some(),
+        "deeply nested shadow DOM button should be extracted"
+    );
+
+    // Verify ghost-ID stamping works (all elements should have an id)
+    for el in &view.elements {
+        // Each element got a unique data-lad-id
+        assert!(
+            el.id < 300,
+            "element IDs should be sequential and reasonable"
+        );
+    }
+
+    // Should have at least 9 elements total
+    assert!(
+        view.elements.len() >= 9,
+        "expected >= 9 elements (2 light + 7 shadow), got {}",
+        view.elements.len()
+    );
+
+    assert_eq!(view.state, PageState::Ready);
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+// ── iframe traversal test (browser required) ─────────────────────────
+
+/// Extracts elements from a fixture page containing same-origin iframes.
+///
+/// The fixture `iframe.html` has:
+/// - 2 light-DOM elements (button + input)
+/// - 4 same-origin iframe elements (name input, email input, submit button, link)
+/// - 1 cross-origin iframe (should be silently skipped)
+///
+/// Total: at least 6 interactive elements should be found.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_iframe_elements() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use llm_as_dom::semantic::ElementKind;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/iframe.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // Light DOM elements
+    let main_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Main Page Button"));
+    assert!(main_btn.is_some(), "main page button should be found");
+    // Main page elements should have frame_index = None
+    assert_eq!(
+        main_btn.unwrap().frame_index,
+        None,
+        "main document elements should have frame_index = None"
+    );
+
+    let main_input = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("main-input"));
+    assert!(main_input.is_some(), "main page input should be found");
+
+    // Same-origin iframe elements
+    let iframe_name = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("contact-name"));
+    assert!(
+        iframe_name.is_some(),
+        "iframe name input should be extracted"
+    );
+    // Iframe elements should have frame_index = Some(0) (first iframe)
+    assert_eq!(
+        iframe_name.unwrap().frame_index,
+        Some(0),
+        "iframe elements should have frame_index = Some(0)"
+    );
+
+    let iframe_email = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("contact-email"));
+    assert!(
+        iframe_email.is_some(),
+        "iframe email input should be extracted"
+    );
+
+    let iframe_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label.contains("Send Message") && e.kind == ElementKind::Button);
+    assert!(
+        iframe_btn.is_some(),
+        "iframe submit button should be extracted"
+    );
+
+    let iframe_link = view
+        .elements
+        .iter()
+        .find(|e| e.href.as_deref() == Some("/iframe-help"));
+    assert!(iframe_link.is_some(), "iframe link should be extracted");
+
+    // Should have at least 6 elements (2 main + 4 iframe)
+    assert!(
+        view.elements.len() >= 6,
+        "expected >= 6 elements (2 main + 4 iframe), got {}",
+        view.elements.len()
+    );
+
+    // Cross-origin iframe should NOT have caused any errors
+    assert_eq!(view.state, PageState::Ready);
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+// ── DX-MZ4 (bug 4): modal stacking / visibility filter ──────────────
+
+/// When a [role="dialog"][aria-modal="true"] is open, extraction must
+/// scope to the dialog subtree. All background buttons in the source —
+/// visible, display:none, visibility:collapse, pointer-events:none, or
+/// behind an [inert] ancestor — must be excluded.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_modal_stacking_excludes_background_elements() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/modal-stacking.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // The modal's Close button must be present.
+    let close_btn = view.elements.iter().find(|e| e.label == "Close");
+    assert!(
+        close_btn.is_some(),
+        "modal's 'Close' button must be extracted, got {} elements: {:?}",
+        view.elements.len(),
+        view.elements.iter().map(|e| &e.label).collect::<Vec<_>>()
+    );
+
+    // None of the background buttons may appear.
+    let forbidden = [
+        "Background Button",
+        "Another Background Button",
+        "Hidden Button",
+        "Collapsed Button",
+        "Ghost Button",
+    ];
+    for name in forbidden {
+        assert!(
+            view.elements.iter().all(|e| e.label != name),
+            "element '{name}' must not be extracted when modal is open"
+        );
+    }
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Regression: visibility filter excludes display:none,
+/// visibility:collapse, pointer-events:none, and [inert] even when no
+/// modal is open.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_visibility_filter_excludes_hidden_buttons() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/hidden-button.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    let visible = view.elements.iter().find(|e| e.label == "Visible Button");
+    assert!(
+        visible.is_some(),
+        "visible button must be extracted, got {} elements: {:?}",
+        view.elements.len(),
+        view.elements.iter().map(|e| &e.label).collect::<Vec<_>>()
+    );
+
+    let forbidden = [
+        "Hidden Button",
+        "Collapsed Button",
+        "Ghost Button",
+        "Inert Button",
+    ];
+    for name in forbidden {
+        assert!(
+            view.elements.iter().all(|e| e.label != name),
+            "'{name}' must be filtered out by visibility rules"
+        );
+    }
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+// ── DX-CE3 (bug 3): contenteditable / Draft.js / Lexical support ─────
+
+/// Fixture: `fixtures/pages/contenteditable.html` ships a contenteditable
+/// div with `role="textbox"`, `aria-multiline="true"`, and
+/// `aria-label="Post text"` — the same shape Twitter's Draft.js composer
+/// exposes. The old extractor skipped it entirely because it only knew
+/// about `<input>`, `<textarea>`, `<select>`.
+///
+/// Assertions:
+/// 1. The composer is extracted as an `Input` with
+///    `input_type == "contenteditable"` and `label == "Post text"`.
+/// 2. The fallback `<textarea>` is still extracted (regression).
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_contenteditable_as_input() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use llm_as_dom::semantic::ElementKind;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/contenteditable.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    let composer = view
+        .elements
+        .iter()
+        .find(|e| e.label == "Post text")
+        .unwrap_or_else(|| {
+            panic!(
+                "contenteditable composer should be extracted; got {} elements: {:?}",
+                view.elements.len(),
+                view.elements
+                    .iter()
+                    .map(|e| (e.kind, &e.label, &e.input_type))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(composer.kind, ElementKind::Input);
+    assert_eq!(composer.input_type.as_deref(), Some("contenteditable"));
+
+    // Regression: plain textarea must still be collected.
+    let fallback = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("fallback"));
+    assert!(
+        fallback.is_some(),
+        "plain textarea must still be extracted after contenteditable support"
+    );
+    let fallback = fallback.unwrap();
+    assert_eq!(fallback.kind, ElementKind::Textarea);
+
+    // The page ships with the "Post" button too.
+    let post_btn = view
+        .elements
+        .iter()
+        .find(|e| e.label == "Post" && e.kind == ElementKind::Button);
+    assert!(post_btn.is_some(), "Post button should be extracted");
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Typing into a contenteditable via `lad_type` must populate the
+/// editor's `innerText`. The JS payload is copied from
+/// `mcp_server::tools::interact::tool_lad_type` so the test exercises
+/// the exact production path.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_type_into_contenteditable() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/contenteditable.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Extract so each element gets a data-lad-id. Pick the composer ID.
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+    let composer = view
+        .elements
+        .iter()
+        .find(|e| e.label == "Post text")
+        .expect("composer must be extracted");
+    let composer_id = composer.id;
+
+    // Production-path JS: locate by data-lad-id, branch on isEditor,
+    // execCommand insertText. Must stay in sync with interact.rs.
+    let text = "hello contenteditable world";
+    let js = format!(
+        r#"(() => {{
+            const el = document.querySelector('[data-lad-id="{id}"]');
+            if (!el) return JSON.stringify({{ error: "not found" }});
+            const isEditor = el.isContentEditable
+                || el.getAttribute('contenteditable') === 'true'
+                || el.getAttribute('contenteditable') === ''
+                || el.getAttribute('role') === 'textbox'
+                || el.getAttribute('aria-multiline') === 'true';
+            el.focus();
+            if (isEditor) {{
+                try {{
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                }} catch (_) {{}}
+                let ok = false;
+                try {{ ok = document.execCommand('insertText', false, '{text}'); }} catch (_) {{ ok = false; }}
+                if (!ok) {{
+                    el.textContent = '{text}';
+                    el.dispatchEvent(new InputEvent('input', {{
+                        bubbles: true, cancelable: true,
+                        data: '{text}', inputType: 'insertText'
+                    }}));
+                }}
+            }}
+            return JSON.stringify({{ ok: true }});
+        }})()"#,
+        id = composer_id,
+        text = text,
+    );
+    page.eval_js(&js).await.unwrap();
+
+    // Small flush so async input events settle.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Assert the composer's innerText equals our payload.
+    let got: String = page
+        .eval_js(r#"document.getElementById('composer').innerText.trim()"#)
+        .await
+        .unwrap()
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(
+        got, text,
+        "contenteditable innerText should match typed payload"
+    );
+
+    // Bonus: the page's input-event spy must have fired at least once.
+    let fires = page
+        .eval_js("window.__composerInput || 0")
+        .await
+        .unwrap()
+        .as_i64()
+        .unwrap_or(0);
+    assert!(
+        fires >= 1,
+        "contenteditable should have received at least one 'input' event, got {fires}"
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Regression: plain <textarea> via lad_type's native-setter path must
+/// still populate its .value.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_type_into_plain_textarea_regression() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/contenteditable.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+    let textarea = view
+        .elements
+        .iter()
+        .find(|e| e.name.as_deref() == Some("fallback"))
+        .expect("fallback textarea must be extracted");
+    let id = textarea.id;
+    let text = "plain textarea payload";
+
+    let js = format!(
+        r#"(() => {{
+            const el = document.querySelector('[data-lad-id="{id}"]');
+            if (!el) return JSON.stringify({{ error: "not found" }});
+            const isEditor = el.isContentEditable
+                || el.getAttribute('contenteditable') === 'true'
+                || el.getAttribute('contenteditable') === ''
+                || el.getAttribute('role') === 'textbox'
+                || el.getAttribute('aria-multiline') === 'true';
+            el.focus();
+            if (!isEditor) {{
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+                    'value'
+                )?.set;
+                if (nativeSetter) {{ nativeSetter.call(el, '{text}'); }}
+                else {{ el.value = '{text}'; }}
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+            return JSON.stringify({{ ok: true }});
+        }})()"#
+    );
+    page.eval_js(&js).await.unwrap();
+
+    let got: String = page
+        .eval_js(r#"document.getElementById('fallback-area').value"#)
+        .await
+        .unwrap()
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(got, text, "plain textarea .value should match payload");
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+// ── DX-CL2 (bug 2): SPA shell cloaking false-positive ────────────────
+
+/// Regression test: a React/Next.js SPA shell with zero interactive
+/// elements in the initial HTML and heavy hero copy must NOT be
+/// classified as "possible CSS cloaking". The fixture ships with a
+/// hydration script that injects a composer after 800ms, so after the
+/// 1500ms retry the extraction sees interactive elements.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_spa_shell_not_classified_as_cloaking() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/spa-shell.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    // Do NOT sleep here — extract_semantic_view is supposed to retry
+    // internally when it sees a SPA shell with zero elements.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    // After the internal retry the composer should be visible.
+    assert!(
+        !view.elements.is_empty(),
+        "SPA shell retry should have picked up hydrated elements, got {}",
+        view.elements.len()
+    );
+    assert_eq!(
+        view.state,
+        PageState::Ready,
+        "SPA shell must not be blocked as cloaking — blocked_reason = {:?}",
+        view.blocked_reason
+    );
+    assert!(
+        view.blocked_reason.is_none(),
+        "no blocked_reason expected, got {:?}",
+        view.blocked_reason
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
 }
