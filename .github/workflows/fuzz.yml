@@ -11,7 +11,7 @@ env:
 jobs:
   fuzz:
     name: Fuzz
-    runs-on: ubuntu-latest
+    runs-on: llm-as-dom-runners
     steps:
       - uses: actions/checkout@v4
 
