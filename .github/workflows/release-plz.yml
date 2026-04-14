@@ -9,6 +9,11 @@ on:
     branches:
       - main
 
+# release-plz manages state; if two run at once they race on PRs and tags.
+concurrency:
+  group: release-plz
+  cancel-in-progress: false
+
 jobs:
   release-plz:
     name: Release-plz
