@@ -11,11 +11,11 @@ jobs:
     name: Run Benchmarks
     runs-on: llm-as-dom-runners
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: bencherdev/bencher@main
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+
+      - uses: bencherdev/bencher@f027b2a20a3a56d4e525a7e7bdd742f4d02c6a82 # main
 
       - name: Run benchmarks with bencher
         run: >
