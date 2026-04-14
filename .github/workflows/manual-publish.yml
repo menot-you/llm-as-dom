@@ -5,7 +5,7 @@ jobs:
     name: Publish NPM and PyPI
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # required for PyPI trusted publishing
+      id-token: write
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -13,11 +13,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
         with:
-          node-version: 20
+          node-version: 24
           registry-url: 'https://registry.npmjs.org'
-
-      - name: Publish NPM Package (Skipped)
-        run: echo "Already published v0.12.0"
 
       - name: Setup Python
         uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f
@@ -36,7 +33,6 @@ jobs:
 [tool.hatch.build.targets.wheel]
 packages = ["menot_you_mcp_lad"]
 INNER_EOF
-          sed -i "s/^name = .*/name = \"llm-as-dom\"/" pyproject.toml
           rm -rf dist/
           python -m build
 
@@ -48,12 +44,7 @@ INNER_EOF
       - name: Build Python Package (llm-as-dom-mcp)
         working-directory: ./python
         run: |
-          sed -i "s/^name = .*/name = \"llm-as-dom\"/" pyproject.toml
-          cat << 'INNER_EOF' >> pyproject.toml
-
-[tool.hatch.build.targets.wheel]
-packages = ["menot_you_mcp_lad"]
-INNER_EOF
+          git restore pyproject.toml
           sed -i "s/^name = .*/name = \"llm-as-dom-mcp\"/" pyproject.toml
           cat << 'INNER_EOF' >> pyproject.toml
 
