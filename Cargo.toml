@@ -68,7 +68,7 @@ pbkdf2 = { version = "0.12", features = ["hmac"] }
 sha1 = { version = "0.10", default-features = false }
 
 # URL parsing (SSRF protection in sanitize module)
-url = "2"
+url = "2.5.8"
 
 # Regex (case-insensitive injection pattern matching, FIX-6)
 regex = "1"
@@ -97,7 +97,6 @@ http = "1"
 # Misc
 async-trait = "0.1"
 thiserror = "2"
-url = "2.5.8"
 
 # Wave 1: jq engine for the `lad_jq` MCP tool.
 # jaq is a pure-Rust jq interpreter split into several small crates; we need
@@ -106,6 +105,7 @@ url = "2.5.8"
 jaq-core = "3.0"
 jaq-std = "3.0"
 jaq-json = { version = "2.0", features = ["serde"] }
+sentry = { version = "0.47.0", default-features = false, features = ["panic", "tracing", "reqwest", "rustls", "anyhow", "backtrace", "contexts"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

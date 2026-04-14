@@ -72,14 +72,34 @@ struct Cli {
     engine: String,
 }
 
+// Sentry MUST be initialised before ANY other setup so that panics raised
+// during runtime bootstrap (tokio, tracing subscriber, CLI parsing) are
+// reported. If SENTRY_DSN is unset or empty the guard is a no-op and the
+// binary behaves exactly as before.
+//
+// Post-incident hardening: added 2026-04-03 after an npm auth token leaked
+// via a Playwright DOM snapshot. Runtime error tracking is now mandatory
+// so future production issues are surfaced before they become incidents.
+//
+// Ops env-var contract:
+//   SENTRY_DSN          — enables reporting when set to a non-empty string
+//   SENTRY_ENVIRONMENT  — deployment tag (defaults to "production")
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    let _sentry_guard = init_sentry();
+
+    // Layer the fmt subscriber with Sentry's tracing bridge so `tracing`
+    // error events propagate to Sentry. Layering (not replacing) preserves
+    // the existing stderr output format used by ops.
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::registry()
+        .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "llm_as_dom=info".into()),
         )
-        .compact()
+        .with(tracing_subscriber::fmt::layer().compact())
+        .with(sentry::integrations::tracing::layer())
         .init();
 
     let cli = Cli::parse();
@@ -203,6 +223,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     engine.close().await?;
 
     Ok(())
+}
+
+/// Initialise Sentry if `SENTRY_DSN` is set and non-empty.
+///
+/// Returns `Some(ClientInitGuard)` when active (must be held until `main`
+/// exits so the Drop impl flushes queued events) or `None` when the env
+/// var is absent/empty — the entire SDK is a no-op in that case.
+fn init_sentry() -> Option<sentry::ClientInitGuard> {
+    let dsn = std::env::var("SENTRY_DSN").ok().filter(|s| !s.is_empty())?;
+    let environment = std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into());
+    Some(sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            environment: Some(environment.into()),
+            attach_stacktrace: true,
+            ..Default::default()
+        },
+    )))
 }
 
 #[cfg(test)]
