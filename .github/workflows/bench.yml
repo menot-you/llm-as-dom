@@ -6,12 +6,26 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Copied to env so the job-level `if:` can read secret presence (GitHub
+  # forbids `secrets.*` in `if:` directly; env bridge is the idiomatic workaround).
+  BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+
 jobs:
   benchmark:
     name: Run Benchmarks
     runs-on: llm-as-dom-runners
+    # Skip entirely when BENCHER_API_TOKEN is not configured — prevents hard
+    # failure on forks/setup-pending repos while keeping the check active
+    # once the secret is set.
+    if: ${{ env.BENCHER_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install build toolchain (gcc, pkg-config)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
 
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
@@ -21,7 +35,7 @@ jobs:
         run: >
           bencher run
           --project llm-as-dom
-          --token '${{ secrets.BENCHER_API_TOKEN }}'
+          --token "$BENCHER_API_TOKEN"
           --branch '${{ github.ref_name }}'
           --adapter rust_criterion
           --err
