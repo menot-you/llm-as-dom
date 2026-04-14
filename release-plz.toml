@@ -1,11 +1,11 @@
 [workspace]
-changelog_config = "release-plz.toml"
 
 [changelog]
-include = [
-    "feat",
-    "fix",
-    "refactor",
-    "perf",
-    "docs"
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactoring" },
+    { message = ".*", skip = true }
 ]
