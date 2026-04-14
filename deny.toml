@@ -12,8 +12,6 @@ allow = [
 ]
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
 
 [sources]
 unknown-registry = "deny"
