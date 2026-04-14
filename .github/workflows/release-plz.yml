@@ -45,6 +45,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
+      - name: Publish PyPI Aliases
+        if: steps.release-plz.outputs.releases_created == 'true'
+        run: |
+          pip install build twine
+          python -m build python/llm_as_dom
+          twine upload --non-interactive -u __token__ -p ${{ secrets.PYPI_TOKEN }} python/llm_as_dom/dist/*
+          python -m build python/llm_as_dom_mcp_pkg
+          twine upload --non-interactive -u __token__ -p ${{ secrets.PYPI_TOKEN }} python/llm_as_dom_mcp_pkg/dist/*
+
       - id: release-plz
         name: Run release-plz
         uses: MarcoIeni/release-plz-action@ef08e716ba77de37dd17b19d72ed171a2e1b63ab # v0.5
