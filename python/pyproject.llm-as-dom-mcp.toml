@@ -22,7 +22,7 @@ Homepage = "https://github.com/menot-you/llm-as-dom"
 Repository = "https://github.com/menot-you/llm-as-dom"
 
 [project.scripts]
-mcp-lad = "llm_as_dom_mcp:main"
+mcp-lad = "menot_you_mcp_lad:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["llm_as_dom_mcp"]
+packages = ["menot_you_mcp_lad"]

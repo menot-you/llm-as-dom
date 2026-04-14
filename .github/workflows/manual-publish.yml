@@ -16,10 +16,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Publish NPM Package @menot-you/mcp-lad (Skipped)
-        run: echo "@menot-you/mcp-lad 0.12.0 is already published."
+        run: echo "NPM @menot-you/mcp-lad 0.12.0 is already online."
 
       - name: Publish NPM Package llm-as-dom (Skipped)
-        run: echo "llm-as-dom 0.12.0 is already published."
+        run: echo "NPM llm-as-dom 0.12.0 is already online."
 
       - name: Set up Python
         uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f
