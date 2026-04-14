@@ -33,7 +33,7 @@ jobs:
         working-directory: ./python
         run: |
           VERSION="0.12.0"
-          python update_pyproject.py pyproject.toml "llm-as-dom" "$VERSION"
+          python update_pyproject.py pyproject.toml "llm-as-dom" "$VERSION" "llm_as_dom_mcp" # Package source dir
           rm -rf dist/
           python -m build
 
@@ -46,7 +46,7 @@ jobs:
         working-directory: ./python
         run: |
           VERSION="0.12.0"
-          python update_pyproject.py pyproject.toml "llm-as-dom-mcp" "$VERSION"
+          python update_pyproject.py pyproject.toml "llm-as-dom-mcp" "$VERSION" "llm_as_dom_mcp" # Package source dir
           rm -rf dist/
           python -m build
 
