@@ -26,22 +26,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python build tools and toml-cli
-        run: pip install build twine hatchling toml-cli
+      - name: Install Python build tools and toml
+        run: pip install build twine hatchling toml
 
       - name: Build & Publish PyPI Package llm-as-dom
         working-directory: ./python
         run: |
           VERSION="0.12.0"
-          git restore pyproject.toml || true
-
-          # Update project name and version using toml set
-          toml set pyproject.toml project.name "llm-as-dom"
-          toml set pyproject.toml project.version "$VERSION"
-
-          # Set hatchling wheel config using toml set (creates section if not present)
-          toml set pyproject.toml tool.hatch.build.targets.wheel.packages '["menot_you_mcp_lad"]'
-
+          python update_pyproject.py pyproject.toml "llm-as-dom" "$VERSION"
           rm -rf dist/
           python -m build
 
@@ -54,15 +46,7 @@ jobs:
         working-directory: ./python
         run: |
           VERSION="0.12.0"
-          git restore pyproject.toml || true
-
-          # Update project name and version using toml set
-          toml set pyproject.toml project.name "llm-as-dom-mcp"
-          toml set pyproject.toml project.version "$VERSION"
-
-          # Set hatchling wheel config using toml set (creates section if not present)
-          toml set pyproject.toml tool.hatch.build.targets.wheel.packages '["menot_you_mcp_lad"]'
-
+          python update_pyproject.py pyproject.toml "llm-as-dom-mcp" "$VERSION"
           rm -rf dist/
           python -m build
 
