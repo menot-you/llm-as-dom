@@ -34,7 +34,7 @@ jobs:
         run: |
           cp pyproject.llm-as-dom.toml pyproject.toml
           rm -rf dist/
-          python -m build
+          python -m build .
 
       - name: Publish PyPI Package (llm-as-dom)
         uses: pypa/gh-action-pypi-publish@8a08d616893759ef8e1aa1f2785787c0b97e20d6
@@ -46,7 +46,7 @@ jobs:
         run: |
           cp pyproject.llm-as-dom-mcp.toml pyproject.toml
           rm -rf dist/
-          python -m build
+          python -m build .
 
       - name: Publish PyPI Package (llm-as-dom-mcp)
         uses: pypa/gh-action-pypi-publish@8a08d616893759ef8e1aa1f2785787c0b97e20d6
