@@ -18,13 +18,17 @@ jobs:
     runs-on: llm-as-dom-runners
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: EmbarkStudios/cargo-deny-action@5bb39ff5d5a0e94dc9e2dc94eced0c6129743a57 # v2
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+      - uses: taiki-e/install-action@095d17ff8e68bec1be4a23180d476e78015114e4 # cargo-deny
+      - name: cargo deny check
+        run: cargo deny check
 
   audit:
     name: cargo audit
     runs-on: llm-as-dom-runners
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -34,6 +38,10 @@ jobs:
     runs-on: llm-as-dom-runners
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install build toolchain (gcc, pkg-config)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@2d5b196a2dc9984a136f1a2a41e1a33631d7c261 # cargo-llvm-cov
@@ -50,9 +58,15 @@ jobs:
     runs-on: llm-as-dom-runners
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install build toolchain (gcc, pkg-config)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
-          toolchain: nightly-2025-01-01
+          # Bumped from nightly-2025-01-01 (rustc 1.85) — current deps
+          # (sentry 0.47, image 0.25, time 0.3.47, zip 8.5) require 1.88+.
+          toolchain: nightly-2025-08-01
       - name: cargo check
         run: cargo check --all-targets --all-features
 
@@ -62,6 +76,11 @@ jobs:
     runs-on: llm-as-dom-runners
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install build toolchain (gcc, pkg-config)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
 
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
@@ -85,6 +104,11 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install build toolchain (gcc, pkg-config)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
 
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 

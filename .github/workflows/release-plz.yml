@@ -19,6 +19,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install build toolchain (gcc, pkg-config)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+
+      - name: Install gh CLI (required by release-plz/git-config)
+        run: |
+          set -euo pipefail
+          GH_VERSION="2.64.0"
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local "gh_${GH_VERSION}_linux_amd64/bin/gh"
+          gh --version
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
