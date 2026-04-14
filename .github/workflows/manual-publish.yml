@@ -1,5 +1,7 @@
 name: Manual Publish Ecosystems
 on: workflow_dispatch
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
   publish-ecosystems:
     name: Publish NPM and PyPI
