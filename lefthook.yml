@@ -15,9 +15,34 @@ pre-commit:
       run: cargo clippy --all-targets -- -D warnings
       fail_text: "Clippy warnings found. Fix all warnings before committing."
 
+    # SEC-001: block secret-prone paths from ever being staged
+    # Incident 2026-04-03: .playwright-mcp/ captured npm token in DOM snapshot
+    blocked-paths:
+      run: |
+        blocked=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^\.playwright-mcp/|(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.p12$|\.pfx$|_rsa$|_dsa$|_ed25519$|\.keystore$|\.jks$' | grep -vE '\.env\.(example|sample)$' || true)
+        if [ -n "$blocked" ]; then
+          echo "ERROR: Staged files match blocked-path policy (secrets/artifacts)"
+          echo "$blocked"
+          echo ""
+          echo "These paths are in .gitignore — if one slipped through, unstage:"
+          echo "  git restore --staged <file> && git rm --cached <file>"
+          exit 1
+        fi
+      fail_text: "Blocked-path policy hit. See output above."
+
+    # SEC-002: scan staged content for secret patterns (gitleaks v8, --staged mode)
+    gitleaks-staged:
+      run: gitleaks protect --staged --redact --config .gitleaks.toml --no-banner
+      fail_text: "gitleaks found secrets in staged diff. Remove them before committing."
+
 pre-push:
   parallel: false
   commands:
+    # SEC-003: deep scan of commits being pushed (catches secrets in older commits)
+    gitleaks-detect:
+      run: gitleaks detect --redact --config .gitleaks.toml --no-banner --log-level=warn
+      fail_text: "gitleaks found secrets in repo history. Do not push."
+
     act-ci:
       run: act push -W .github/workflows/ci.yml
       fail_text: "Local CI simulation failed via ACT. Please fix before pushing."
