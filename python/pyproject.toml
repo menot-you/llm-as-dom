@@ -23,3 +23,6 @@ Repository = "https://github.com/menot-you/llm-as-dom"
 
 [project.scripts]
 mcp-lad = "menot_you_mcp_lad:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["menot_you_mcp_lad"]
