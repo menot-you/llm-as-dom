@@ -8,10 +8,10 @@ jobs:
       id-token: write # required for PyPI trusted publishing
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
@@ -23,7 +23,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f
         with:
           python-version: "3.11"
 
@@ -35,6 +35,6 @@ jobs:
         run: python -m build
 
       - name: Publish PyPI Package
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@15c56dba361d8335944d31a2ecd17d700fd7ecd2
         with:
           packages-dir: python/dist/
