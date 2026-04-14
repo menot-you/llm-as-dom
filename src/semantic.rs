@@ -600,36 +600,3 @@ mod tests {
         assert_eq!(view.elements.len(), 5);
     }
 }
-
-/// Build a compact session context string for LLM prompt injection.
-///
-/// Includes recent navigation history (last 3 pages) and auth state.
-pub fn format_session_context(session: &crate::session::SessionState) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::new();
-
-    if !session.navigation_history.is_empty() {
-        out.push_str("SESSION CONTEXT:\n");
-        for entry in session.navigation_history.iter().rev().take(3) {
-            let _ = writeln!(out, "  - visited: {} ({})", entry.url, entry.title);
-            for action in &entry.actions_taken {
-                let _ = writeln!(out, "    action: {}", action);
-            }
-        }
-    }
-
-    match session.auth_state {
-        crate::session::AuthState::InProgress => out.push_str("AUTH: in progress\n"),
-        crate::session::AuthState::Authenticated => {
-            out.push_str("AUTH: authenticated\n");
-        }
-        crate::session::AuthState::Failed => out.push_str("AUTH: failed\n"),
-        _ => {}
-    }
-
-    if session.has_auth_cookies() {
-        out.push_str("AUTH COOKIES: present\n");
-    }
-
-    out
-}
