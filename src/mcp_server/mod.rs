@@ -1055,7 +1055,6 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
     )))
 }
 
-
 // Sentry MUST be initialised before ANY other setup so that panics raised
 // during runtime bootstrap (tokio, tracing subscriber, rmcp handshake) are
 // reported. If SENTRY_DSN is unset or empty the guard is a no-op and the
