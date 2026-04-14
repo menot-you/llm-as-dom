@@ -14,13 +14,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python build tools and toml-cli
-        run: pip install build twine hatchling toml-cli
+      - name: Install Python build tools
+        run: pip install build twine hatchling
 
       - name: Build & Publish PyPI Package llm-as-dom
         working-directory: ./python
         run: |
-          toml set pyproject.toml project.name "llm-as-dom"
+          sed -i 's/^name = .*/name = "llm-as-dom"/' pyproject.toml
           rm -rf dist/
           python -m build .
 
@@ -32,7 +32,7 @@ jobs:
       - name: Build & Publish PyPI Package llm-as-dom-mcp
         working-directory: ./python
         run: |
-          toml set pyproject.toml project.name "llm-as-dom-mcp"
+          sed -i 's/^name = .*/name = "llm-as-dom-mcp"/' pyproject.toml
           rm -rf dist/
           python -m build .
 
