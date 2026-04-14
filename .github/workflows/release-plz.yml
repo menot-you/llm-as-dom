@@ -13,6 +13,9 @@ jobs:
   release-plz:
     name: Release-plz
     runs-on: llm-as-dom-runners
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      version: ${{ steps.parse_version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -35,8 +38,79 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
-      - name: Run release-plz
+      - id: release-plz
+        name: Run release-plz
         uses: MarcoIeni/release-plz-action@ef08e716ba77de37dd17b19d72ed171a2e1b63ab # v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - id: parse_version
+        name: Extract published version from cargo
+        if: steps.release-plz.outputs.releases_created == 'true'
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | awk -F '"' '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  publish-ecosystems:
+    name: Publish NPM and PyPI
+    needs: release-plz
+    if: needs.release-plz.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for PyPI trusted publishing
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update versions in files
+        run: |
+          VERSION="${{ needs.release-plz.outputs.version }}"
+          echo "$VERSION" > VERSION
+          
+          # Bump npm
+          cd npm
+          node -e "
+            const p = require('./package.json');
+            p.version = '$VERSION';
+            require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+          cd ..
+          
+          # Bump Python
+          sed -i "s/^version = .*/version = \"$VERSION\"/" python/pyproject.toml
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION npm/package.json python/pyproject.toml
+          git commit -m "chore: sync ecosystems versions to v$VERSION [skip ci]"
+          git push origin main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish NPM Package
+        working-directory: ./npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python build tools
+        run: pip install build twine hatchling
+
+      - name: Build Python Package
+        working-directory: ./python
+        run: python -m build
+
+      - name: Publish PyPI Package
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist/
