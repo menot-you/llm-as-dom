@@ -36,15 +36,11 @@ jobs:
           git restore pyproject.toml || true
 
           # Update project name and version using toml set
-          toml set pyproject.toml project.name \"llm-as-dom\"
-          toml set pyproject.toml project.version \"$VERSION\"
+          toml set pyproject.toml project.name "llm-as-dom"
+          toml set pyproject.toml project.version "$VERSION"
 
-          # Add/Update hatchling wheel config using toml append if not present
-          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
-            toml append pyproject.toml '[tool.hatch.build.targets.wheel]' packages '["menot_you_mcp_lad"]'
-          else
-            toml set pyproject.toml 'tool.hatch.build.targets.wheel.packages' '["menot_you_mcp_lad"]'
-          fi
+          # Set hatchling wheel config using toml set (creates section if not present)
+          toml set pyproject.toml tool.hatch.build.targets.wheel.packages '["menot_you_mcp_lad"]'
 
           rm -rf dist/
           python -m build
@@ -61,15 +57,11 @@ jobs:
           git restore pyproject.toml || true
 
           # Update project name and version using toml set
-          toml set pyproject.toml project.name \"llm-as-dom-mcp\"
-          toml set pyproject.toml project.version \"$VERSION\"
+          toml set pyproject.toml project.name "llm-as-dom-mcp"
+          toml set pyproject.toml project.version "$VERSION"
 
-          # Add/Update hatchling wheel config using toml append if not present
-          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
-            toml append pyproject.toml '[tool.hatch.build.targets.wheel]' packages '["menot_you_mcp_lad"]'
-          else
-            toml set pyproject.toml 'tool.hatch.build.targets.wheel.packages' '["menot_you_mcp_lad"]'
-          fi
+          # Set hatchling wheel config using toml set (creates section if not present)
+          toml set pyproject.toml tool.hatch.build.targets.wheel.packages '["menot_you_mcp_lad"]'
 
           rm -rf dist/
           python -m build
