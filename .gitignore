@@ -2,3 +2,22 @@
 .mcp.json
 .DS_Store
 webkit-bridge/.build/
+
+# Browser automation artifacts — DOM snapshots can capture auth tokens (npm, oauth, cookies)
+# Incident 2026-04-03: page-*.yml snapshotted npm token page → leaked to GitHub
+.playwright-mcp/
+
+# Secrets (defensive)
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Dependencies / build output (should never be committed)
+node_modules/
+website/dist/
+
+# IDE / local session state
+.idea/
+.nott/
+
