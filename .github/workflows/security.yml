@@ -1,0 +1,56 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC — catches historical regressions
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Scan repository
+        run: gitleaks detect --redact --config .gitleaks.toml --verbose --exit-code 1
+
+  blocked-paths:
+    name: blocked-paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce path blocklist across full history
+        run: |
+          set -euo pipefail
+          hits=$(git log --all --name-only --pretty=format: 2>/dev/null \
+            | sort -u \
+            | grep -E '^\.playwright-mcp/|(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.p12$|\.pfx$|_rsa$|_dsa$|_ed25519$|\.keystore$|\.jks$' \
+            | grep -vE '\.env\.(example|sample)$' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Blocked paths found in history:"
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "No blocked paths in history."

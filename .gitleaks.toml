@@ -1,0 +1,63 @@
+# gitleaks config — llm-as-dom
+# Extends gitleaks v8 default rules (~150 patterns) with repo-specific additions.
+# Docs: https://github.com/gitleaks/gitleaks
+
+title = "llm-as-dom secret scanning"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Custom rules — patterns the default ruleset misses
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "npm-access-token"
+description = "npm granular access token (npm_*) — incident 2026-04-03"
+regex = '''npm_[A-Za-z0-9]{36}'''
+keywords = ["npm_"]
+tags = ["key", "npm"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key (sk-ant-*)"
+regex = '''sk-ant-(api03|admin01)-[A-Za-z0-9_-]{93}'''
+keywords = ["sk-ant-"]
+tags = ["key", "anthropic"]
+
+[[rules]]
+id = "zai-api-key"
+description = "Z.AI API key shape (LAD_LLM_API_KEY / Z_AI_API_KEY value)"
+regex = '''(?i)(?:LAD_LLM_API_KEY|Z_AI_API_KEY)["'\s]*[:=]["'\s]*[A-Za-z0-9_.-]{20,}'''
+keywords = ["LAD_LLM_API_KEY", "Z_AI_API_KEY"]
+tags = ["key", "zai", "llm"]
+
+# ---------------------------------------------------------------------------
+# Allowlist — known false-positive paths and patterns
+# ---------------------------------------------------------------------------
+
+[allowlist]
+description = "Ignore vendor/build artifacts, lockfiles, and third-party test fixtures"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)target/''',
+  '''(^|/)Cargo\.lock$''',
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)yarn\.lock$''',
+  '''(^|/)webkit-bridge/\.build/''',
+  '''(^|/)website/dist/''',
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)\.git/''',
+  # Test fixtures: captured HTML from third-party sites (Twitter, HN, etc.)
+  # Contain feature tokens / analytics blobs that are public values of THOSE sites,
+  # not our secrets. If a real secret leaks into a fixture, sanitize the fixture.
+  '''(^|/)fixtures/pages/''',
+  '''(^|/)fixtures/adversarial/''',
+]
+
+# Stopwords — known-fake test fixtures that look like secrets
+regexes = [
+  '''550e8400-e29b-41d4-a716-446655440000''',
+  '''(?i)example|placeholder|dummy|fixture|mock-token''',
+]
