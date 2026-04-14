@@ -1,8 +1,6 @@
 name: Manual Publish Ecosystems
 on: workflow_dispatch
 jobs:
-  env:
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   publish-ecosystems:
     name: Publish NPM and PyPI
     runs-on: ubuntu-latest
