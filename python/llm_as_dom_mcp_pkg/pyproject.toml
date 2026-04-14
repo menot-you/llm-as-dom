@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "llm-as-dom-mcp"
 version = "0.12.0"
 description = "AI browser pilot — test your app 60x cheaper. MCP server binary wrapper."
-readme = "../../README.md"
+readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.9"
 keywords = ["browser", "automation", "mcp", "ai-agent", "headless", "llm"]
