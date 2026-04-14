@@ -26,7 +26,7 @@ pub fn print_qr_stderr(url: &str) {
     };
 
     let modules = code.to_colors();
-    let width = code.width() as usize;
+    let width = code.width();
 
     // Quiet zone: 2 modules on each side.
     let qz = 2;
