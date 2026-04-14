@@ -6,6 +6,8 @@ jobs:
     permissions:
       id-token: write
       contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
@@ -38,11 +40,11 @@ jobs:
           git restore pyproject.toml || true
 
           # Update project name and version using yq
-          yq -i '.project.name = "llm-as-dom"' pyproject.toml
-          yq -i '.project.version = "'"$VERSION"'"' pyproject.toml
+          yq -i -y '.project.name = "llm-as-dom"' pyproject.toml
+          yq -i -y '.project.version = "'"$VERSION"'"' pyproject.toml
 
           # Add/Update hatchling wheel config using yq
-          yq -i '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
+          yq -i -y '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
 
           rm -rf dist/
           python -m build
@@ -59,11 +61,11 @@ jobs:
           git restore pyproject.toml || true
 
           # Update project name and version using yq
-          yq -i '.project.name = "llm-as-dom-mcp"' pyproject.toml
-          yq -i '.project.version = "'"$VERSION"'"' pyproject.toml
+          yq -i -y '.project.name = "llm-as-dom-mcp"' pyproject.toml
+          yq -i -y '.project.version = "'"$VERSION"'"' pyproject.toml
 
           # Add/Update hatchling wheel config using yq
-          yq -i '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
+          yq -i -y '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
 
           rm -rf dist/
           python -m build
