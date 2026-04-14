@@ -6,8 +6,6 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
@@ -28,10 +26,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python build tools and yq
-        run: |
-          pip install build twine hatchling
-          sudo apt-get update && sudo apt-get install -y yq
+      - name: Install Python build tools and toml-cli
+        run: pip install build twine hatchling toml-cli
 
       - name: Build & Publish PyPI Package llm-as-dom
         working-directory: ./python
@@ -39,12 +35,14 @@ jobs:
           VERSION="0.12.0"
           git restore pyproject.toml || true
 
-          # Update project name and version using yq
-          yq -i -y '.project.name = "llm-as-dom"' pyproject.toml
-          yq -i -y '.project.version = "'"$VERSION"'"' pyproject.toml
+          # Update project name and version using toml set
+          toml set pyproject.toml project.name \"llm-as-dom\"
+          toml set pyproject.toml project.version \"$VERSION\"
 
-          # Add/Update hatchling wheel config using yq
-          yq -i -y '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
+          # Add/Update hatchling wheel config using toml append if not present
+          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
+            toml append pyproject.toml 'tool.hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]'
+          fi
 
           rm -rf dist/
           python -m build
@@ -60,12 +58,14 @@ jobs:
           VERSION="0.12.0"
           git restore pyproject.toml || true
 
-          # Update project name and version using yq
-          yq -i -y '.project.name = "llm-as-dom-mcp"' pyproject.toml
-          yq -i -y '.project.version = "'"$VERSION"'"' pyproject.toml
+          # Update project name and version using toml set
+          toml set pyproject.toml project.name \"llm-as-dom-mcp\"
+          toml set pyproject.toml project.version \"$VERSION\"
 
-          # Add/Update hatchling wheel config using yq
-          yq -i -y '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
+          # Add/Update hatchling wheel config using toml append if not present
+          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
+            toml append pyproject.toml 'tool.hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]'
+          fi
 
           rm -rf dist/
           python -m build
