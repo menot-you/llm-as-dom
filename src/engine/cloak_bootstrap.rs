@@ -45,6 +45,10 @@ const DEFAULT_RELEASE_TAG: &str = "chromium-v145.0.7632.109.2";
 /// SHA-256 digests for each platform tarball at `DEFAULT_RELEASE_TAG`.
 /// Pinned to prevent silent binary substitution by a compromised release
 /// asset. `shasum -a 256 <file>` on disk should match these.
+///
+/// Only referenced under cfg(macos + aarch64); gating keeps Linux CI
+/// from bouncing with `-D dead_code`.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const CLOAK_DARWIN_ARM64_SHA256: &str =
     "505582aa1bd3971c577f70e0cbbe016431702bdb693529abfd943b5bd9120c1c";
 
