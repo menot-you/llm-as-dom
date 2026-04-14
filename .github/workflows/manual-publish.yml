@@ -29,7 +29,6 @@ jobs:
         run: |
           sed -i "s/^name = .*/name = \"llm-as-dom\"/" pyproject.toml
           cat << 'INNER_EOF' >> pyproject.toml
-
 [tool.hatch.build.targets.wheel]
 packages = ["menot_you_mcp_lad"]
 INNER_EOF
@@ -47,7 +46,6 @@ INNER_EOF
           git restore pyproject.toml
           sed -i "s/^name = .*/name = \"llm-as-dom-mcp\"/" pyproject.toml
           cat << 'INNER_EOF' >> pyproject.toml
-
 [tool.hatch.build.targets.wheel]
 packages = ["menot_you_mcp_lad"]
 INNER_EOF
