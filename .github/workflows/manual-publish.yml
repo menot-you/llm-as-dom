@@ -26,20 +26,23 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python build tools
-        run: pip install build twine hatchling
+      - name: Install Python build tools and yq
+        run: |
+          pip install build twine hatchling
+          sudo apt-get update && sudo apt-get install -y yq
 
       - name: Build & Publish PyPI Package llm-as-dom
         working-directory: ./python
         run: |
           VERSION="0.12.0"
           git restore pyproject.toml || true
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          sed -i "s/^name = .*/name = \"llm-as-dom\"/" pyproject.toml
-          
-          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
-            echo -e "\n[tool.hatch.build.targets.wheel]\npackages = [\"menot_you_mcp_lad\"]" >> pyproject.toml
-          fi
+
+          # Update project name and version using yq
+          yq -i '.project.name = "llm-as-dom"' pyproject.toml
+          yq -i '.project.version = "'"$VERSION"'"' pyproject.toml
+
+          # Add/Update hatchling wheel config using yq
+          yq -i '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
 
           rm -rf dist/
           python -m build
@@ -54,12 +57,13 @@ jobs:
         run: |
           VERSION="0.12.0"
           git restore pyproject.toml || true
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          sed -i "s/^name = .*/name = \"llm-as-dom-mcp\"/" pyproject.toml
 
-          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
-            echo -e "\n[tool.hatch.build.targets.wheel]\npackages = [\"menot_you_mcp_lad\"]" >> pyproject.toml
-          fi
+          # Update project name and version using yq
+          yq -i '.project.name = "llm-as-dom-mcp"' pyproject.toml
+          yq -i '.project.version = "'"$VERSION"'"' pyproject.toml
+
+          # Add/Update hatchling wheel config using yq
+          yq -i '."tool".hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]' pyproject.toml
 
           rm -rf dist/
           python -m build
