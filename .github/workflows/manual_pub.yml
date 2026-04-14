@@ -1,7 +1,94 @@
 name: Manual Publish Ecosystems
 on: workflow_dispatch
 jobs:
-  hello_world:
+  publish_ecosystems:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - run: echo "Hello, world!"
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
+        with:
+          node-version: 20 # Use Node.js 20, as setup-node@v4 supports it.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish NPM Package @menot-you/mcp-lad
+        working-directory: ./npm
+        run: |
+          VERSION="0.12.0"
+          git restore package.json || true # Ensure clean state
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          sed -i "s/\"name\": \".*\"/\"name\": \"@menot-you\/mcp-lad\"/" package.json
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish NPM Package llm-as-dom
+        working-directory: ./npm
+        run: |
+          VERSION="0.12.0"
+          git restore package.json || true # Ensure clean state
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          sed -i "s/\"name\": \".*\"/\"name\": \"llm-as-dom\"/" package.json
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f
+        with:
+          python-version: "3.11"
+
+      - name: Install Python build tools
+        run: pip install build twine hatchling
+
+      - name: Publish PyPI Package llm-as-dom
+        working-directory: ./python
+        run: |
+          VERSION="0.12.0"
+          git restore pyproject.toml || true # Ensure clean state
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          sed -i "s/^name = .*/name = \"llm-as-dom\"/" pyproject.toml
+          
+          # Add the packages definition for hatchling if it's not there
+          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
+            echo -e "\n[tool.hatch.build.targets.wheel]\npackages = [\"menot_you_mcp_lad\"]" >> pyproject.toml
+          fi
+
+          rm -rf dist/
+          python -m build
+        env:
+          # This is required for pypa/gh-action-pypi-publish to pick up the OIDC token
+          # and for the PyPI project to be associated with the GitHub repo/workflow
+          PYTHON_PUBLISH_ACCESS_TOKEN: ${{ secrets.PYPI_API_TOKEN }} # Placeholder, action uses OIDC
+      - name: Publish PyPI Package (llm-as-dom)
+        uses: pypa/gh-action-pypi-publish@8a08d616893759ef8e1aa1f2785787c0b97e20d6
+        with:
+          packages-dir: python/dist/
+          
+      - name: Publish PyPI Package llm-as-dom-mcp
+        working-directory: ./python
+        run: |
+          VERSION="0.12.0"
+          git restore pyproject.toml || true # Ensure clean state
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          sed -i "s/^name = .*/name = \"menot-you-mcp-lad\"/" pyproject.toml
+
+          # Add the packages definition for hatchling if it's not there
+          if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
+            echo -e "\n[tool.hatch.build.targets.wheel]\npackages = [\"menot_you_mcp_lad\"]" >> pyproject.toml
+          fi
+
+          rm -rf dist/
+          python -m build
+        env:
+          PYTHON_PUBLISH_ACCESS_TOKEN: ${{ secrets.PYPI_API_TOKEN }} # Placeholder, action uses OIDC
+      - name: Publish PyPI Package (llm-as-dom-mcp)
+        uses: pypa/gh-action-pypi-publish@8a08d616893759ef8e1aa1f2785787c0b97e20d6
+        with:
+          packages-dir: python/dist/
