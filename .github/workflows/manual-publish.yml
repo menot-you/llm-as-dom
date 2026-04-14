@@ -41,7 +41,9 @@ jobs:
 
           # Add/Update hatchling wheel config using toml append if not present
           if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
-            toml append pyproject.toml 'tool.hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]'
+            toml append pyproject.toml '[tool.hatch.build.targets.wheel]' packages '["menot_you_mcp_lad"]'
+          else
+            toml set pyproject.toml 'tool.hatch.build.targets.wheel.packages' '["menot_you_mcp_lad"]'
           fi
 
           rm -rf dist/
@@ -64,7 +66,9 @@ jobs:
 
           # Add/Update hatchling wheel config using toml append if not present
           if ! grep -q "^\[tool\.hatch\.build\.targets\.wheel\]" pyproject.toml; then
-            toml append pyproject.toml 'tool.hatch.build.targets.wheel.packages = ["menot_you_mcp_lad"]'
+            toml append pyproject.toml '[tool.hatch.build.targets.wheel]' packages '["menot_you_mcp_lad"]'
+          else
+            toml set pyproject.toml 'tool.hatch.build.targets.wheel.packages' '["menot_you_mcp_lad"]'
           fi
 
           rm -rf dist/
