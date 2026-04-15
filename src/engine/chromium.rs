@@ -121,27 +121,13 @@ impl ChromiumEngine {
 
         // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
         // --no-sandbox is a significant security reduction; only enable when necessary.
-        //
-        // Extra flags for hardened container hosts (e.g. Talos k3s nodes with SELinux
-        // and/or LSM-level restrictions on namespace creation):
-        //   --disable-setuid-sandbox: skip the SUID helper (not present in runner image)
-        //   --no-zygote:              skip the zygote forking process
-        //   --single-process:         run browser+renderer in one process — eliminates
-        //                             every subprocess that would try to unshare() into
-        //                             a new PID/network/user namespace. Without this,
-        //                             Chromium dies at zygote_host_impl_linux.cc:207 with
-        //                             "Failed to move to new namespace: Operation not
-        //                             permitted" even when --no-zygote is passed.
-        //   --disable-dev-shm-usage:  k8s caps /dev/shm at 64MB, avoid SIGBUS on larger
-        //                             shared memory allocations.
+        // --disable-setuid-sandbox complements it: skip the SUID helper lookup when the
+        // helper binary is not installed in the runtime image (the common container case).
         if should_disable_sandbox() {
             builder = builder
                 .arg("--no-sandbox")
-                .arg("--disable-setuid-sandbox")
-                .arg("--no-zygote")
-                .arg("--single-process")
-                .arg("--disable-dev-shm-usage");
-            tracing::info!("chromium sandbox/zygote disabled (container or LAD_NO_SANDBOX=true)");
+                .arg("--disable-setuid-sandbox");
+            tracing::info!("chromium sandbox disabled (container or LAD_NO_SANDBOX=true)");
         }
 
         let browser_config = builder.build().map_err(crate::Error::Browser)?;

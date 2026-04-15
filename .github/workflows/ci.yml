@@ -6,6 +6,14 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  # Browser-dependent jobs (fixture-tests, integration) are gated on these two
+  # events because Chromium cannot initialize inside our Talos k3s pods — the
+  # node's LSM/SELinux hardening blocks unshare() for PID namespaces regardless
+  # of --no-sandbox/--no-zygote/--single-process flags. Run them manually on
+  # demand or on the nightly schedule when pre-release validation matters.
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *' # nightly 5am UTC
 
 # Keep at most one active run per ref. Rapid-fire pushes cancel older
 # runs instead of piling up and starving the 3-slot self-hosted pool.
@@ -152,6 +160,8 @@ jobs:
     name: fixture tests (chrome + local server)
     runs-on: llm-as-dom-runners
     needs: build
+    # Skip on push/PR — see workflow-level `on:` comment. Manual + nightly only.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     env:
       # cloakbrowser has no pinned build for ARC runner host — fall back to default Chromium.
       LAD_CLOAK_DISABLE: "1"
@@ -193,6 +203,8 @@ jobs:
     name: integration (chrome)
     runs-on: llm-as-dom-runners
     needs: build
+    # Skip on push/PR — see workflow-level `on:` comment. Manual + nightly only.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     env:
       # cloakbrowser has no pinned build for ARC runner host — fall back to default Chromium.
       LAD_CLOAK_DISABLE: "1"
