@@ -151,6 +151,10 @@ jobs:
     env:
       # cloakbrowser has no pinned build for ARC runner host — fall back to default Chromium.
       LAD_CLOAK_DISABLE: "1"
+      # k3s node has user.max_user_namespaces=0 (see infra-gitops buildkit/b0c1d08);
+      # Chromium's user-ns sandbox can't start. Auto-detect (cgroup match "docker|containerd")
+      # misses cgroup-v2 kubepods paths — force-disable the sandbox explicitly.
+      LAD_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -188,6 +192,10 @@ jobs:
     env:
       # cloakbrowser has no pinned build for ARC runner host — fall back to default Chromium.
       LAD_CLOAK_DISABLE: "1"
+      # k3s node has user.max_user_namespaces=0 (see infra-gitops buildkit/b0c1d08);
+      # Chromium's user-ns sandbox can't start. Auto-detect (cgroup match "docker|containerd")
+      # misses cgroup-v2 kubepods paths — force-disable the sandbox explicitly.
+      LAD_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
