@@ -122,17 +122,25 @@ impl ChromiumEngine {
         // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
         // --no-sandbox is a significant security reduction; only enable when necessary.
         //
-        // Also disable the zygote process (--no-zygote) and the setuid sandbox helper
-        // (--disable-setuid-sandbox): even with --no-sandbox, Chromium's zygote still
-        // tries to create PID/network namespaces on startup, which fails on hosts where
-        // user namespaces are forbidden (e.g. k8s nodes with user.max_user_namespaces=0).
-        // The zygote path surfaces as `zygote_host_impl_linux.cc:207 Check failed` with
-        // "Failed to move to new namespace: Operation not permitted".
+        // Extra flags for hardened container hosts (e.g. Talos k3s nodes with SELinux
+        // and/or LSM-level restrictions on namespace creation):
+        //   --disable-setuid-sandbox: skip the SUID helper (not present in runner image)
+        //   --no-zygote:              skip the zygote forking process
+        //   --single-process:         run browser+renderer in one process — eliminates
+        //                             every subprocess that would try to unshare() into
+        //                             a new PID/network/user namespace. Without this,
+        //                             Chromium dies at zygote_host_impl_linux.cc:207 with
+        //                             "Failed to move to new namespace: Operation not
+        //                             permitted" even when --no-zygote is passed.
+        //   --disable-dev-shm-usage:  k8s caps /dev/shm at 64MB, avoid SIGBUS on larger
+        //                             shared memory allocations.
         if should_disable_sandbox() {
             builder = builder
                 .arg("--no-sandbox")
                 .arg("--disable-setuid-sandbox")
-                .arg("--no-zygote");
+                .arg("--no-zygote")
+                .arg("--single-process")
+                .arg("--disable-dev-shm-usage");
             tracing::info!("chromium sandbox/zygote disabled (container or LAD_NO_SANDBOX=true)");
         }
 
