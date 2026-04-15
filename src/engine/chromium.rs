@@ -124,9 +124,7 @@ impl ChromiumEngine {
         // --disable-setuid-sandbox complements it: skip the SUID helper lookup when the
         // helper binary is not installed in the runtime image (the common container case).
         if should_disable_sandbox() {
-            builder = builder
-                .arg("--no-sandbox")
-                .arg("--disable-setuid-sandbox");
+            builder = builder.arg("--no-sandbox").arg("--disable-setuid-sandbox");
             tracing::info!("chromium sandbox disabled (container or LAD_NO_SANDBOX=true)");
         }
 
