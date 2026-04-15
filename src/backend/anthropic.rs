@@ -20,13 +20,15 @@ pub struct AnthropicBackend {
 impl AnthropicBackend {
     /// Create a new Anthropic-compatible backend.
     ///
-    /// Reads `LAD_LLM_API_KEY` (or deprecated `ANTHROPIC_API_KEY`) from environment
-    /// if `api_key` is empty. Base URL falls back from `LAD_LLM_URL` to
-    /// `ANTHROPIC_BASE_URL` to the default Anthropic endpoint.
+    /// - `api_key`: credential; when empty, falls back to `LAD_LLM_API_KEY`
+    ///   then `ANTHROPIC_API_KEY`.
+    /// - `base_url`: API base URL; when empty, falls back to `LAD_LLM_URL`
+    ///   then `ANTHROPIC_BASE_URL` then the default Anthropic endpoint.
     pub fn new(
         api_key: impl Into<String>,
         model: impl Into<String>,
         max_prompt_length: Option<usize>,
+        base_url: impl Into<String>,
     ) -> Self {
         let max_prompt_length = max_prompt_length.unwrap_or(40000);
         let cred = {
@@ -37,6 +39,16 @@ impl AnthropicBackend {
                     .unwrap_or_default()
             } else {
                 k
+            }
+        };
+        let resolved_base_url = {
+            let u = base_url.into();
+            if u.is_empty() {
+                std::env::var("LAD_LLM_URL")
+                    .or_else(|_| std::env::var("ANTHROPIC_BASE_URL"))
+                    .unwrap_or_else(|_| "https://api.anthropic.com".into())
+            } else {
+                u
             }
         };
         // CHAOS-13: Apply connect + total request timeouts to prevent
@@ -51,9 +63,7 @@ impl AnthropicBackend {
             api_key: cred,
             model: model.into(),
             max_prompt_length,
-            base_url: std::env::var("LAD_LLM_URL")
-                .or_else(|_| std::env::var("ANTHROPIC_BASE_URL"))
-                .unwrap_or_else(|_| "https://api.anthropic.com".into()),
+            base_url: resolved_base_url,
         }
     }
 }

@@ -30,12 +30,14 @@ pub fn create_backend(
             &llm_cred,
             model,
             max_prompt_length,
+            url,
         ))
     } else if lower_url.contains("openai") {
         Box::new(openai::OpenAiBackend::new(
             &llm_cred,
             model,
             max_prompt_length,
+            url,
         ))
     } else if !llm_cred.is_empty() {
         // Has credentials but no URL hint — default to OpenAI-compatible
@@ -43,6 +45,7 @@ pub fn create_backend(
             &llm_cred,
             model,
             max_prompt_length,
+            url,
         ))
     } else {
         // No credentials, no URL match — generic (Ollama-style)

@@ -165,11 +165,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "",
                 &cli.llm_model,
                 None,
+                &cli.llm_url,
             )),
             "openai" => Box::new(backend::openai::OpenAiBackend::new(
                 "",
                 &cli.llm_model,
                 None,
+                &cli.llm_url,
             )),
             "ollama" => Box::new(backend::generic::GenericLlmBackend::new(
                 &cli.llm_url,
