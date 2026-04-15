@@ -121,9 +121,19 @@ impl ChromiumEngine {
 
         // FIX-R3-10: Only disable sandbox when explicitly requested or running in a container.
         // --no-sandbox is a significant security reduction; only enable when necessary.
+        //
+        // Also disable the zygote process (--no-zygote) and the setuid sandbox helper
+        // (--disable-setuid-sandbox): even with --no-sandbox, Chromium's zygote still
+        // tries to create PID/network namespaces on startup, which fails on hosts where
+        // user namespaces are forbidden (e.g. k8s nodes with user.max_user_namespaces=0).
+        // The zygote path surfaces as `zygote_host_impl_linux.cc:207 Check failed` with
+        // "Failed to move to new namespace: Operation not permitted".
         if should_disable_sandbox() {
-            builder = builder.arg("--no-sandbox");
-            tracing::info!("chromium sandbox disabled (container or LAD_NO_SANDBOX=true)");
+            builder = builder
+                .arg("--no-sandbox")
+                .arg("--disable-setuid-sandbox")
+                .arg("--no-zygote");
+            tracing::info!("chromium sandbox/zygote disabled (container or LAD_NO_SANDBOX=true)");
         }
 
         let browser_config = builder.build().map_err(crate::Error::Browser)?;
