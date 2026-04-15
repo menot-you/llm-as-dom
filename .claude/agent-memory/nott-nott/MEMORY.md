@@ -1,6 +1,10 @@
 # Memory Index
 
+## Directive 0 (above all else)
+- [Wisdom-Driven Methodology](feedback_directive_zero_wisdom.md) — every action begins with "is this the wise thing to do?" Pausing is a valid move. Clean > fast. All other rules serve this.
+
 ## Feedback (how to work with @tiago.im)
+- [Senior Engineering Method](feedback_senior_engineering_method.md) — STOP before solving. Requirements → architecture → blast radius → hypotheses → experiments → clean solution. No gambiarra.
 - [Proactivity + Confidence Gating](feedback_proactivity_confidence.md) — trivial = execute, non-trivial = autonomous + confidence, critical = call codex/gemini CLI directly (no @oracle)
 - [Multi-Model Review Pattern](feedback_multi_model_review.md) — adversarial review loop; codex/gemini/opus find different bug classes (53+ real findings in LAD v0.8)
 - [Model Thinking Styles](feedback_model_thinking_styles.md) — each model hunts a different class of bug, use all 3 for complete coverage

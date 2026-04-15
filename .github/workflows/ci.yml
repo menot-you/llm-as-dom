@@ -149,12 +149,14 @@ jobs:
             target/release/lad-relay
 
   # ── Fixture Tests ──────────────────────────────────────────────────
+  # Build-once, test-many: consume the `lad` binary produced by the `build`
+  # job instead of re-compiling inside the Kata microVM. Kata's virtio-net
+  # (via Cloud Hypervisor) has high throughput variance under load (measured
+  # 9x range on the same rustup install vs ~1x under runc). Running cargo
+  # + rustup inside the microVM made CI flaky. Downloading a ~30MB artifact
+  # is a 10s operation with small blast radius if the network hiccups.
   fixture-tests:
     name: fixture tests (chrome + local server)
-    # Kata microVM runners (image: ghcr.io/menot-you/lad-runner). Pod gets
-    # its own kernel so Chromium can create user/PID namespaces that the
-    # Talos host LSM would otherwise deny. Image has build-essential +
-    # google-chrome-stable pre-baked.
     runs-on: llm-as-dom-kata-runners
     needs: build
     env:
@@ -163,12 +165,13 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: binaries-linux-x86_64
+          path: target/release
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-
-      - name: Build release
-        run: cargo build --release --bin lad
+      - name: Restore executable bit
+        run: chmod +x target/release/lad
 
       - name: Run fixture smoke tests
         run: ./fixtures/smoke_test.sh ./target/release/lad
@@ -176,7 +179,6 @@ jobs:
   # ── Integration ────────────────────────────────────────────────────
   integration:
     name: integration (chrome)
-    # Kata microVM runners — see fixture-tests comment above.
     runs-on: llm-as-dom-kata-runners
     needs: build
     env:
@@ -184,12 +186,13 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: binaries-linux-x86_64
+          path: target/release
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-
-      - name: Build release
-        run: cargo build --release --bin lad
+      - name: Restore executable bit
+        run: chmod +x target/release/lad
 
       - name: Smoke test — example.com extraction
         run: |

@@ -62,3 +62,27 @@ type: project
 
 ## How to apply
 Read this before making infra changes to nott-prod. Talos is immutable — extension changes require factory.talos.dev schematic regen + `talosctl upgrade`. Sysctl changes apply live via `talosctl patch mc`. Kata/NVIDIA are declarative via Flux Kustomization.
+
+## Anti-patterns discovered (do NOT repeat)
+
+### Anti-pattern 1 — Rebuilding in a Kata microVM because "it's where the browser runs"
+
+**What I did wrong**: Configured fixture-tests + integration jobs to run `dtolnay/rust-toolchain + cargo build` inside Kata microVMs. Rationale at the time: "they need Chrome, Chrome needs Kata, so the whole job runs on Kata." This made Kata responsible for both the build (long network downloads of rustup toolchain + crates.io) AND the smoke test execution.
+
+**What broke**: Kata's Cloud Hypervisor virtio-net has 9x throughput variance compared to runc on the same node (measured: runc 16-18s, Kata 18-168s on identical rustup install). Long downloads inside the microVM got flaky, runners lost websocket heartbeat to GitHub, jobs hung mid-step.
+
+**What I proposed (wrong fix)**: bake rustup + nightly + components into the runner image alongside Chrome. Faster, hides the problem. But: tight coupling between Rust version and runner image, ~2GB image size, still exposed to long downloads during `cargo fetch` (crates.io), didn't address the root cause (CLH network variance).
+
+**Clean fix (what's in the code now)**: build once in the existing `build` job (runs on runc, fast + stable network), upload artifact, download in fixture-tests + integration (10s for a ~30MB artifact). Kata is now responsible for ONLY what Kata is uniquely good at — executing the Chrome-dependent binary. The build/test separation is the basic CI hygiene pattern "build once, test many."
+
+**Trigger for this mistake**: speed bias. "Fix the immediate flaky step" instead of asking "why is this step running here in the first place?"
+
+**General rule**: Kata is expensive (~150MB RAM overhead per pod, noticeable boot time, flakier network). Use it **only** for the specific capability that requires it — unprivileged namespace creation, unprivileged rootless builds, stronger isolation. Everything else stays on runc.
+
+### Anti-pattern 2 — Chasing retry/recycle loops as "debugging"
+
+**What I did wrong**: Each CI failure → assume the ghost-assignment bug → recycle pod → retry → failure → guess again. Accumulated ~10 retry attempts with no diagnostic data gathered, just hoping.
+
+**Clean method**: Any problem that has cost one failed fix attempt is non-trivial. Stop retrying. Apply the Senior Engineering Method (feedback file in memory). Reproduce the failure in isolation, measure it, form testable hypotheses, pick the clean fix.
+
+**General rule**: If you've guessed and retried twice, you're in firefighting mode. Stop. Diagnose.
