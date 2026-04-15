@@ -59,6 +59,10 @@ jobs:
       - name: Generate code coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
+        # Non-blocking: CODECOV_TOKEN is not set yet. codecov-action@v4 requires the
+        # token (v3 allowed tokenless uploads for public repos). Remove this flag
+        # once the secret is provisioned at the repo/org level.
+        continue-on-error: true
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
