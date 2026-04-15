@@ -148,6 +148,9 @@ jobs:
     name: fixture tests (chrome + local server)
     runs-on: llm-as-dom-runners
     needs: build
+    env:
+      # cloakbrowser has no pinned build for ARC runner host — fall back to default Chromium.
+      LAD_CLOAK_DISABLE: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -155,6 +158,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config
+
+      - name: Install Google Chrome
+        run: |
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          google-chrome-stable --version
 
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
@@ -171,6 +185,9 @@ jobs:
     name: integration (chrome)
     runs-on: llm-as-dom-runners
     needs: build
+    env:
+      # cloakbrowser has no pinned build for ARC runner host — fall back to default Chromium.
+      LAD_CLOAK_DISABLE: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -178,6 +195,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config
+
+      - name: Install Google Chrome
+        run: |
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          google-chrome-stable --version
 
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
