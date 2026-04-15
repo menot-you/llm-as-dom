@@ -75,9 +75,9 @@ jobs:
           sudo apt-get install -y build-essential pkg-config
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
-          # Bumped from nightly-2025-01-01 (rustc 1.85) — current deps
-          # (sentry 0.47, image 0.25, time 0.3.47, zip 8.5) require 1.88+.
-          toolchain: nightly-2025-08-01
+          # Bumped from nightly-2025-08-01 (rustc 1.88) — src/mcp_server/tools/browse.rs
+          # uses ceil_char_boundary (feature round_char_boundary), stabilized in 1.93.
+          toolchain: nightly-2025-12-01
       - name: cargo check
         run: cargo check --all-targets --all-features
 
