@@ -1,11 +1,68 @@
 [workspace]
+# Write a single top-level CHANGELOG.md (Keep-a-Changelog format).
+changelog_path = "CHANGELOG.md"
+
+# GitHub Release: create a draft-free, prod-tagged release per version.
+# Binary artifacts are attached by `.github/workflows/release-binaries.yml`
+# (triggered on `release: created`).
+git_release_enable = true
+git_release_draft = false
+git_release_type = "prod"
+
+# PR hygiene for release PRs.
+pr_name = "chore(release): prepare v{{ version }}"
+pr_labels = ["release", "automated"]
+pr_draft = false
+
+# Safety: never release with dirty tree or missing CI.
+allow_dirty = false
+publish_allow_dirty = false
+
+# Dependency updates sit in their own PR (keeps release PR focused).
+dependencies_update = false
 
 [changelog]
+protect_breaking_commits = true
+sort_commits = "newest"
+
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+
+body = """
+## [{{ version | trim_start_matches(pat=\"v\") }}]\
+    {%- if release_link %}({{ release_link }}){%- endif %} \
+    - {{ timestamp | date(format=\"%Y-%m-%d\") }}
+{% for group, commits in commits | group_by(attribute=\"group\") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+{% if commit.breaking %}[**breaking**] {% endif %}\
+{{ commit.message | upper_first }}\
+{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}){% endfor %}){% endif %}
+{% endfor %}
+{% endfor %}
+"""
+
 commit_parsers = [
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
-    { message = "^docs", group = "Documentation" },
+    { message = "^sec", group = "Security" },
     { message = "^perf", group = "Performance" },
     { message = "^refactor", group = "Refactoring" },
-    { message = ".*", skip = true }
+    { message = "^docs", group = "Documentation" },
+    { message = "^chore\\(deps\\)", group = "Dependencies" },
+    { message = "^build", group = "Build" },
+    { message = ".*[bB]reaking [cC]hange", group = "Breaking Changes" },
+    { message = "^revert", group = "Reverts" },
+    { message = "^ci", skip = true },
+    { message = "^test", skip = true },
+    { message = "^style", skip = true },
+    { message = "^chore", skip = true },
+    { message = ".*", skip = true },
 ]

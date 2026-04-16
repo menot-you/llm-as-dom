@@ -245,8 +245,8 @@ jobs:
             target: aarch64-apple-darwin
             artifact: macos-arm64
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
+    # actions/upload-artifact does not need contents:write — the default
+    # read permission (set at the workflow level by repo policy) is enough.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
