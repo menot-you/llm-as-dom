@@ -88,6 +88,7 @@ impl LadServer {
             max_retries_per_step: 2,
             session: None,
             interactive: self.interactive.load(std::sync::atomic::Ordering::Acquire),
+            learn: None,
         };
 
         tracing::info!("running pilot");

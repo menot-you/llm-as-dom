@@ -70,6 +70,45 @@ struct Cli {
     /// Browser engine: "chromium" (default) or "webkit".
     #[arg(long, default_value = "chromium")]
     engine: String,
+
+    /// Enable playbook learning. When set, a successful run is synthesized
+    /// into a reusable playbook and written to `--learn-dir`.
+    #[arg(long, default_value_t = false)]
+    learn: bool,
+
+    /// Optional explicit playbook name. Defaults to a name derived from the goal.
+    #[arg(long)]
+    learn_name: Option<String>,
+
+    /// Comma-separated list of params to templatize in `Type` / `Select` values,
+    /// e.g. `--learn-params "email=octocat,password=hunter2"`.
+    #[arg(long)]
+    learn_params: Option<String>,
+
+    /// Directory to write the learned playbook to. Defaults to `.lad/playbooks`.
+    #[arg(long, default_value = ".lad/playbooks")]
+    learn_dir: String,
+}
+
+/// Parse a `KEY=VALUE,KEY=VALUE` string into a map. Entries without `=` or
+/// with an empty key are skipped.
+fn parse_learn_params(raw: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for pair in raw.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let Some((k, v)) = pair.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        out.insert(key.to_string(), v.trim().to_string());
+    }
+    out
 }
 
 // Sentry MUST be initialised before ANY other setup so that panics raised
@@ -182,6 +221,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let playbook_path = std::path::PathBuf::from(&cli.playbook_dir);
+        let learn_config = if cli.learn {
+            let params = cli
+                .learn_params
+                .as_deref()
+                .map(parse_learn_params)
+                .unwrap_or_default();
+            Some(pilot::LearnConfig {
+                name: cli.learn_name.clone(),
+                explicit_params: params,
+                output_dir: std::path::PathBuf::from(&cli.learn_dir),
+            })
+        } else {
+            None
+        };
         let config = pilot::PilotConfig {
             goal: goal.clone(),
             max_steps: cli.max_steps,
@@ -195,6 +248,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_retries_per_step: 2,
             session: None,
             interactive: cli.interactive,
+            learn: learn_config,
         };
 
         let result = pilot::run_pilot(page.as_ref(), backend_impl.as_ref(), &config).await?;
@@ -345,5 +399,59 @@ mod tests {
     fn cli_backend_defaults_to_auto() {
         let cli = Cli::try_parse_from(["lad", "--url", "https://x.com"]).unwrap();
         assert_eq!(cli.backend, "auto");
+    }
+
+    #[test]
+    fn cli_learn_defaults_off() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com"]).unwrap();
+        assert!(!cli.learn);
+        assert!(cli.learn_name.is_none());
+        assert!(cli.learn_params.is_none());
+        assert_eq!(cli.learn_dir, ".lad/playbooks");
+    }
+
+    #[test]
+    fn cli_learn_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "lad",
+            "--url",
+            "https://x.com",
+            "--learn",
+            "--learn-name",
+            "gh-login",
+            "--learn-params",
+            "email=octocat,password=hunter2",
+            "--learn-dir",
+            "/tmp/pb",
+        ])
+        .unwrap();
+        assert!(cli.learn);
+        assert_eq!(cli.learn_name.as_deref(), Some("gh-login"));
+        assert_eq!(
+            cli.learn_params.as_deref(),
+            Some("email=octocat,password=hunter2")
+        );
+        assert_eq!(cli.learn_dir, "/tmp/pb");
+    }
+
+    #[test]
+    fn parse_learn_params_basic() {
+        let map = parse_learn_params("email=alice,password=secret");
+        assert_eq!(map.get("email").map(String::as_str), Some("alice"));
+        assert_eq!(map.get("password").map(String::as_str), Some("secret"));
+    }
+
+    #[test]
+    fn parse_learn_params_trims_whitespace() {
+        let map = parse_learn_params(" email = alice , password = secret ");
+        assert_eq!(map.get("email").map(String::as_str), Some("alice"));
+        assert_eq!(map.get("password").map(String::as_str), Some("secret"));
+    }
+
+    #[test]
+    fn parse_learn_params_skips_invalid_entries() {
+        let map = parse_learn_params("=orphan,,key_only,good=yes");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("good").map(String::as_str), Some("yes"));
     }
 }

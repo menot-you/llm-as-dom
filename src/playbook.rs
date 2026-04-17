@@ -5,7 +5,7 @@
 //! URL, the pilot replays it step-by-step instead of using heuristics or LLM.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::heuristics::login::extract_credential;
 use crate::pilot::Action;
@@ -264,6 +264,284 @@ pub fn step_to_action(
                 reasoning: format!("playbook: select in \"{}\"", step.selector),
             })
         }
+    }
+}
+
+// ── Synthesis: trajectory -> Playbook ─────────────────────────────────
+
+/// Error returned by [`synthesize_from_history`] when a run cannot be turned
+/// into a replayable playbook.
+#[derive(Debug, thiserror::Error)]
+pub enum SynthesizeError {
+    /// The history contains no steps at all.
+    #[error("history is empty")]
+    EmptyHistory,
+    /// The run did not end with a successful [`Action::Done`].
+    #[error("history contains no successful completion")]
+    NoCompletion,
+    /// The initial URL could not be parsed into a `host + path` pattern.
+    #[error("cannot derive URL pattern from initial URL: {0}")]
+    InvalidUrl(String),
+    /// No explicit name was supplied and the goal was too empty to derive one.
+    #[error("cannot derive name from goal; pass --learn-name explicitly")]
+    NameDerivationFailed,
+}
+
+/// Error returned by [`save`] when writing a playbook to disk fails.
+#[derive(Debug, thiserror::Error)]
+pub enum SaveError {
+    /// The target directory could not be created.
+    #[error("playbook directory could not be created: {0}")]
+    DirCreate(std::io::Error),
+    /// Serialization to JSON failed.
+    #[error("failed to serialize playbook: {0}")]
+    Serialize(serde_json::Error),
+    /// Writing the file (including atomic rename) failed.
+    #[error("failed to write playbook file {path}: {source}")]
+    Write {
+        /// The path that failed to be written.
+        path: PathBuf,
+        /// Underlying IO error.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Turn a successful pilot run into a replayable [`Playbook`].
+///
+/// Keeps only [`Action::Type`], [`Action::Click`], and [`Action::Select`]
+/// steps; skips [`Action::Scroll`], [`Action::Wait`], [`Action::Navigate`],
+/// [`Action::Escalate`], and the terminal [`Action::Done`].
+///
+/// When a `Type` / `Select` value matches one of the `explicit_params`
+/// values, it is templatized as `${key}` so the same playbook can be
+/// replayed later with different credentials.
+///
+/// Returns an error if the history is empty, contains no successful
+/// `Done` action, cannot derive a name, or cannot parse the initial URL.
+pub fn synthesize_from_history(
+    history: &[crate::pilot::Step],
+    goal: &str,
+    initial_url: &str,
+    explicit_params: &std::collections::HashMap<String, String>,
+    name: Option<&str>,
+) -> Result<Playbook, SynthesizeError> {
+    if history.is_empty() {
+        return Err(SynthesizeError::EmptyHistory);
+    }
+
+    // The run must conclude with a successful Done.
+    let has_done = history
+        .iter()
+        .any(|s| matches!(s.action, Action::Done { .. }));
+    if !has_done {
+        return Err(SynthesizeError::NoCompletion);
+    }
+
+    // Derive the playbook name.
+    let playbook_name = match name {
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => derive_name_from_goal(goal).ok_or(SynthesizeError::NameDerivationFailed)?,
+    };
+
+    // Derive the url_pattern from the initial URL.
+    let url_pattern = derive_url_pattern(initial_url)?;
+
+    // Params list: sorted keys for deterministic output.
+    let mut param_keys: Vec<String> = explicit_params.keys().cloned().collect();
+    param_keys.sort();
+
+    // Walk history and map actionable steps.
+    let mut steps: Vec<PlaybookStep> = Vec::new();
+    let mut final_view: Option<&SemanticView> = None;
+    for step in history {
+        final_view = Some(&step.observation);
+        match &step.action {
+            Action::Click { element, .. } => {
+                if let Some(selector) = element_selector(&step.observation, *element) {
+                    steps.push(PlaybookStep {
+                        kind: StepKind::Click,
+                        selector,
+                        value: None,
+                        fallbacks: Vec::new(),
+                    });
+                }
+            }
+            Action::Type { element, value, .. } => {
+                if let Some(selector) = element_selector(&step.observation, *element) {
+                    let templated = templatize(value, explicit_params);
+                    steps.push(PlaybookStep {
+                        kind: StepKind::Type,
+                        selector,
+                        value: Some(templated),
+                        fallbacks: Vec::new(),
+                    });
+                }
+            }
+            Action::Select { element, value, .. } => {
+                if let Some(selector) = element_selector(&step.observation, *element) {
+                    let templated = templatize(value, explicit_params);
+                    steps.push(PlaybookStep {
+                        kind: StepKind::Select,
+                        selector,
+                        value: Some(templated),
+                        fallbacks: Vec::new(),
+                    });
+                }
+            }
+            // Skip non-essential / terminal variants.
+            Action::Scroll { .. }
+            | Action::Wait { .. }
+            | Action::Navigate { .. }
+            | Action::Escalate { .. }
+            | Action::Done { .. } => {}
+        }
+    }
+
+    // Derive success signal from the final observation, if we have one.
+    let success = final_view.and_then(|v| derive_success(v, initial_url));
+
+    Ok(Playbook {
+        name: playbook_name,
+        url_pattern,
+        steps,
+        params: param_keys,
+        success,
+    })
+}
+
+/// Persist a [`Playbook`] as JSON to `dir/<name>.json`.
+///
+/// Creates `dir` recursively if missing. Writes are atomic: the content is
+/// staged to a `.tmp` sibling and then renamed onto the final path. If the
+/// target file already exists, it is overwritten with a `tracing::warn`.
+pub fn save(playbook: &Playbook, dir: &Path) -> Result<PathBuf, SaveError> {
+    if !dir.exists() {
+        std::fs::create_dir_all(dir).map_err(SaveError::DirCreate)?;
+    }
+
+    let final_path = dir.join(format!("{}.json", playbook.name));
+    if final_path.exists() {
+        tracing::warn!(
+            path = %final_path.display(),
+            "overwriting existing playbook file"
+        );
+    }
+
+    let json = serde_json::to_string_pretty(playbook).map_err(SaveError::Serialize)?;
+
+    let tmp_path = final_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, json.as_bytes()).map_err(|e| SaveError::Write {
+        path: tmp_path.clone(),
+        source: e,
+    })?;
+    std::fs::rename(&tmp_path, &final_path).map_err(|e| SaveError::Write {
+        path: final_path.clone(),
+        source: e,
+    })?;
+
+    Ok(final_path)
+}
+
+// ── Synthesis helpers ─────────────────────────────────────────────────
+
+/// Extract `host + first path segment` from a URL, e.g.
+/// `https://github.com/login?x=1` -> `github.com/login`.
+fn derive_url_pattern(url: &str) -> Result<String, SynthesizeError> {
+    if url.is_empty() {
+        return Err(SynthesizeError::InvalidUrl("empty url".into()));
+    }
+    let parsed = url::Url::parse(url).map_err(|e| SynthesizeError::InvalidUrl(e.to_string()))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| SynthesizeError::InvalidUrl(format!("no host in {url}")))?;
+    let first_segment = parsed
+        .path_segments()
+        .and_then(|mut s| s.next())
+        .filter(|s| !s.is_empty());
+    match first_segment {
+        Some(seg) => Ok(format!("{host}/{seg}")),
+        None => Ok(host.to_string()),
+    }
+}
+
+/// Derive a playbook name from the goal: take the first three alphanumeric
+/// words, lowercase, join with underscores. Returns `None` if the resulting
+/// name is empty.
+fn derive_name_from_goal(goal: &str) -> Option<String> {
+    let tokens: Vec<String> = goal
+        .split_whitespace()
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .filter(|w| !w.is_empty())
+        .take(3)
+        .collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(tokens.join("_"))
+}
+
+/// Get the `label` of the element with the given id, falling back to `name`
+/// then `input_type`. Returns `None` when the element is not present in the
+/// view (defensive — should be rare).
+fn element_selector(view: &SemanticView, element_id: u32) -> Option<String> {
+    let el = view.elements.iter().find(|e| e.id == element_id)?;
+    if !el.label.trim().is_empty() {
+        return Some(el.label.clone());
+    }
+    if let Some(name) = &el.name
+        && !name.trim().is_empty()
+    {
+        return Some(name.clone());
+    }
+    el.input_type.clone()
+}
+
+/// Replace any occurrence of each `params[key]` value in `raw` with `${key}`.
+fn templatize(raw: &str, params: &std::collections::HashMap<String, String>) -> String {
+    let mut out = raw.to_string();
+    for (key, value) in params {
+        if value.is_empty() {
+            continue;
+        }
+        let placeholder = format!("${{{key}}}");
+        out = out.replace(value, &placeholder);
+    }
+    out
+}
+
+/// Derive a [`SuccessSignal`] from the final view URL + title, when either
+/// differs usefully from the initial URL. Returns `None` if neither is
+/// distinguishable.
+fn derive_success(final_view: &SemanticView, initial_url: &str) -> Option<SuccessSignal> {
+    let initial_host = url::Url::parse(initial_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()));
+
+    let url_contains = match (initial_host.as_deref(), final_view.url.as_str()) {
+        (Some(host), current) if current.contains(host) && current != initial_url => {
+            Some(host.to_string())
+        }
+        _ => None,
+    };
+    let title_contains = if final_view.title.trim().is_empty() {
+        None
+    } else {
+        Some(final_view.title.clone())
+    };
+
+    if url_contains.is_none() && title_contains.is_none() {
+        None
+    } else {
+        Some(SuccessSignal {
+            url_contains,
+            title_contains,
+        })
     }
 }
 
@@ -626,5 +904,355 @@ mod tests {
             }
             other => panic!("expected Select, got {other:?}"),
         }
+    }
+
+    // ── synthesize_from_history tests ─────────────────────────────────
+
+    use crate::pilot::{DecisionSource, Step as PilotStep};
+    use std::time::Duration;
+
+    /// Build a minimal `Step` for synthesis tests.
+    fn synth_step(
+        idx: u32,
+        view: SemanticView,
+        action: Action,
+        source: DecisionSource,
+    ) -> PilotStep {
+        PilotStep {
+            index: idx,
+            observation: view,
+            action,
+            source,
+            confidence: 0.9,
+            duration: Duration::from_millis(10),
+        }
+    }
+
+    #[test]
+    fn synthesize_empty_history_fails() {
+        let params = HashMap::new();
+        let err =
+            synthesize_from_history(&[], "some goal", "https://example.com/login", &params, None)
+                .unwrap_err();
+        assert!(matches!(err, SynthesizeError::EmptyHistory));
+    }
+
+    #[test]
+    fn synthesize_without_completion_fails() {
+        let view = sample_view();
+        let history = vec![synth_step(
+            0,
+            view,
+            Action::Click {
+                element: 2,
+                reasoning: "test".into(),
+            },
+            DecisionSource::Heuristic,
+        )];
+        let params = HashMap::new();
+        let err =
+            synthesize_from_history(&history, "login", "https://github.com/login", &params, None)
+                .unwrap_err();
+        assert!(matches!(err, SynthesizeError::NoCompletion));
+    }
+
+    #[test]
+    fn synthesize_basic_login() {
+        let view = sample_view();
+        let mut params = HashMap::new();
+        params.insert("email".into(), "octocat".into());
+        params.insert("password".into(), "hunter2".into());
+
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Type {
+                    element: 0,
+                    value: "octocat".into(),
+                    reasoning: "heuristic".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view.clone(),
+                Action::Type {
+                    element: 1,
+                    value: "hunter2".into(),
+                    reasoning: "heuristic".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                2,
+                view.clone(),
+                Action::Click {
+                    element: 2,
+                    reasoning: "heuristic".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                3,
+                view,
+                Action::Done {
+                    result: serde_json::Value::Null,
+                    reasoning: "logged in".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let pb = synthesize_from_history(
+            &history,
+            "login as octocat with password hunter2",
+            "https://github.com/login",
+            &params,
+            Some("github-login"),
+        )
+        .unwrap();
+
+        assert_eq!(pb.name, "github-login");
+        assert_eq!(pb.url_pattern, "github.com/login");
+        assert_eq!(pb.steps.len(), 3);
+        assert_eq!(pb.steps[0].kind, StepKind::Type);
+        assert_eq!(pb.steps[1].kind, StepKind::Type);
+        assert_eq!(pb.steps[2].kind, StepKind::Click);
+        // Params exposed in sorted order.
+        assert_eq!(pb.params, vec!["email", "password"]);
+    }
+
+    #[test]
+    fn synthesize_interpolates_params() {
+        let view = sample_view();
+        let mut params = HashMap::new();
+        params.insert("email".into(), "octocat".into());
+        params.insert("password".into(), "hunter2".into());
+
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Type {
+                    element: 0,
+                    value: "octocat".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view.clone(),
+                Action::Type {
+                    element: 1,
+                    value: "hunter2".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                2,
+                view,
+                Action::Done {
+                    result: serde_json::Value::Null,
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let pb = synthesize_from_history(
+            &history,
+            "login",
+            "https://github.com/login",
+            &params,
+            Some("pb"),
+        )
+        .unwrap();
+
+        assert_eq!(pb.steps[0].value.as_deref(), Some("${email}"));
+        assert_eq!(pb.steps[1].value.as_deref(), Some("${password}"));
+    }
+
+    #[test]
+    fn synthesize_derives_name_from_goal() {
+        let view = sample_view();
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Click {
+                    element: 2,
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view,
+                Action::Done {
+                    result: serde_json::Value::Null,
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let params = HashMap::new();
+        let pb = synthesize_from_history(
+            &history,
+            "Login as alice with password",
+            "https://example.com/login",
+            &params,
+            None,
+        )
+        .unwrap();
+
+        // Derived name contains "login" (lowercased, snake-cased from goal).
+        assert!(
+            pb.name.contains("login"),
+            "expected derived name to contain 'login', got: {}",
+            pb.name
+        );
+    }
+
+    #[test]
+    fn synthesize_invalid_url_fails() {
+        let view = sample_view();
+        let history = vec![synth_step(
+            0,
+            view,
+            Action::Done {
+                result: serde_json::Value::Null,
+                reasoning: "".into(),
+            },
+            DecisionSource::Llm,
+        )];
+        let params = HashMap::new();
+        let err = synthesize_from_history(&history, "login", "", &params, Some("pb")).unwrap_err();
+        assert!(matches!(err, SynthesizeError::InvalidUrl(_)));
+    }
+
+    #[test]
+    fn synthesize_name_derivation_failed_on_empty_goal() {
+        let view = sample_view();
+        let history = vec![synth_step(
+            0,
+            view,
+            Action::Done {
+                result: serde_json::Value::Null,
+                reasoning: "".into(),
+            },
+            DecisionSource::Llm,
+        )];
+        let params = HashMap::new();
+        let err = synthesize_from_history(&history, "", "https://example.com/login", &params, None)
+            .unwrap_err();
+        assert!(matches!(err, SynthesizeError::NameDerivationFailed));
+    }
+
+    #[test]
+    fn synthesize_skips_scroll_and_escalate() {
+        let view = sample_view();
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Scroll {
+                    direction: "down".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view.clone(),
+                Action::Click {
+                    element: 2,
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                2,
+                view,
+                Action::Done {
+                    result: serde_json::Value::Null,
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let params = HashMap::new();
+        let pb = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("pb"),
+        )
+        .unwrap();
+
+        // Scroll and Done are skipped; only the Click is kept.
+        assert_eq!(pb.steps.len(), 1);
+        assert_eq!(pb.steps[0].kind, StepKind::Click);
+    }
+
+    // ── save tests ────────────────────────────────────────────────────
+
+    fn make_playbook(name: &str) -> Playbook {
+        Playbook {
+            name: name.into(),
+            url_pattern: "example.com/login".into(),
+            steps: vec![PlaybookStep {
+                kind: StepKind::Click,
+                selector: "Sign in".into(),
+                value: None,
+                fallbacks: vec![],
+            }],
+            params: vec![],
+            success: None,
+        }
+    }
+
+    #[test]
+    fn save_creates_dir_and_file() {
+        let tmp = TempDir::new().unwrap();
+        let target_dir = tmp.path().join("nested").join("playbooks");
+        assert!(!target_dir.exists());
+
+        let pb = make_playbook("demo");
+        let path = save(&pb, &target_dir).unwrap();
+
+        assert!(target_dir.exists(), "target dir should be created");
+        assert!(path.exists(), "playbook file should exist");
+        assert_eq!(path.file_name().unwrap(), "demo.json");
+    }
+
+    #[test]
+    fn save_atomic_overwrite() {
+        let tmp = TempDir::new().unwrap();
+        let mut pb = make_playbook("overwrite");
+
+        let path1 = save(&pb, tmp.path()).unwrap();
+        let first = std::fs::read_to_string(&path1).unwrap();
+
+        pb.url_pattern = "different.com".into();
+        let path2 = save(&pb, tmp.path()).unwrap();
+        let second = std::fs::read_to_string(&path2).unwrap();
+
+        assert_eq!(path1, path2);
+        assert_ne!(first, second);
+        assert!(second.contains("different.com"));
+    }
+
+    #[test]
+    fn save_roundtrips_through_load() {
+        let tmp = TempDir::new().unwrap();
+        let pb = make_playbook("roundtrip");
+        save(&pb, tmp.path()).unwrap();
+
+        let loaded = load_playbooks(tmp.path());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "roundtrip");
+        assert_eq!(loaded[0].steps.len(), 1);
     }
 }

@@ -65,6 +65,7 @@ pub async fn run_pilot(
     let mut prev_element_count: Option<usize> = None;
     let mut prev_acted_count: Option<usize> = None;
     let mut stale_streak: u32 = 0;
+    let mut initial_url: Option<String> = None;
 
     for step_idx in 0..config.max_steps {
         let step_start = Instant::now();
@@ -77,6 +78,9 @@ pub async fn run_pilot(
             tokens = view.estimated_tokens(),
             "observed"
         );
+        if initial_url.is_none() {
+            initial_url = Some(view.url.clone());
+        }
 
         // 1b. Stale-state detection
         let current_element_count = view.elements.len();
@@ -224,6 +228,9 @@ pub async fn run_pilot(
         if matches!(&action, Action::Done { .. } | Action::Escalate { .. }) {
             let success = matches!(&action, Action::Done { .. });
             history.push(step);
+            if success {
+                maybe_learn_playbook(config, &history, initial_url.as_deref());
+            }
             let session_snapshot = match &session {
                 Some(s) => Some(s.lock().await.clone()),
                 None => None,
@@ -322,4 +329,43 @@ pub async fn run_pilot(
         screenshots,
         session_snapshot,
     })
+}
+
+/// Synthesize and persist a playbook from a successful run, if `config.learn`
+/// is enabled.
+///
+/// Non-fatal: logs a warning on any failure path and returns silently. Only
+/// fires when the run actually contains non-Tier-0 decisions (a pure playbook
+/// replay has nothing new to learn).
+fn maybe_learn_playbook(config: &PilotConfig, history: &[Step], initial_url: Option<&str>) {
+    let Some(learn) = config.learn.as_ref() else {
+        return;
+    };
+    // Only learn when at least one step was *not* a Tier 0 replay — otherwise
+    // we'd just overwrite the playbook with itself.
+    let has_new_work = history
+        .iter()
+        .any(|s| !matches!(s.source, DecisionSource::Playbook));
+    if !has_new_work {
+        tracing::info!("learn: run was pure playbook replay, nothing to synthesize");
+        return;
+    }
+    let Some(initial) = initial_url else {
+        tracing::warn!("learn: no initial URL captured, skipping synthesis");
+        return;
+    };
+    let synthesized = crate::playbook::synthesize_from_history(
+        history,
+        &config.goal,
+        initial,
+        &learn.explicit_params,
+        learn.name.as_deref(),
+    );
+    match synthesized {
+        Ok(pb) => match crate::playbook::save(&pb, &learn.output_dir) {
+            Ok(path) => tracing::info!(path = %path.display(), "playbook learned"),
+            Err(e) => tracing::warn!(error = %e, "failed to save learned playbook"),
+        },
+        Err(e) => tracing::warn!(error = %e, "skipped playbook synthesis"),
+    }
 }

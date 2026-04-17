@@ -104,6 +104,34 @@ Your App (localhost)          lad                         Claude
 
 Most dev testing **never hits the LLM**. Heuristics parse your goal, match form fields by name/type/label, find submit buttons, and detect success — all in nanoseconds.
 
+### Playbook learning (`--learn`)
+
+Tier 0 only fires when a playbook file exists. With `--learn`, one successful run is enough to produce it — the next invocation runs at zero LLM cost.
+
+```bash
+# First run: navigate with heuristics/LLM and persist the successful trajectory
+lad --url "https://example.com/login" \
+    --goal "login as alice@test.com with password s3cret" \
+    --learn \
+    --learn-name "example-login" \
+    --learn-params "email=alice@test.com,password=s3cret"
+# -> .lad/playbooks/example-login.json
+
+# Every subsequent run at the same URL is Tier 0 — instant, free
+lad --url "https://example.com/login" --goal "login as bob@test.com with password other"
+```
+
+Flags:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--learn` | off | Enable learning for this run (opt-in; off by default) |
+| `--learn-name <NAME>` | derived from goal | Explicit playbook filename (without `.json`) |
+| `--learn-params <K=V,...>` | — | Comma-separated params to templatize as `${key}` in captured values |
+| `--learn-dir <PATH>` | `.lad/playbooks` | Where the playbook JSON is written |
+
+Learning is non-fatal: synthesis or save failures log a warning and never break the run. Existing playbook files are overwritten with a `warn` log (v1; dedup/merge is v2).
+
 ## Multi-Engine
 
 lad is **browser-agnostic**. The pilot, heuristics, and LLM reasoning never touch browser APIs directly — they operate on a compressed `SemanticView`. The actual browser is a pluggable adapter.
