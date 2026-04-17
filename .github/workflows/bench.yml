@@ -29,7 +29,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: steps.preflight.outputs.skip != 'true'
 
       - name: Install build toolchain (gcc, pkg-config)
@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         if: steps.preflight.outputs.skip != 'true'
 
-      - uses: bencherdev/bencher@f027b2a20a3a56d4e525a7e7bdd742f4d02c6a82 # main
+      - uses: bencherdev/bencher@f639b1b6030ebd80690d396b2b003c4f8a183563 # main
         if: steps.preflight.outputs.skip != 'true'
 
       - name: Run benchmarks with bencher
