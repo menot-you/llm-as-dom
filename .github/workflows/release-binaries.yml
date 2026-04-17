@@ -59,9 +59,15 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      # Install cross from a pre-built binary via taiki-e/install-action.
+      # Previous `cargo install cross --git ...` kept failing with network
+      # flakes on the cargo clone (3 consecutive v0.13.1 reruns). The
+      # install-action pulls a pinned release tarball — no git clone.
       - name: Install cross (for aarch64-linux)
         if: matrix.cross == true
-        run: cargo install cross --git https://github.com/cross-rs/cross --rev 185398b1b885d8d4d16b4d0b2ccc815b800e6b44
+        uses: taiki-e/install-action@2d5b196a2dc9984a136f1a2a41e1a33631d7c261
+        with:
+          tool: cross
 
       - name: Cache cargo registry + build
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
