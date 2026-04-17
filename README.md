@@ -4,9 +4,11 @@
 
 # LLM-as-DOM
 
-## Your AI agent's browser
+## Playwright is AI cosplay.
 
-**Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
+**Built for humans. Every AI agent using it wastes 80% of its tokens pretending to be one.**
+
+LAD cuts it out. The DOM speaks AI directly — heuristics first, LLM only when ambiguous. **60x cheaper tests. Zero HTML parsing.**
 
 [![CI](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml)
 [![docs.rs](https://docs.rs/menot-you-mcp-lad/badge.svg)](https://docs.rs/menot-you-mcp-lad)
