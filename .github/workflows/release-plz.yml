@@ -76,23 +76,17 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Update versions in files
+      - name: Update npm version
         run: |
           set -euo pipefail
           VERSION="${{ needs.release-plz.outputs.version }}"
           echo "$VERSION" > VERSION
-
-          # Bump npm
           cd npm
           node -e "
             const p = require('./package.json');
             p.version = '$VERSION';
             require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
           "
-          cd ..
-
-          # Bump Python
-          sed -i "s/^version = .*/version = \"$VERSION\"/" python/pyproject.toml
 
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v4
@@ -114,29 +108,101 @@ jobs:
       - name: Install Python build tools
         run: pip install build twine hatchling
 
-      - name: Build Python Package (llm-as-dom)
-        working-directory: ./python
+      # Python dual-name publish:
+      #   python/llm_as_dom/menot_you_mcp_lad/          -> "llm-as-dom" on PyPI
+      #   python/llm_as_dom_mcp_pkg/menot_you_mcp_lad/  -> "llm-as-dom-mcp" on PyPI
+      # Both wrap the same `menot_you_mcp_lad` module. pyproject.toml used to
+      # live at python/ and was deleted; we synthesize it inline per build so
+      # the repo has no stale template and both aliases stay in lockstep.
+      - name: Build + publish llm-as-dom alias
+        working-directory: ./python/llm_as_dom
+        env:
+          VERSION: ${{ needs.release-plz.outputs.version }}
         run: |
-          sed -i "s/^name = .*/name = \"llm-as-dom\"/" pyproject.toml
+          set -euo pipefail
+          cp ../../README.md README.md
+          cat > pyproject.toml <<EOF
+          [build-system]
+          requires = ["hatchling"]
+          build-backend = "hatchling.build"
+
+          [project]
+          name = "llm-as-dom"
+          version = "${VERSION}"
+          description = "AI browser pilot — test your app 60x cheaper. MCP server binary wrapper."
+          readme = "README.md"
+          license = "AGPL-3.0-or-later"
+          requires-python = ">=3.9"
+          keywords = ["browser", "automation", "mcp", "ai-agent", "headless", "llm"]
+          classifiers = [
+              "Development Status :: 4 - Beta",
+              "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+              "Programming Language :: Python :: 3",
+              "Topic :: Software Development :: Testing",
+          ]
+
+          [project.urls]
+          Homepage = "https://github.com/menot-you/llm-as-dom"
+          Repository = "https://github.com/menot-you/llm-as-dom"
+
+          [project.scripts]
+          mcp-lad = "menot_you_mcp_lad:main"
+
+          [tool.hatch.build.targets.wheel]
+          packages = ["menot_you_mcp_lad"]
+          EOF
           rm -rf dist/
           python -m build
 
       - name: Publish PyPI Package (llm-as-dom)
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
         with:
-          packages-dir: python/dist/
+          packages-dir: python/llm_as_dom/dist/
 
-      - name: Build Python Package (llm-as-dom-mcp)
-        working-directory: ./python
+      - name: Build + publish llm-as-dom-mcp alias
+        working-directory: ./python/llm_as_dom_mcp_pkg
+        env:
+          VERSION: ${{ needs.release-plz.outputs.version }}
         run: |
-          sed -i "s/^name = .*/name = \"llm-as-dom-mcp\"/" pyproject.toml
+          set -euo pipefail
+          cp ../../README.md README.md
+          cat > pyproject.toml <<EOF
+          [build-system]
+          requires = ["hatchling"]
+          build-backend = "hatchling.build"
+
+          [project]
+          name = "llm-as-dom-mcp"
+          version = "${VERSION}"
+          description = "AI browser pilot — test your app 60x cheaper. MCP server binary wrapper."
+          readme = "README.md"
+          license = "AGPL-3.0-or-later"
+          requires-python = ">=3.9"
+          keywords = ["browser", "automation", "mcp", "ai-agent", "headless", "llm"]
+          classifiers = [
+              "Development Status :: 4 - Beta",
+              "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+              "Programming Language :: Python :: 3",
+              "Topic :: Software Development :: Testing",
+          ]
+
+          [project.urls]
+          Homepage = "https://github.com/menot-you/llm-as-dom"
+          Repository = "https://github.com/menot-you/llm-as-dom"
+
+          [project.scripts]
+          mcp-lad = "menot_you_mcp_lad:main"
+
+          [tool.hatch.build.targets.wheel]
+          packages = ["menot_you_mcp_lad"]
+          EOF
           rm -rf dist/
           python -m build
 
       - name: Publish PyPI Package (llm-as-dom-mcp)
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
         with:
-          packages-dir: python/dist/
+          packages-dir: python/llm_as_dom_mcp_pkg/dist/
 
       # Open a PR to sync VERSION / npm / python version files back to main.
       # Replaces the prior `git push origin main` which is now blocked by
