@@ -139,8 +139,26 @@ pub fn find_playbook<'a>(playbooks: &'a [Playbook], url: &str) -> Option<&'a Pla
         let Some((pattern_host, pattern_path)) = split_url_pattern(&pb.url_pattern) else {
             return false;
         };
-        current_host.eq_ignore_ascii_case(pattern_host) && current_path.starts_with(&pattern_path)
+        current_host.eq_ignore_ascii_case(pattern_host)
+            && path_prefix_matches(current_path, &pattern_path)
     })
+}
+
+/// Does `current` start with `pattern_prefix` on a path-segment boundary?
+///
+/// `starts_with` alone would let a pattern like `/login` match `/loginregister`.
+/// We require the match to end at a `/` or at the end of the path so the
+/// boundary is segment-aligned.
+fn path_prefix_matches(current: &str, pattern_prefix: &str) -> bool {
+    if pattern_prefix == "/" {
+        return true;
+    }
+    let trimmed = pattern_prefix.trim_end_matches('/');
+    if !current.starts_with(trimmed) {
+        return false;
+    }
+    let rest = &current[trimmed.len()..];
+    rest.is_empty() || rest.starts_with('/')
 }
 
 /// Split a `host[/path_prefix]` pattern into `(host, path_prefix)` where the
@@ -566,8 +584,15 @@ pub fn synthesize_from_history(
     // value should contain the raw secret value verbatim. Defends against
     // substring mismatches (e.g. the Type value had whitespace normalised)
     // that would slip past the substitution check above.
+    //
+    // Skip very short values — a 2-3 char secret collides with legitimate
+    // substrings ("ab" appears in "label", "about", etc.) and would DoS the
+    // learn path on weak inputs. Production secrets are always >= 6 chars;
+    // the `is_secret_key`/`substituted_keys` check above already handles
+    // the non-substitution case for any length.
+    const MIN_SHAPE_GUARD_LEN: usize = 6;
     for (key, value) in explicit_params {
-        if value.is_empty() || !is_secret_key(key) {
+        if value.is_empty() || !is_secret_key(key) || value.len() < MIN_SHAPE_GUARD_LEN {
             continue;
         }
         let leaks = steps.iter().any(|s| {
@@ -1000,6 +1025,27 @@ mod tests {
 
         let found = find_playbook(&playbooks, "https://gitlab.com/login");
         assert!(found.is_none());
+    }
+
+    // Segment-boundary match: `/login` must NOT match `/loginregister`
+    // (path-prefix needs to end at a `/` or end-of-path).
+    #[test]
+    fn find_playbook_path_prefix_respects_segment_boundary() {
+        let pb: Playbook = serde_json::from_str(sample_playbook_json()).unwrap();
+        let playbooks = vec![pb];
+
+        let collision = find_playbook(&playbooks, "https://github.com/loginregister");
+        assert!(
+            collision.is_none(),
+            "/login must NOT match /loginregister (segment-boundary violation)"
+        );
+
+        // But a true sub-path under /login/... SHOULD still match.
+        let sub = find_playbook(&playbooks, "https://github.com/login/oauth");
+        assert!(
+            sub.is_some(),
+            "/login should still match /login/oauth as legitimate sub-segment"
+        );
     }
 
     #[test]
@@ -1670,6 +1716,51 @@ mod tests {
             Some("pb"),
         )
         .expect("non-secret non-matching key should not fail");
+        assert!(pb.steps.iter().any(|s| s.kind == StepKind::Type));
+    }
+
+    // Shape-guard MIN_SHAPE_GUARD_LEN bypass: a 3-char secret value ("abc")
+    // that happens to appear as a substring of legitimate data (e.g. inside
+    // the serialized element JSON) must NOT trip the guard — that would be a
+    // DoS on learn for users with short/weak secrets. The substitution-guard
+    // (`is_secret_key && !substituted_keys`) still protects them.
+    #[test]
+    fn templatize_shape_guard_skips_short_secret_values() {
+        let view = sample_view();
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Type {
+                    element: 0,
+                    // Legitimate substring-collision target: element label may
+                    // serialize to something containing "abc" incidentally.
+                    value: "abc".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view,
+                Action::Done {
+                    result: serde_json::json!({"success": true}),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let mut params = HashMap::new();
+        params.insert("password".into(), "abc".into()); // 3 chars, below guard
+
+        let pb = synthesize_from_history(
+            &history,
+            "log in with password abc",
+            "https://example.com/login",
+            &params,
+            Some("short_pw"),
+        )
+        .expect("short secret should templatize via substitution path and skip shape guard");
         assert!(pb.steps.iter().any(|s| s.kind == StepKind::Type));
     }
 
