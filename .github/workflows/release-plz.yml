@@ -45,14 +45,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
 
-      - name: Publish PyPI Aliases
-        if: steps.release-plz.outputs.releases_created == 'true'
-        run: |
-          pip install build twine
-          python -m build python/llm_as_dom
-          twine upload --non-interactive -u __token__ -p ${{ secrets.PYPI_TOKEN }} python/llm_as_dom/dist/*
-          python -m build python/llm_as_dom_mcp_pkg
-          twine upload --non-interactive -u __token__ -p ${{ secrets.PYPI_TOKEN }} python/llm_as_dom_mcp_pkg/dist/*
+      # PyPI publishing is handled by the `publish-ecosystems` job below via
+      # OIDC trusted publishing (no PYPI_TOKEN needed). The earlier twine
+      # step that lived here duplicated that publish and used a long-lived
+      # token — removed in favour of the single OIDC path.
 
       - id: release-plz
         name: Run release-plz
