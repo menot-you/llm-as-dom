@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.13.1](https://github.com/menot-you/llm-as-dom/compare/v0.13.0...v0.13.1) - 2026-04-17
+
+### Bug Fixes
+- *(release)* rewrite publish-ecosystems Python build for actual layout (#27)
+- *(ci)* bump cosign-installer to v4.1.1 (fixes key validation)
+- *(ci)* temporarily disable cosign signing (sigstore infra broken)
+
+Note: v0.13.0 shipped to crates.io but the GitHub Release was permanently
+locked as immutable at create time; binaries never attached. v0.13.1
+re-runs the pipeline end-to-end against a non-immutable release to
+validate the dedupe refactor (#20) + Python publish fix (#27) land
+correctly across crates.io, npm, PyPI, and GitHub binaries.
+
 ## [0.13.0](https://github.com/menot-you/llm-as-dom/compare/v0.12.0...v0.13.0) - 2026-04-17
 
 ### Bug Fixes
