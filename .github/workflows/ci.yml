@@ -109,7 +109,11 @@ jobs:
   # ── Fixture Tests ──────────────────────────────────────────────────
   fixture-tests:
     name: fixture tests (chrome + local server)
-    runs-on: llm-as-dom-runners
+    # Browser job → kata-qemu microVM scale-set. Chromium zygote wants a real
+    # Linux kernel; kata gives each pod its own microVM. Also spreads load:
+    # llm-as-dom-runners (3 slots) handles rust, llm-as-dom-kata-runners
+    # (4 slots) handles browser — 7 parallel instead of 3.
+    runs-on: llm-as-dom-kata-runners
     needs: build
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -127,7 +131,8 @@ jobs:
   # ── Integration ────────────────────────────────────────────────────
   integration:
     name: integration (chrome)
-    runs-on: llm-as-dom-runners
+    # Same reasoning as fixture-tests: route Chromium workloads to kata.
+    runs-on: llm-as-dom-kata-runners
     needs: build
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
