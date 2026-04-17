@@ -118,6 +118,12 @@ jobs:
       # Covers all 5 targets — the old ci.yml publish-release only signed 2.
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          # cosign v2.5.2 shipped a public key the pinned installer SHA does
+          # not validate against ("Fetched public key does not match expected
+          # digest"). Pin to v2.4.3 — last release confirmed to validate with
+          # this installer version. Revisit when bumping installer SHA.
+          cosign-release: v2.4.3
 
       - name: Sign artifact
         shell: bash
