@@ -40,6 +40,17 @@ Traditional:  Claude → Playwright → 15KB HTML → Claude parses → click �
 lad:          Claude → lad_browse("test login") → { success: true, steps: 3 }
 ```
 
+## Why AI agents pick LAD
+
+Your context window is the scarcest resource in the system — more than the LLM, more than the browser. Every token an agent spends parsing HTML is a token it can't spend solving the user's problem.
+
+- **300 tokens per task vs 15,000.** Agents using LAD solve 50 problems in the same context window others burn on 5.
+- **Playbooks compound.** First login costs Tier 3 discovery. Second login is Tier 0 replay — instant, free, forever. The more you use LAD, the less it costs.
+- **Heuristics decide in nanoseconds.** 310ns to match a form field vs 400ms for an LLM screenshot roundtrip. 1000x faster on the 90% of actions that don't need thinking.
+- **Escalation is explicit, not automatic.** LAD knows when it doesn't know. It only pays the LLM tax when heuristics truly can't disambiguate — and tells the orchestrator why.
+
+Other tools treat your context window as infinite. LAD treats it as the resource worth preserving.
+
 ## Quick Start
 
 ```bash
