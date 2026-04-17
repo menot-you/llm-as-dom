@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -229,176 +228,14 @@ jobs:
           name: llm-benchmark-results
           path: bench/results.json
 
-  # ── Release (cross-platform binaries) ──────────────────────────────
-  # Tags are created by release.yml (workflow_dispatch), not auto-tag.
-  release:
-    name: release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, build, fixture-tests, integration]
-    strategy:
-      matrix:
-        include:
-          - os: llm-as-dom-runners
-            target: x86_64-unknown-linux-gnu
-            artifact: linux-x86_64
-          - os: [self-hosted, macos]
-            target: aarch64-apple-darwin
-            artifact: macos-arm64
-    runs-on: ${{ matrix.os }}
-    # actions/upload-artifact does not need contents:write — the default
-    # read permission (set at the workflow level by repo policy) is enough.
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Install build toolchain (Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config
-
-      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-
-      - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build WebKit bridge (macOS only)
-        if: runner.os == 'macOS'
-        run: |
-          cd webkit-bridge
-          swift build -c release
-          cp .build/release/lad-webkit-bridge ../target/${{ matrix.target }}/release/ || true
-
-      - name: Package
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/lad dist/lad-${{ matrix.artifact }} || true
-          cp target/${{ matrix.target }}/release/llm-as-dom-mcp dist/llm-as-dom-mcp-${{ matrix.artifact }} || true
-          cp target/${{ matrix.target }}/release/lad-relay dist/lad-relay-${{ matrix.artifact }} || true
-          cp target/${{ matrix.target }}/release/lad-webkit-bridge dist/lad-webkit-bridge-${{ matrix.artifact }} 2>/dev/null || true
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-${{ matrix.artifact }}
-          path: dist/
-
-  # ── Publish GitHub Release ─────────────────────────────────────────
-  publish-release:
-    name: publish GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: release
-    runs-on: llm-as-dom-runners
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Download linux artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-linux-x86_64
-          path: dist/
-
-      - name: Download macos artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-macos-arm64
-          path: dist/
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-        
-      - name: Sign binaries
-        run: |
-          cosign sign-blob --yes dist/lad-linux-x86_64 --bundle dist/lad-linux-x86_64.bundle
-          if [ -f dist/llm-as-dom-mcp-linux-x86_64 ]; then cosign sign-blob --yes dist/llm-as-dom-mcp-linux-x86_64 --bundle dist/llm-as-dom-mcp-linux-x86_64.bundle; fi
-          cosign sign-blob --yes dist/lad-macos-arm64 --bundle dist/lad-macos-arm64.bundle
-          if [ -f dist/llm-as-dom-mcp-macos-arm64 ]; then cosign sign-blob --yes dist/llm-as-dom-mcp-macos-arm64 --bundle dist/llm-as-dom-mcp-macos-arm64.bundle; fi
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
-        with:
-          generate_release_notes: true
-          files: dist/*
-
-  # ── Publish to crates.io ───────────────────────────────────────────
-  publish-crate:
-    name: publish crate
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: publish-release
-    runs-on: llm-as-dom-runners
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
-
-      - name: Publish to crates.io
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --allow-dirty || echo "Version may already be published"
-
-  # ── Publish to npm ─────────────────────────────────────────────────
-  publish-npm:
-    name: publish npm
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: publish-release
-    runs-on: llm-as-dom-runners
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-
-      - name: Sync version from VERSION file
-        run: |
-          VERSION=$(cat VERSION)
-          cd npm
-          node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
-
-      - name: Publish llm-as-dom-mcp
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: cd npm && npm publish --access public || echo "Version may already be published"
-
-  # ── Publish to PyPI ────────────────────────────────────────────────
-  publish-pypi-aliases:
-    name: publish pypi (aliases)
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: publish-release
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-        with:
-          python-version: "3.11"
-
-      - name: Install Python build tools
-        run: pip install build twine hatchling
-
-      - name: Build PyPI Package llm-as-dom
-        run: python -m build python/llm_as_dom
-
-      - name: Publish PyPI Package (llm-as-dom)
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
-        with:
-          packages-dir: python/llm_as_dom/dist
-
-      - name: Build PyPI Package llm-as-dom-mcp
-        run: python -m build python/llm_as_dom_mcp_pkg
-
-      - name: Publish PyPI Package (llm-as-dom-mcp)
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
-        with:
-          packages-dir: python/llm_as_dom_mcp_pkg/dist
+  # ── Release path ────────────────────────────────────────────────────
+  # All publish/release jobs moved out of ci.yml to kill overlap with
+  # release-plz.yml + release-binaries.yml (see issue #20).
+  #
+  # Source of truth per artifact after dedupe:
+  #   - git tag + GitHub Release    -> release-plz action (release-plz.yml)
+  #   - crates.io publish           -> release-plz action (release-plz.yml)
+  #   - npm + PyPI publish          -> publish-ecosystems job (release-plz.yml)
+  #   - multi-platform binaries     -> release-binaries.yml (5 targets, cosign signed)
+  #
+  # ci.yml is now purely quality + security gates, running on push/PR.
