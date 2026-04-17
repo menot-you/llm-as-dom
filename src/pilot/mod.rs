@@ -12,7 +12,7 @@ pub mod util;
 pub use action::{Action, execute_action, execute_action_with_retry};
 pub use captcha::wait_for_captcha_resolution;
 pub use decide::decide_with_retry;
-pub use runner::{run_pilot, take_screenshot};
+pub use runner::{redact_action_for_learn, run_pilot, take_screenshot};
 pub use util::js_escape;
 
 use async_trait::async_trait;
@@ -130,6 +130,14 @@ pub struct PilotConfig {
     /// trajectory is synthesized into a replayable playbook and saved to
     /// `learn.output_dir`. Default: `None` (no learning).
     pub learn: Option<LearnConfig>,
+    /// The URL the pilot was originally pointed at (the `--url` argument).
+    ///
+    /// Used by playbook learning to derive the `url_pattern` from the
+    /// *canonical* entry point, not from whatever the first observation
+    /// sees (an OAuth bounce to a third-party IdP would otherwise
+    /// replace the pattern and cause future replay to miss). `None` is
+    /// the legacy default — synthesis falls back to the first observed URL.
+    pub initial_url: Option<String>,
 }
 
 impl Default for PilotConfig {
@@ -144,6 +152,7 @@ impl Default for PilotConfig {
             session: None,
             interactive: false,
             learn: None,
+            initial_url: None,
         }
     }
 }

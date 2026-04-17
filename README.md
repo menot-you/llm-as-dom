@@ -108,13 +108,15 @@ Most dev testing **never hits the LLM**. Heuristics parse your goal, match form 
 
 Tier 0 only fires when a playbook file exists. With `--learn`, one successful run is enough to produce it — the next invocation runs at zero LLM cost.
 
+> **SECRET WARNING** — `--learn-params <K=V,...>` passes values on argv, which is visible via `ps aux`, `/proc/self/cmdline`, shell history, and core dumps. For anything resembling a password, token, or API key, prefer `--learn-params-file <path>` (file mode `0600`, outside the repo) or the `LAD_LEARN_PARAMS` env var.
+
 ```bash
 # First run: navigate with heuristics/LLM and persist the successful trajectory
 lad --url "https://example.com/login" \
     --goal "login as alice@test.com with password s3cret" \
     --learn \
     --learn-name "example-login" \
-    --learn-params "email=alice@test.com,password=s3cret"
+    --learn-params-file ~/.config/lad/example.params
 # -> .lad/playbooks/example-login.json
 
 # Every subsequent run at the same URL is Tier 0 — instant, free
@@ -127,10 +129,24 @@ Flags:
 |------|---------|---------|
 | `--learn` | off | Enable learning for this run (opt-in; off by default) |
 | `--learn-name <NAME>` | derived from goal | Explicit playbook filename (without `.json`) |
-| `--learn-params <K=V,...>` | — | Comma-separated params to templatize as `${key}` in captured values |
+| `--learn-params <K=V,...>` | — | Inline argv params. **Do not use for secrets.** |
+| `--learn-params-file <PATH>` | — | Params file (`KEY=VALUE` per line, `#` comments). Highest priority. |
+| `--learn-params-env` | off | Read params from `LAD_LEARN_PARAMS` env var. Middle priority. |
 | `--learn-dir <PATH>` | `.lad/playbooks` | Where the playbook JSON is written |
 
+Merge priority when multiple sources are given: `--learn-params` (argv) < `LAD_LEARN_PARAMS` env < `--learn-params-file` (highest).
+
 Learning is non-fatal: synthesis or save failures log a warning and never break the run. Existing playbook files are overwritten with a `warn` log (v1; dedup/merge is v2).
+
+#### Secrets and `.gitignore`
+
+Learned playbooks may contain secrets-adjacent artifacts even after templatization (element labels, URLs with query-string tokens, etc). Add this to your `.gitignore`:
+
+    .lad/playbooks/
+
+To pass secrets safely, prefer `--learn-params-file <path>` (file mode `0600`, outside the repo) or `LAD_LEARN_PARAMS` env var over `--learn-params` on argv. Values passed on argv are visible via `ps aux`, `/proc/self/cmdline`, shell history, and core dumps.
+
+Keys matching `password|secret|token|api[_-]?key|credential|bearer` are treated as secrets: if their value doesn't substitute into any captured step, synthesis refuses to write the playbook rather than leaking the raw value.
 
 ## Multi-Engine
 

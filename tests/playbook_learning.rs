@@ -141,7 +141,7 @@ fn learn_then_replay_round_trip() {
             3,
             view.clone(),
             Action::Done {
-                result: serde_json::Value::Null,
+                result: serde_json::json!({"success": true}),
                 reasoning: "login succeeded".into(),
             },
             DecisionSource::Llm,
@@ -213,4 +213,163 @@ fn learn_then_replay_no_learn_no_file() {
     // We simply don't call save(). load_playbooks on an empty dir returns empty.
     let loaded = load_playbooks(tmp.path());
     assert!(loaded.is_empty());
+}
+
+/// Fix 4c — URL pattern is derived from `--url` input, not from OAuth bounce.
+///
+/// Simulates the OAuth case: the pilot was pointed at `app.example.com/login`
+/// but the first observation sees `accounts.idp.com/...` after an IdP
+/// redirect. The canonical pattern must come from the entry point, so a
+/// later replay at `app.example.com/login` matches.
+///
+/// This covers the runner change via the synthesis contract: the runner
+/// now passes `config.initial_url` through to `synthesize_from_history`.
+#[test]
+fn runner_uses_pilot_url_not_view_url() {
+    // Observations all show `accounts.idp.com/...` (the OAuth provider).
+    let mut oauth_view = login_view();
+    oauth_view.url = "https://accounts.idp.com/oauth/authorize?client_id=x".into();
+    let history = vec![
+        step(
+            0,
+            oauth_view.clone(),
+            Action::Type {
+                element: 0,
+                value: "alice@test.com".into(),
+                reasoning: "fill email".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+        step(
+            1,
+            oauth_view.clone(),
+            Action::Type {
+                element: 1,
+                value: "s3cret".into(),
+                reasoning: "fill password".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+        step(
+            2,
+            oauth_view.clone(),
+            Action::Click {
+                element: 2,
+                reasoning: "submit".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+        step(
+            3,
+            oauth_view,
+            Action::Done {
+                result: serde_json::json!({"success": true}),
+                reasoning: "login succeeded".into(),
+            },
+            DecisionSource::Llm,
+        ),
+    ];
+
+    let mut params = HashMap::new();
+    params.insert("email".into(), "alice@test.com".into());
+    params.insert("password".into(), "s3cret".into());
+
+    // Pass the CANONICAL entry point as initial_url.
+    let pb = synthesize_from_history(
+        &history,
+        "login",
+        "https://app.example.com/login",
+        &params,
+        Some("app-login"),
+    )
+    .expect("successful trajectory should synthesize");
+    assert_eq!(
+        pb.url_pattern, "app.example.com/login",
+        "pattern must derive from --url input, not from the OAuth-bounce view.url"
+    );
+    assert!(
+        !pb.url_pattern.contains("accounts.idp.com"),
+        "post-OAuth host must NOT leak into the pattern"
+    );
+}
+
+/// Fix 1 — reject synthesis of a failed login trajectory.
+///
+/// End-to-end proof that a run terminating with `Done { success: false }`
+/// does NOT produce a playbook file on disk. This is the canonical attack
+/// that the success-gate blocks: if we didn't, a failed login trajectory
+/// (e.g. bad password) would be persisted and replayed forever as a
+/// "working" playbook.
+#[test]
+fn failed_login_trajectory_does_not_persist_playbook() {
+    let view = login_view();
+    let history = vec![
+        step(
+            0,
+            view.clone(),
+            Action::Type {
+                element: 0,
+                value: "alice@test.com".into(),
+                reasoning: "fill email".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+        step(
+            1,
+            view.clone(),
+            Action::Type {
+                element: 1,
+                value: "wrong-password".into(),
+                reasoning: "fill password".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+        step(
+            2,
+            view.clone(),
+            Action::Click {
+                element: 2,
+                reasoning: "submit".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+        step(
+            3,
+            view,
+            Action::Done {
+                // login failed — mirrors `heuristics::login::try_detect_done`'s
+                // error branch.
+                result: serde_json::json!({
+                    "success": false,
+                    "error": "login failed",
+                }),
+                reasoning: "login failed".into(),
+            },
+            DecisionSource::Heuristic,
+        ),
+    ];
+
+    let mut params = HashMap::new();
+    params.insert("email".into(), "alice@test.com".into());
+    params.insert("password".into(), "wrong-password".into());
+
+    let tmp = TempDir::new().unwrap();
+    let result = synthesize_from_history(
+        &history,
+        "login as alice@test.com with password wrong-password",
+        "https://example.com/login",
+        &params,
+        Some("example-login"),
+    );
+    assert!(
+        result.is_err(),
+        "failed login trajectory must be rejected by the success gate"
+    );
+    // Simulate the runner's "synthesize then save" pipeline — on failure,
+    // `save` is never called, so the dir stays empty.
+    let loaded = load_playbooks(tmp.path());
+    assert!(
+        loaded.is_empty(),
+        "no playbook should land on disk for a failed run"
+    );
 }

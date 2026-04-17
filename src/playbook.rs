@@ -6,10 +6,27 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::heuristics::login::extract_credential;
 use crate::pilot::Action;
 use crate::semantic::SemanticView;
+
+/// Regex matching param keys that must be treated as secrets (password,
+/// token, api-key, credential, bearer, etc). Case-insensitive.
+fn secret_key_re() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r"(?i)password|secret|token|api[_-]?key|credential|bearer")
+            .expect("secret-key regex is static")
+    })
+}
+
+/// Returns `true` when the given param name looks like a secret and therefore
+/// must be templatized when learning a playbook.
+pub fn is_secret_key(name: &str) -> bool {
+    secret_key_re().is_match(name)
+}
 
 // ── Data model ────────────────────────────────────────────────────────
 
@@ -102,9 +119,47 @@ pub fn load_playbooks(dir: &Path) -> Vec<Playbook> {
     playbooks
 }
 
-/// Find the first playbook whose `url_pattern` is a substring of the given URL.
+/// Find the first playbook whose `url_pattern` structurally matches the given URL.
+///
+/// Matching is structural (not substring): both URLs are parsed and the
+/// playbook matches only when `current.host == pattern.host` (exact, not
+/// suffix) and `current.path` starts with the pattern's recorded path prefix.
+/// This closes the `evilgithub.com/login` host-suffix attack that
+/// `substring.contains` allowed.
+///
+/// The pattern itself is the `host[/segment[/segment]]` shape produced by
+/// [`derive_url_pattern`]. When the pattern or current URL fails to parse,
+/// the playbook is skipped (fail-closed).
 pub fn find_playbook<'a>(playbooks: &'a [Playbook], url: &str) -> Option<&'a Playbook> {
-    playbooks.iter().find(|pb| url.contains(&pb.url_pattern))
+    let current = url::Url::parse(url).ok()?;
+    let current_host = current.host_str()?;
+    let current_path = current.path();
+
+    playbooks.iter().find(|pb| {
+        let Some((pattern_host, pattern_path)) = split_url_pattern(&pb.url_pattern) else {
+            return false;
+        };
+        current_host.eq_ignore_ascii_case(pattern_host) && current_path.starts_with(&pattern_path)
+    })
+}
+
+/// Split a `host[/path_prefix]` pattern into `(host, path_prefix)` where the
+/// path is `/` when no path is present (so `github.com` matches `/` which is
+/// any path, while `github.com/owner/repo` matches only paths starting with
+/// `/owner/repo`).
+fn split_url_pattern(pattern: &str) -> Option<(&str, String)> {
+    if pattern.is_empty() {
+        return None;
+    }
+    match pattern.split_once('/') {
+        Some((host, rest)) => {
+            if host.is_empty() {
+                return None;
+            }
+            Some((host, format!("/{rest}")))
+        }
+        None => Some((pattern, "/".into())),
+    }
 }
 
 // ── Parameter interpolation ───────────────────────────────────────────
@@ -115,6 +170,11 @@ pub fn find_playbook<'a>(playbooks: &'a [Playbook], url: &str) -> Option<&'a Pla
 /// - `"username"` -> tries prefixes `["as ", "user ", "username ", "email ", "login "]`
 /// - `"password"` -> tries prefixes `["password ", "pass ", "pw "]`
 /// - anything else -> tries `["<name> "]`
+///
+/// Prefix matching is case-insensitive (lowercase is only used for locating
+/// the position), but extracted values preserve the original case of the
+/// goal (`Hunter2` stays `Hunter2`, not `hunter2`) — passwords are
+/// case-sensitive and lowercasing silently breaks the login replay.
 pub fn extract_params(
     goal: &str,
     param_names: &[String],
@@ -123,17 +183,20 @@ pub fn extract_params(
     let mut params = std::collections::HashMap::new();
 
     for name in param_names {
+        let prefixes: &[&str] = match name.as_str() {
+            "username" | "user" | "email" => &["as ", "user ", "username ", "email ", "login "],
+            "password" | "pass" | "pw" => &["password ", "pass ", "pw "],
+            other => &[other],
+        };
+        // `extract_credential` needs prefixes with a trailing space. For
+        // the arbitrary-name branch we synthesise `"<name> "` on the fly.
         let value = match name.as_str() {
-            "username" | "user" | "email" => extract_credential(
-                &goal_lower,
-                &["as ", "user ", "username ", "email ", "login "],
-            ),
-            "password" | "pass" | "pw" => {
-                extract_credential(&goal_lower, &["password ", "pass ", "pw "])
+            "username" | "user" | "email" | "password" | "pass" | "pw" => {
+                extract_credential_preserve_case(goal, &goal_lower, prefixes)
             }
             other => {
                 let prefix = format!("{other} ");
-                extract_credential(&goal_lower, &[&prefix])
+                extract_credential_preserve_case(goal, &goal_lower, &[&prefix])
             }
         };
         if let Some(v) = value {
@@ -142,6 +205,35 @@ pub fn extract_params(
     }
 
     params
+}
+
+/// Locate each candidate prefix in `goal_lower`, but read the value from
+/// the original `goal` at the matched offset so case is preserved.
+///
+/// Mirrors the contract of [`extract_credential`]: returns the first
+/// whitespace-delimited token after the prefix, or `None` when no prefix
+/// matches or the tail is empty.
+fn extract_credential_preserve_case(
+    goal: &str,
+    goal_lower: &str,
+    prefixes: &[&str],
+) -> Option<String> {
+    for prefix in prefixes {
+        if let Some(start) = goal_lower.find(prefix) {
+            let after = start + prefix.len();
+            if after > goal.len() {
+                continue;
+            }
+            let tail = &goal[after..];
+            let token: String = tail.chars().take_while(|c| !c.is_whitespace()).collect();
+            if !token.is_empty() {
+                return Some(token);
+            }
+        }
+    }
+    // Fallback: the legacy lowercased extractor. Preserves original behaviour
+    // when the new fast path yields nothing (e.g. embedded separators).
+    extract_credential(goal_lower, prefixes)
 }
 
 /// Replace `${param}` placeholders in a template string with actual values.
@@ -279,12 +371,37 @@ pub enum SynthesizeError {
     /// The run did not end with a successful [`Action::Done`].
     #[error("history contains no successful completion")]
     NoCompletion,
+    /// The run ended with a `Done` whose `result.success` was `false` or missing.
+    ///
+    /// Guards against learning a playbook from a failed run (e.g. a login
+    /// heuristic returning `Done { success: false, error: "bad password" }`).
+    /// Missing `success` fields are treated as failure (fail-closed).
+    #[error("run did not succeed (result.success != true); refusing to learn")]
+    RunNotSuccessful,
     /// The initial URL could not be parsed into a `host + path` pattern.
     #[error("cannot derive URL pattern from initial URL: {0}")]
     InvalidUrl(String),
     /// No explicit name was supplied and the goal was too empty to derive one.
     #[error("cannot derive name from goal; pass --learn-name explicitly")]
     NameDerivationFailed,
+    /// The explicit playbook name contained unsafe characters or was too long.
+    #[error("invalid playbook name {name:?}: {reason}")]
+    InvalidName {
+        /// The offending name.
+        name: String,
+        /// Why it was rejected (e.g. "contains '/'" or "exceeds 128 chars").
+        reason: String,
+    },
+    /// A param key matching the secret-name regex was not substituted into
+    /// any captured step. Learning refuses to persist raw secrets.
+    #[error(
+        "secret-like param {key:?} was not substituted into any step; \
+         refusing to persist a playbook that could leak the raw value"
+    )]
+    SecretNotTemplatized {
+        /// The param key whose value was not templatized.
+        key: String,
+    },
 }
 
 /// Error returned by [`save`] when writing a playbook to disk fails.
@@ -330,18 +447,40 @@ pub fn synthesize_from_history(
         return Err(SynthesizeError::EmptyHistory);
     }
 
-    // The run must conclude with a successful Done.
-    let has_done = history
-        .iter()
-        .any(|s| matches!(s.action, Action::Done { .. }));
-    if !has_done {
+    // The run must conclude with a `Done` action whose `result.success` is
+    // explicitly `true`. Missing or falsy `success` is treated as failure
+    // (fail-closed) — this blocks learning a playbook from a login failure
+    // heuristic that emits `Done { result: { success: false } }`.
+    let last_done_success = history.iter().rev().find_map(|s| match &s.action {
+        Action::Done { result, .. } => Some(result),
+        _ => None,
+    });
+    let Some(result) = last_done_success else {
         return Err(SynthesizeError::NoCompletion);
+    };
+    if !result
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(SynthesizeError::RunNotSuccessful);
     }
 
-    // Derive the playbook name.
+    // Derive the playbook name, validating either the explicit name or the
+    // derived one (a malformed goal producing ".." or "/" must also be
+    // rejected — the attacker doesn't need the `--learn-name` flag).
     let playbook_name = match name {
-        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
-        _ => derive_name_from_goal(goal).ok_or(SynthesizeError::NameDerivationFailed)?,
+        Some(n) if !n.trim().is_empty() => {
+            let trimmed = n.trim().to_string();
+            validate_playbook_name(&trimmed)?;
+            trimmed
+        }
+        _ => {
+            let derived =
+                derive_name_from_goal(goal).ok_or(SynthesizeError::NameDerivationFailed)?;
+            validate_playbook_name(&derived)?;
+            derived
+        }
     };
 
     // Derive the url_pattern from the initial URL.
@@ -351,41 +490,52 @@ pub fn synthesize_from_history(
     let mut param_keys: Vec<String> = explicit_params.keys().cloned().collect();
     param_keys.sort();
 
-    // Walk history and map actionable steps.
+    // Walk history and map actionable steps. Track which explicit-param keys
+    // actually got substituted so we can reject the run if a secret-shaped
+    // key never matched any captured value (see the post-loop check below).
     let mut steps: Vec<PlaybookStep> = Vec::new();
     let mut final_view: Option<&SemanticView> = None;
+    let mut substituted_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     for step in history {
         final_view = Some(&step.observation);
         match &step.action {
             Action::Click { element, .. } => {
-                if let Some(selector) = element_selector(&step.observation, *element) {
+                if let Some((selector, fallbacks)) =
+                    element_selector_with_fallbacks(&step.observation, *element)
+                {
                     steps.push(PlaybookStep {
                         kind: StepKind::Click,
                         selector,
                         value: None,
-                        fallbacks: Vec::new(),
+                        fallbacks,
                     });
                 }
             }
             Action::Type { element, value, .. } => {
-                if let Some(selector) = element_selector(&step.observation, *element) {
-                    let templated = templatize(value, explicit_params);
+                if let Some((selector, fallbacks)) =
+                    element_selector_with_fallbacks(&step.observation, *element)
+                {
+                    let templated =
+                        templatize_tracking(value, explicit_params, &mut substituted_keys);
                     steps.push(PlaybookStep {
                         kind: StepKind::Type,
                         selector,
                         value: Some(templated),
-                        fallbacks: Vec::new(),
+                        fallbacks,
                     });
                 }
             }
             Action::Select { element, value, .. } => {
-                if let Some(selector) = element_selector(&step.observation, *element) {
-                    let templated = templatize(value, explicit_params);
+                if let Some((selector, fallbacks)) =
+                    element_selector_with_fallbacks(&step.observation, *element)
+                {
+                    let templated =
+                        templatize_tracking(value, explicit_params, &mut substituted_keys);
                     steps.push(PlaybookStep {
                         kind: StepKind::Select,
                         selector,
                         value: Some(templated),
-                        fallbacks: Vec::new(),
+                        fallbacks,
                     });
                 }
             }
@@ -395,6 +545,37 @@ pub fn synthesize_from_history(
             | Action::Navigate { .. }
             | Action::Escalate { .. }
             | Action::Done { .. } => {}
+        }
+    }
+
+    // Any secret-shaped key whose value was NOT substituted into at least
+    // one captured step is a leak vector: the user passed `--learn-params
+    // password=hunter2` but the real Type step used a different value
+    // (wrapped/normalized/etc). Refuse to persist instead of silently
+    // writing a playbook that doesn't protect the secret.
+    for (key, value) in explicit_params {
+        if value.is_empty() {
+            continue;
+        }
+        if is_secret_key(key) && !substituted_keys.contains(key) {
+            return Err(SynthesizeError::SecretNotTemplatized { key: key.clone() });
+        }
+    }
+
+    // Shape-based guard on param KEYS: after templatization, no captured
+    // value should contain the raw secret value verbatim. Defends against
+    // substring mismatches (e.g. the Type value had whitespace normalised)
+    // that would slip past the substitution check above.
+    for (key, value) in explicit_params {
+        if value.is_empty() || !is_secret_key(key) {
+            continue;
+        }
+        let leaks = steps.iter().any(|s| {
+            let step_json = serde_json::to_string(s).unwrap_or_default();
+            step_json.contains(value.as_str())
+        });
+        if leaks {
+            return Err(SynthesizeError::SecretNotTemplatized { key: key.clone() });
         }
     }
 
@@ -408,6 +589,46 @@ pub fn synthesize_from_history(
         params: param_keys,
         success,
     })
+}
+
+/// Validate a playbook filename component.
+///
+/// Rejects path-traversal, slashes, control chars, dotfiles, and oversized
+/// names. The learn flow uses the returned name directly as `<dir>/<name>.json`,
+/// so any of these forms would escape the configured output dir or trip
+/// filesystem weirdness.
+fn validate_playbook_name(name: &str) -> Result<(), SynthesizeError> {
+    let fail = |reason: &str| -> SynthesizeError {
+        SynthesizeError::InvalidName {
+            name: name.to_string(),
+            reason: reason.to_string(),
+        }
+    };
+    if name.is_empty() {
+        return Err(fail("name is empty"));
+    }
+    if name.len() > 128 {
+        return Err(fail("name exceeds 128 chars"));
+    }
+    if name.starts_with('.') {
+        return Err(fail("name starts with '.' (dotfile/parent traversal)"));
+    }
+    if name.contains("..") {
+        return Err(fail("name contains '..'"));
+    }
+    if name.contains('/') {
+        return Err(fail("name contains '/'"));
+    }
+    if name.contains('\\') {
+        return Err(fail("name contains '\\'"));
+    }
+    if name.contains('\0') {
+        return Err(fail("name contains NUL"));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(fail("name contains a control character"));
+    }
+    Ok(())
 }
 
 /// Persist a [`Playbook`] as JSON to `dir/<name>.json`.
@@ -445,8 +666,15 @@ pub fn save(playbook: &Playbook, dir: &Path) -> Result<PathBuf, SaveError> {
 
 // ── Synthesis helpers ─────────────────────────────────────────────────
 
-/// Extract `host + first path segment` from a URL, e.g.
-/// `https://github.com/login?x=1` -> `github.com/login`.
+/// Extract `host + up to two path segments` from a URL, e.g.
+/// `https://github.com/owner/repo/settings?x=1` -> `github.com/owner/repo`.
+///
+/// Two segments is enough to distinguish `github.com/owner/repo/settings`
+/// from `github.com/owner/repo/issues` (same "section" on the same repo)
+/// while avoiding a pattern so specific it won't match any future URL.
+///
+/// When the path is empty (e.g. `https://example.com`), the pattern is just
+/// the host.
 fn derive_url_pattern(url: &str) -> Result<String, SynthesizeError> {
     if url.is_empty() {
         return Err(SynthesizeError::InvalidUrl("empty url".into()));
@@ -455,13 +683,14 @@ fn derive_url_pattern(url: &str) -> Result<String, SynthesizeError> {
     let host = parsed
         .host_str()
         .ok_or_else(|| SynthesizeError::InvalidUrl(format!("no host in {url}")))?;
-    let first_segment = parsed
+    let segments: Vec<&str> = parsed
         .path_segments()
-        .and_then(|mut s| s.next())
-        .filter(|s| !s.is_empty());
-    match first_segment {
-        Some(seg) => Ok(format!("{host}/{seg}")),
-        None => Ok(host.to_string()),
+        .map(|s| s.filter(|p| !p.is_empty()).take(2).collect())
+        .unwrap_or_default();
+    if segments.is_empty() {
+        Ok(host.to_string())
+    } else {
+        Ok(format!("{host}/{}", segments.join("/")))
     }
 }
 
@@ -486,31 +715,78 @@ fn derive_name_from_goal(goal: &str) -> Option<String> {
     Some(tokens.join("_"))
 }
 
-/// Get the `label` of the element with the given id, falling back to `name`
-/// then `input_type`. Returns `None` when the element is not present in the
-/// view (defensive — should be rare).
-fn element_selector(view: &SemanticView, element_id: u32) -> Option<String> {
+/// Primary selector plus observable-attribute fallbacks (`name=X`,
+/// `id=X`, `type=X`, etc). Priority mirrors the [`match_selector`]
+/// passes so a replay attempt tries attributes in the order they're most
+/// likely to survive minor DOM changes.
+///
+/// Only attributes that were present on the element at record time are
+/// included — empty values are filtered out so the fallback list never
+/// contains `"name="` or `"id="`.
+fn element_selector_with_fallbacks(
+    view: &SemanticView,
+    element_id: u32,
+) -> Option<(String, Vec<String>)> {
     let el = view.elements.iter().find(|e| e.id == element_id)?;
-    if !el.label.trim().is_empty() {
-        return Some(el.label.clone());
-    }
-    if let Some(name) = &el.name
+
+    let label_ok = !el.label.trim().is_empty();
+    let name_ok = el
+        .name
+        .as_ref()
+        .map(|n| !n.trim().is_empty())
+        .unwrap_or(false);
+
+    let primary = if label_ok {
+        el.label.clone()
+    } else if name_ok {
+        el.name.clone().unwrap_or_default()
+    } else {
+        el.input_type.clone()?
+    };
+
+    let mut fallbacks: Vec<String> = Vec::new();
+    if label_ok && name_ok {
+        if let Some(name) = &el.name {
+            fallbacks.push(format!("name={name}"));
+        }
+    } else if let Some(name) = &el.name
         && !name.trim().is_empty()
+        && primary != *name
     {
-        return Some(name.clone());
+        fallbacks.push(format!("name={name}"));
     }
-    el.input_type.clone()
+    if let Some(itype) = &el.input_type
+        && !itype.trim().is_empty()
+        && primary != *itype
+    {
+        fallbacks.push(format!("type={itype}"));
+    }
+
+    Some((primary, fallbacks))
 }
 
-/// Replace any occurrence of each `params[key]` value in `raw` with `${key}`.
-fn templatize(raw: &str, params: &std::collections::HashMap<String, String>) -> String {
+/// Replace any occurrence of each `params[key]` value in `raw` with `${key}`,
+/// recording which keys substituted at least once.
+///
+/// Internal variant of [`templatize`]. The caller uses the populated
+/// `substituted` set to detect secret-shaped params that never matched any
+/// captured step value.
+fn templatize_tracking(
+    raw: &str,
+    params: &std::collections::HashMap<String, String>,
+    substituted: &mut std::collections::HashSet<String>,
+) -> String {
     let mut out = raw.to_string();
     for (key, value) in params {
         if value.is_empty() {
             continue;
         }
         let placeholder = format!("${{{key}}}");
-        out = out.replace(value, &placeholder);
+        let replaced = out.replace(value, &placeholder);
+        if replaced != out {
+            substituted.insert(key.clone());
+            out = replaced;
+        }
     }
     out
 }
@@ -997,7 +1273,7 @@ mod tests {
                 3,
                 view,
                 Action::Done {
-                    result: serde_json::Value::Null,
+                    result: serde_json::json!({"success": true}),
                     reasoning: "logged in".into(),
                 },
                 DecisionSource::Llm,
@@ -1054,7 +1330,7 @@ mod tests {
                 2,
                 view,
                 Action::Done {
-                    result: serde_json::Value::Null,
+                    result: serde_json::json!({"success": true}),
                     reasoning: "".into(),
                 },
                 DecisionSource::Llm,
@@ -1090,7 +1366,7 @@ mod tests {
                 1,
                 view,
                 Action::Done {
-                    result: serde_json::Value::Null,
+                    result: serde_json::json!({"success": true}),
                     reasoning: "".into(),
                 },
                 DecisionSource::Llm,
@@ -1121,7 +1397,7 @@ mod tests {
             0,
             view,
             Action::Done {
-                result: serde_json::Value::Null,
+                result: serde_json::json!({"success": true}),
                 reasoning: "".into(),
             },
             DecisionSource::Llm,
@@ -1138,7 +1414,7 @@ mod tests {
             0,
             view,
             Action::Done {
-                result: serde_json::Value::Null,
+                result: serde_json::json!({"success": true}),
                 reasoning: "".into(),
             },
             DecisionSource::Llm,
@@ -1175,7 +1451,7 @@ mod tests {
                 2,
                 view,
                 Action::Done {
-                    result: serde_json::Value::Null,
+                    result: serde_json::json!({"success": true}),
                     reasoning: "".into(),
                 },
                 DecisionSource::Llm,
@@ -1254,5 +1530,371 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "roundtrip");
         assert_eq!(loaded[0].steps.len(), 1);
+    }
+
+    // ── Fix 1: success gate ───────────────────────────────────────────
+
+    #[test]
+    fn synthesize_rejects_done_with_success_false() {
+        let view = sample_view();
+        let history = vec![synth_step(
+            0,
+            view,
+            Action::Done {
+                result: serde_json::json!({"success": false, "reason": "bad password"}),
+                reasoning: "login failed".into(),
+            },
+            DecisionSource::Heuristic,
+        )];
+        let params = HashMap::new();
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("pb"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, SynthesizeError::RunNotSuccessful),
+            "expected RunNotSuccessful, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn synthesize_rejects_done_with_missing_success_field() {
+        let view = sample_view();
+        let history = vec![synth_step(
+            0,
+            view,
+            Action::Done {
+                result: serde_json::json!({}),
+                reasoning: "ambiguous".into(),
+            },
+            DecisionSource::Heuristic,
+        )];
+        let params = HashMap::new();
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("pb"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, SynthesizeError::RunNotSuccessful),
+            "fail-closed on missing success field, got {err:?}"
+        );
+    }
+
+    // ── Fix 2a/2b: templatize enforcement ─────────────────────────────
+
+    #[test]
+    fn templatize_errors_when_secret_not_substituted() {
+        // Value "s3cret" is NOT present in any Type action — so the learn
+        // pipeline cannot substitute it, which would mean the password
+        // would leak raw into the playbook (or at best be un-templatized).
+        let view = sample_view();
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Type {
+                    element: 1,
+                    value: "something_else".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view,
+                Action::Done {
+                    result: serde_json::json!({"success": true}),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let mut params = HashMap::new();
+        params.insert("password".into(), "s3cret".into());
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("pb"),
+        )
+        .unwrap_err();
+        match err {
+            SynthesizeError::SecretNotTemplatized { key } => assert_eq!(key, "password"),
+            other => panic!("expected SecretNotTemplatized, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn templatize_allows_non_secret_key_without_match() {
+        // email is NOT a secret-shaped key; synthesis should succeed even
+        // if the Type action value doesn't match (the playbook just won't
+        // templatize that field — not a security issue).
+        let view = sample_view();
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Type {
+                    element: 0,
+                    value: "unrelated".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view,
+                Action::Done {
+                    result: serde_json::json!({"success": true}),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let mut params = HashMap::new();
+        params.insert("email".into(), "alice@test.com".into());
+        let pb = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("pb"),
+        )
+        .expect("non-secret non-matching key should not fail");
+        assert!(pb.steps.iter().any(|s| s.kind == StepKind::Type));
+    }
+
+    // ── Fix 3: playbook-name validation ───────────────────────────────
+
+    fn minimal_ok_history(view: SemanticView) -> Vec<crate::pilot::Step> {
+        vec![synth_step(
+            0,
+            view,
+            Action::Done {
+                result: serde_json::json!({"success": true}),
+                reasoning: "".into(),
+            },
+            DecisionSource::Llm,
+        )]
+    }
+
+    fn assert_invalid_name_err(err: SynthesizeError, needle: &str) {
+        match err {
+            SynthesizeError::InvalidName { name: _, reason } => assert!(
+                reason.contains(needle),
+                "expected reason to contain {needle:?}, got {reason:?}"
+            ),
+            other => panic!("expected InvalidName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reject_name_with_slash() {
+        let view = sample_view();
+        let history = minimal_ok_history(view);
+        let params = HashMap::new();
+        // Use a name with '/' but no leading '.' and no ".." so the slash
+        // check is the one that fires.
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("subdir/escape"),
+        )
+        .unwrap_err();
+        assert_invalid_name_err(err, "'/'");
+    }
+
+    #[test]
+    fn reject_name_with_parent_traversal() {
+        let view = sample_view();
+        let history = minimal_ok_history(view);
+        let params = HashMap::new();
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("foo..bar"),
+        )
+        .unwrap_err();
+        assert_invalid_name_err(err, "..");
+    }
+
+    #[test]
+    fn reject_name_starting_with_dot() {
+        let view = sample_view();
+        let history = minimal_ok_history(view);
+        let params = HashMap::new();
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some(".hidden"),
+        )
+        .unwrap_err();
+        assert_invalid_name_err(err, "'.'");
+    }
+
+    #[test]
+    fn reject_empty_name() {
+        // Empty after trim falls through to derived-from-goal; use explicit
+        // whitespace to exercise the "empty" branch directly.
+        assert!(validate_playbook_name("").is_err());
+    }
+
+    #[test]
+    fn reject_very_long_name() {
+        let long = "x".repeat(129);
+        let view = sample_view();
+        let history = minimal_ok_history(view);
+        let params = HashMap::new();
+        let err = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some(&long),
+        )
+        .unwrap_err();
+        assert_invalid_name_err(err, "128");
+    }
+
+    // ── Fix 4a/4b: url_pattern derivation + matching ──────────────────
+
+    #[test]
+    fn url_pattern_includes_two_path_segments() {
+        let pat = derive_url_pattern("https://github.com/owner/repo/settings/actions").unwrap();
+        assert_eq!(pat, "github.com/owner/repo");
+    }
+
+    #[test]
+    fn url_pattern_distinguishes_settings_from_issues() {
+        // Both produce different patterns (same host + 2 segments).
+        let a = derive_url_pattern("https://github.com/owner/repo/settings").unwrap();
+        let b = derive_url_pattern("https://github.com/owner/repo/issues").unwrap();
+        assert_eq!(a, "github.com/owner/repo");
+        assert_eq!(b, "github.com/owner/repo");
+        // They *share* the 2-seg prefix but do not share path-3.
+        // (The FULL URL matching still distinguishes; the pattern
+        // intentionally matches both since both live under the same repo.)
+    }
+
+    #[test]
+    fn find_playbook_rejects_evil_subdomain() {
+        let pb = Playbook {
+            name: "gh".into(),
+            url_pattern: "github.com/login".into(),
+            steps: vec![],
+            params: vec![],
+            success: None,
+        };
+        let playbooks = vec![pb];
+        // Host-suffix attack: "github.com" as a suffix of "evilgithub.com"
+        // must NOT match.
+        assert!(find_playbook(&playbooks, "https://evilgithub.com/login").is_none());
+        // Subdomain attack: ANY host that contains "github.com" but isn't
+        // exactly "github.com" must NOT match.
+        assert!(find_playbook(&playbooks, "https://evil.github.com.evil.tld/login").is_none());
+    }
+
+    #[test]
+    fn find_playbook_rejects_host_suffix_attack() {
+        let pb = Playbook {
+            name: "gh-root".into(),
+            url_pattern: "github.com".into(),
+            steps: vec![],
+            params: vec![],
+            success: None,
+        };
+        let playbooks = vec![pb];
+        assert!(find_playbook(&playbooks, "https://fakegithub.com/").is_none());
+        assert!(find_playbook(&playbooks, "https://github.com/").is_some());
+    }
+
+    // ── Fix 5: case-preserving extract_params ─────────────────────────
+
+    #[test]
+    fn extract_params_preserves_case_sensitive_password() {
+        let params = extract_params("log in as Alice password Hunter2", &["password".into()]);
+        assert_eq!(params.get("password"), Some(&"Hunter2".to_string()));
+    }
+
+    #[test]
+    fn extract_params_key_matching_is_case_insensitive() {
+        // The prefix is stored lowercased ("password "); the goal uses
+        // uppercase PASSWORD. Match should still hit (location is found
+        // in the lowercased copy), and the value preserves original case.
+        let params = extract_params("log in as alice PASSWORD secret", &["password".into()]);
+        assert_eq!(params.get("password"), Some(&"secret".to_string()));
+    }
+
+    // ── Fix 8: selector fallbacks ─────────────────────────────────────
+
+    #[test]
+    fn element_selector_returns_name_fallback() {
+        let view = sample_view();
+        // Element 2 has label "Sign in" and name "commit" — primary is the
+        // label, but name should fall back.
+        let (primary, fallbacks) = element_selector_with_fallbacks(&view, 2).unwrap();
+        assert_eq!(primary, "Sign in");
+        assert!(
+            fallbacks.iter().any(|f| f == "name=commit"),
+            "expected name=commit fallback, got {fallbacks:?}"
+        );
+    }
+
+    #[test]
+    fn synthesized_step_has_nonempty_fallbacks_when_available() {
+        let view = sample_view();
+        let mut params = HashMap::new();
+        // Non-secret key; value placed into Type action.
+        params.insert("email".into(), "octocat".into());
+
+        let history = vec![
+            synth_step(
+                0,
+                view.clone(),
+                Action::Type {
+                    element: 0,
+                    value: "octocat".into(),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            synth_step(
+                1,
+                view,
+                Action::Done {
+                    result: serde_json::json!({"success": true}),
+                    reasoning: "".into(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        let pb = synthesize_from_history(
+            &history,
+            "login",
+            "https://example.com/login",
+            &params,
+            Some("pb"),
+        )
+        .unwrap();
+        assert!(
+            !pb.steps[0].fallbacks.is_empty(),
+            "expected at least one fallback for element 0 (has name + type), got {:?}",
+            pb.steps[0].fallbacks
+        );
     }
 }

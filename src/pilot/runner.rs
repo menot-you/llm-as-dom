@@ -65,7 +65,12 @@ pub async fn run_pilot(
     let mut prev_element_count: Option<usize> = None;
     let mut prev_acted_count: Option<usize> = None;
     let mut stale_streak: u32 = 0;
-    let mut initial_url: Option<String> = None;
+    // FIX-4c: prefer `config.initial_url` (the pilot's `--url` input) over
+    // the first observation. An OAuth bounce to a third-party IdP would
+    // otherwise replace the canonical pattern and cause future replay to
+    // miss. Falls back to the first observed URL only when no config URL
+    // was provided (legacy callers).
+    let mut initial_url: Option<String> = config.initial_url.clone();
 
     for step_idx in 0..config.max_steps {
         let step_start = Instant::now();
@@ -203,13 +208,26 @@ pub async fn run_pilot(
             DecisionSource::Llm => llm_hits += 1,
         }
 
-        tracing::info!(
-            step = step_idx,
-            source = ?source,
-            action = ?action,
-            duration_ms = step_duration.as_millis() as u64,
-            "decided"
-        );
+        // Redact Type value in learn mode so per-step log never dumps raw
+        // credentials (visible in journalctl, Sentry, etc.).
+        if config.learn.is_some() {
+            let redacted = redact_action_for_learn(&action);
+            tracing::info!(
+                step = step_idx,
+                source = ?source,
+                action = %redacted,
+                duration_ms = step_duration.as_millis() as u64,
+                "decided"
+            );
+        } else {
+            tracing::info!(
+                step = step_idx,
+                source = ?source,
+                action = ?action,
+                duration_ms = step_duration.as_millis() as u64,
+                "decided"
+            );
+        }
 
         if let Action::Type { element, .. } | Action::Click { element, .. } = &action {
             acted_on.push(*element);
@@ -229,7 +247,7 @@ pub async fn run_pilot(
             let success = matches!(&action, Action::Done { .. });
             history.push(step);
             if success {
-                maybe_learn_playbook(config, &history, initial_url.as_deref());
+                maybe_learn_playbook(config, &history, initial_url.as_deref(), playbook_hits);
             }
             let session_snapshot = match &session {
                 Some(s) => Some(s.lock().await.clone()),
@@ -331,24 +349,89 @@ pub async fn run_pilot(
     })
 }
 
+/// Decision produced by [`learn_decision`] — used by `maybe_learn_playbook`
+/// to decide whether to call into synthesis, and exposed here so the guard
+/// logic is unit-testable without a real pilot loop.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LearnDecision {
+    /// There is new non-replay work in the history — synthesize.
+    Synthesize,
+    /// Every non-terminal step came from a playbook match — pure replay.
+    PureReplay,
+    /// No playbook matched and no actionable non-terminal step exists
+    /// either (pathological: the run terminated before doing anything).
+    NoActionable,
+}
+
+/// Decide whether the current history represents "new work" or just a pure
+/// playbook replay. A successful run with zero non-replay, non-terminal
+/// steps is rejected — learning from replay only overwrites the original
+/// playbook with itself and spams logs.
+pub(crate) fn learn_decision(history: &[Step], playbook_hits: u32) -> LearnDecision {
+    let has_new_work = history.iter().any(|s| {
+        matches!(s.source, DecisionSource::Llm | DecisionSource::Heuristic)
+            && !matches!(s.action, Action::Done { .. })
+    });
+    if has_new_work {
+        LearnDecision::Synthesize
+    } else if playbook_hits > 0 {
+        LearnDecision::PureReplay
+    } else {
+        LearnDecision::NoActionable
+    }
+}
+
+/// Render an `Action` for logging in learn mode, hiding the raw `value` of
+/// `Type` actions so credentials don't end up in tracing backends (stderr,
+/// Sentry, journalctl, etc.). Shared with the `lad` binary's summary-print
+/// via `pilot::redact_action_for_learn`.
+pub fn redact_action_for_learn(action: &Action) -> String {
+    match action {
+        Action::Type { element, value, .. } => {
+            format!(
+                "Type {{ element: {element}, value: <redacted len={}> }}",
+                value.len()
+            )
+        }
+        other => format!("{other:?}"),
+    }
+}
+
 /// Synthesize and persist a playbook from a successful run, if `config.learn`
 /// is enabled.
 ///
 /// Non-fatal: logs a warning on any failure path and returns silently. Only
 /// fires when the run actually contains non-Tier-0 decisions (a pure playbook
 /// replay has nothing new to learn).
-fn maybe_learn_playbook(config: &PilotConfig, history: &[Step], initial_url: Option<&str>) {
+fn maybe_learn_playbook(
+    config: &PilotConfig,
+    history: &[Step],
+    initial_url: Option<&str>,
+    playbook_hits: u32,
+) {
     let Some(learn) = config.learn.as_ref() else {
         return;
     };
-    // Only learn when at least one step was *not* a Tier 0 replay — otherwise
-    // we'd just overwrite the playbook with itself.
-    let has_new_work = history
-        .iter()
-        .any(|s| !matches!(s.source, DecisionSource::Playbook));
-    if !has_new_work {
-        tracing::info!("learn: run was pure playbook replay, nothing to synthesize");
-        return;
+    // FIX-6: the OLD guard (`any step where source != Playbook`) was always
+    // true because the terminal `Done` is produced by a heuristic/LLM, never
+    // Playbook. That made the guard a no-op and "pure replays" were being
+    // persisted as "learned" playbooks — unnecessary writes, noisy logs, and
+    // an overwrite of the original. The NEW guard:
+    //   1. counts non-terminal steps that came from LLM or Heuristic as
+    //      "new work" (Hints count as Playbook-adjacent policy — configurable
+    //      later if needed; for now treat hints as deterministic replay),
+    //   2. AND short-circuits when a playbook was even matched at all
+    //      (`playbook_hits > 0` ∧ `has_new_work == false` ⇒ pure replay).
+    match learn_decision(history, playbook_hits) {
+        LearnDecision::Synthesize => {}
+        LearnDecision::PureReplay => {
+            tracing::info!("learn: run was pure playbook replay, nothing to synthesize");
+            return;
+        }
+        LearnDecision::NoActionable => {
+            tracing::info!("learn: run produced no actionable non-terminal steps");
+            return;
+        }
     }
     let Some(initial) = initial_url else {
         tracing::warn!("learn: no initial URL captured, skipping synthesis");
@@ -367,5 +450,144 @@ fn maybe_learn_playbook(config: &PilotConfig, history: &[Step], initial_url: Opt
             Err(e) => tracing::warn!(error = %e, "failed to save learned playbook"),
         },
         Err(e) => tracing::warn!(error = %e, "skipped playbook synthesis"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pilot::{DecisionSource, Step};
+    use crate::semantic::{PageState, SemanticView};
+    use std::time::Duration;
+
+    fn empty_view() -> SemanticView {
+        SemanticView {
+            url: "https://example.com/login".into(),
+            title: String::new(),
+            page_hint: String::new(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: String::new(),
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        }
+    }
+
+    fn mkstep(idx: u32, action: Action, source: DecisionSource) -> Step {
+        Step {
+            index: idx,
+            observation: empty_view(),
+            action,
+            source,
+            confidence: 0.9,
+            duration: Duration::from_millis(1),
+        }
+    }
+
+    #[test]
+    fn guard_skips_save_on_pure_replay() {
+        // 3 Playbook Type/Click steps + 1 Llm Done (the only non-Playbook
+        // step in the history is the terminal Done).
+        let history = vec![
+            mkstep(
+                0,
+                Action::Type {
+                    element: 0,
+                    value: "x".into(),
+                    reasoning: String::new(),
+                },
+                DecisionSource::Playbook,
+            ),
+            mkstep(
+                1,
+                Action::Type {
+                    element: 1,
+                    value: "y".into(),
+                    reasoning: String::new(),
+                },
+                DecisionSource::Playbook,
+            ),
+            mkstep(
+                2,
+                Action::Click {
+                    element: 2,
+                    reasoning: String::new(),
+                },
+                DecisionSource::Playbook,
+            ),
+            mkstep(
+                3,
+                Action::Done {
+                    result: serde_json::json!({"success": true}),
+                    reasoning: String::new(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        assert_eq!(learn_decision(&history, 3), LearnDecision::PureReplay);
+    }
+
+    #[test]
+    fn guard_allows_save_on_mixed_replay_plus_new_step() {
+        // 3 Playbook steps + 1 Heuristic Click (new work) + 1 Llm Done.
+        let history = vec![
+            mkstep(
+                0,
+                Action::Type {
+                    element: 0,
+                    value: "x".into(),
+                    reasoning: String::new(),
+                },
+                DecisionSource::Playbook,
+            ),
+            mkstep(
+                1,
+                Action::Type {
+                    element: 1,
+                    value: "y".into(),
+                    reasoning: String::new(),
+                },
+                DecisionSource::Playbook,
+            ),
+            mkstep(
+                2,
+                Action::Click {
+                    element: 2,
+                    reasoning: String::new(),
+                },
+                DecisionSource::Playbook,
+            ),
+            mkstep(
+                3,
+                Action::Click {
+                    element: 3,
+                    reasoning: String::new(),
+                },
+                DecisionSource::Heuristic,
+            ),
+            mkstep(
+                4,
+                Action::Done {
+                    result: serde_json::json!({"success": true}),
+                    reasoning: String::new(),
+                },
+                DecisionSource::Llm,
+            ),
+        ];
+        assert_eq!(learn_decision(&history, 3), LearnDecision::Synthesize);
+    }
+
+    #[test]
+    fn redact_hides_value() {
+        let action = Action::Type {
+            element: 9,
+            value: "topsecret".into(),
+            reasoning: "test".into(),
+        };
+        let rendered = redact_action_for_learn(&action);
+        assert!(rendered.contains("len=9"));
+        assert!(!rendered.contains("topsecret"));
     }
 }
