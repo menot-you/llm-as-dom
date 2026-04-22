@@ -254,9 +254,21 @@ const A11Y_CHECKS: &str = r#"
     }
 
     // A11Y-6 (FR-6): heading hierarchy skips. Either no <h1> at all, or
-    // a heading jumps a level (e.g. <h3> with no <h2> ancestor above it
-    // in document order). Screen readers rely on continuous h1→h2→h3
-    // nesting to expose the page outline.
+    // a heading jumps a level (e.g. <h3> with no prior <h2>). Screen
+    // readers rely on continuous h1→h2→h3 nesting to expose the page
+    // outline.
+    //
+    // Skip-detection scope: we walk headings INSIDE the primary content
+    // landmark (`<main>` if present, else `document.body`). Headings
+    // inside complementary landmarks (`<aside>`, `<nav>`, `<header>`,
+    // `<footer>`) are excluded because each landmark may legitimately
+    // start its own outline (per HTML5 sectioning algorithm). This
+    // matches `axe-core`'s `heading-order` behavior and trades a class
+    // of false positives (h1 → h3 across landmark boundaries) for the
+    // residual document-order limitation that remains within `<main>`.
+    // The `h1Count` check still spans the full document — every page
+    // should declare exactly one top-level heading regardless of
+    // landmark layout.
     (() => {
         const h1Count = document.querySelectorAll('h1').length;
         if (h1Count === 0) {
@@ -268,7 +280,12 @@ const A11Y_CHECKS: &str = r#"
             });
         }
         // Flag each heading that skips from <hN-1> — e.g. h3 with no prior h2.
-        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+        // Scope to <main> when present so landmark sub-trees don't
+        // generate false positives.
+        const scope = document.querySelector('main') || document.body;
+        if (!scope) return;
+        const headings = Array.from(scope.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+            .filter(h => !h.closest('aside, nav, header, footer'));
         let lastLevel = 0;
         for (const h of headings) {
             const level = parseInt(h.tagName.substring(1), 10);
@@ -415,7 +432,12 @@ const LINKS_CHECKS: &str = r##"
     // noreferrer is the flag that suppresses the Referer header — some
     // analytics pipelines treat the two as interchangeable and ship
     // only noopener, leaving the referrer leak intact.
-    document.querySelectorAll('a[target=_blank]').forEach(el => {
+    //
+    // The `target` selector uses the case-insensitive `i` flag so
+    // `target="_BLANK"` (rare but spec-legal) is also caught. LINKS-2
+    // above keeps its case-sensitive form for now — pre-existing rule,
+    // out of scope for FR-6; tracked as a follow-up nit.
+    document.querySelectorAll('a[target="_blank" i]').forEach(el => {
         const rel = (el.getAttribute('rel') || '').toLowerCase();
         if (rel.includes('noopener') && !rel.includes('noreferrer')) {
             issues.push({
@@ -488,7 +510,10 @@ mod tests {
     #[test]
     fn build_js_a11y_has_heading_hierarchy_rule() {
         let js = build_audit_js(&["a11y".into()]);
-        assert!(js.contains("A11Y-6"), "A11Y-6 heading hierarchy rule missing");
+        assert!(
+            js.contains("A11Y-6"),
+            "A11Y-6 heading hierarchy rule missing"
+        );
         assert!(
             js.contains("Page has no <h1> heading"),
             "heading rule should flag missing h1"
