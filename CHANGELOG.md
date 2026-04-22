@@ -42,6 +42,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than "explicit empty" — falls through to the NL parse / no-limit branch
   to avoid silent empty results. Non-matching phrasing returns the full
   filtered list (FR-2 from `docs/friction-log-2026-04-22.md`).
+- *(a11y)* HINT classifier no longer labels `<article>`/repo content as
+  `navigation/listing page` just because the DOM carries > 10 links. New
+  `article/repo page` hint fires on (a) DOM signal — `<article>`,
+  `<main role=main>`, Schema.org `itemtype`, `og:type` meta — OR (b) URL
+  pattern `/owner/repo(/issues|pulls|wiki|tree|blob|commits|releases|
+  tags|discussions|actions)?` on allow-listed hosts (github.com,
+  gitlab.com, bitbucket.org, codeberg.org, sr.ht). Login, search, and
+  form detection still win over both branches so auth-gate detection
+  does not regress. HN paginator (`news.ycombinator.com/news/2`) and
+  other generic sites outside the allowlist keep their existing
+  `navigation/listing page` classification (FR-4 from
+  `docs/friction-log-2026-04-22.md`).
+- *(a11y)* Extended label fallback chain for interactive elements so
+  icon-only buttons stop surfacing as `Button type=button ""`. New
+  fallback order: `aria-label → <label> → placeholder → textContent →
+  title → testid → SVG <title> descendant → aria-describedby resolved
+  text → data-label / data-name → <unlabeled:${role}>` sentinel. The
+  explicit sentinel replaces silent empty strings on buttons and
+  inputs so the agent can tell a genuinely unlabeled control from a
+  parse failure (FR-5 from `docs/friction-log-2026-04-22.md`).
 
 ## [0.13.1](https://github.com/menot-you/llm-as-dom/compare/v0.13.0...v0.13.1) - 2026-04-17
 

@@ -252,12 +252,48 @@ pub async fn extract_semantic_view_with_options(
                     const href = el.getAttribute('href') || '';
                     // DX-CE3: data-testid fallback for unlabelled editor roots.
                     const testId = editor ? (el.getAttribute('data-testid') || '') : '';
-                    let label = (ariaLabel || labelText || placeholder || textContent || elTitle || testId || '').replace(/\s+/g, ' ').trim();
+                    // FR-5 (friction-log-2026-04-22): extended fallback
+                    // chain so icon-only buttons (close X, menu ≡, search ⌕)
+                    // stop surfacing as `Button type=button ""`. Priority
+                    // order keeps explicit labels (aria, label, placeholder)
+                    // over DOM-inferred ones (svg title, data-*).
+                    //   1. aria-label
+                    //   2. <label> text
+                    //   3. placeholder / aria-placeholder
+                    //   4. textContent (skipped for editors)
+                    //   5. title attribute
+                    //   6. data-testid (editors only, already fallbacks)
+                    //   7. SVG <title> descendant — icon-only buttons
+                    //   8. aria-describedby text — resolved from referenced node
+                    //   9. data-label — common on Tailwind/SaaS toolkits
+                    const svgTitle = (() => {
+                        try {
+                            return el.querySelector('svg > title, svg > desc')?.textContent?.trim() || '';
+                        } catch (_) { return ''; }
+                    })();
+                    const describedByText = (() => {
+                        const id = el.getAttribute('aria-describedby');
+                        if (!id) return '';
+                        try {
+                            const refs = id.split(/\s+/).filter(Boolean);
+                            const texts = refs.map(r => document.getElementById(r)?.textContent?.trim() || '');
+                            return texts.filter(Boolean).join(' ').substring(0, 80);
+                        } catch (_) { return ''; }
+                    })();
+                    const dataLabel = el.getAttribute('data-label') || el.getAttribute('data-name') || '';
+                    let label = (ariaLabel || labelText || placeholder || textContent || elTitle || testId || svgTitle || describedByText || dataLabel || '').replace(/\s+/g, ' ').trim();
                     if (!label && kind === 'link' && href) {
                         label = href.split('/').filter(Boolean).pop() || '';
                     }
                     if (!label && editor) {
                         label = 'text editor';
+                    }
+                    // FR-5: explicit marker for still-unlabeled interactive
+                    // elements so agents see `<unlabeled:button>` instead
+                    // of a silent empty string. Skip links: link labels
+                    // already fall back to the href tail above.
+                    if (!label && (kind === 'button' || kind === 'input')) {
+                        label = `<unlabeled:${kind}>`;
                     }
 
                     const closestForm = el.closest('form');
@@ -508,7 +544,26 @@ pub async fn extract_semantic_view_with_options(
                 name: f.getAttribute('name') || null,
             }));
 
-            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms };
+            // ── FR-4: article/repo structural signal ────────────────────
+            // True when the DOM advertises itself as an article or a
+            // code-hosting repository. Matches <article>, <main role=main>,
+            // Schema.org itemtype variants, and og:type meta values.
+            // Used by Rust-side classify_page() as Branch A, winning over
+            // the "many links → listing" fallback for content-heavy pages
+            // like GitHub repo roots that carry a README + 40+ nav links.
+            let articleSignal = false;
+            try {
+                if (document.querySelector('article, main[role="main"], [itemtype*="SoftwareSourceCode"], [itemtype*="Article"], [itemtype*="BlogPosting"], [itemtype*="NewsArticle"]')) {
+                    articleSignal = true;
+                } else {
+                    const og = document.querySelector('meta[property="og:type"]')?.getAttribute('content');
+                    if (og && /^(article|repository|object|blog|news)$/i.test(og.trim())) {
+                        articleSignal = true;
+                    }
+                }
+            } catch (_) { articleSignal = false; }
+
+            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms, articleSignal };
         })()
     "#;
 
@@ -577,7 +632,7 @@ pub async fn extract_semantic_view_with_options(
         })
         .collect();
 
-    let page_hint = classify_page(&title, &url, &elements);
+    let page_hint = classify_page(&title, &url, &elements, extraction.article_signal);
 
     let forms: Vec<FormMeta> = extraction
         .forms
@@ -640,6 +695,12 @@ struct JsExtraction {
     /// Form metadata collected from each `<form>` on the page.
     #[serde(default)]
     forms: Vec<JsFormMeta>,
+    /// FR-4: true when the DOM advertises itself as an article or a
+    /// code-hosting repository via `<article>`, `<main role=main>`,
+    /// Schema.org `itemtype`, or `og:type` meta. Drives the
+    /// `article/repo page` classification in [`classify_page`].
+    #[serde(default, rename = "articleSignal")]
+    article_signal: bool,
 }
 
 /// Form metadata as returned by the JS extractor.
@@ -728,8 +789,80 @@ fn parse_kind(s: &str) -> ElementKind {
     }
 }
 
+/// FR-4 (friction-log-2026-04-22): hosts where a two-segment path
+/// (`/owner/repo`) reliably denotes a code-hosting repository root.
+/// URL-based Branch B of the `article/repo page` classifier runs ONLY
+/// for these hosts, so `news.ycombinator.com/news/2` does not get
+/// misclassified as a repo just because it matches the generic pattern.
+const REPO_URL_HOST_ALLOWLIST: &[&str] = &[
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "codeberg.org",
+    "sr.ht",
+];
+
+/// FR-4: URL paths within an allow-listed repo host that should be
+/// classified as `article/repo page`. Covers the repo root and the
+/// common subpages (issues, pulls, wiki, tree, blob, commits, releases,
+/// tags) that carry long prose + many ambient links.
+fn url_matches_repo_pattern(host: &str, path: &str) -> bool {
+    if !REPO_URL_HOST_ALLOWLIST
+        .iter()
+        .any(|allowed| host.eq_ignore_ascii_case(allowed))
+    {
+        return false;
+    }
+    // Trim trailing slash so `/foo/bar/` collapses to `/foo/bar`.
+    let trimmed = path.trim_end_matches('/');
+    let segments: Vec<&str> = trimmed.split('/').filter(|s| !s.is_empty()).collect();
+    // Minimum depth for any repo URL: /owner/repo → 2 segments.
+    if segments.len() < 2 {
+        return false;
+    }
+    // Repo root: exactly two segments.
+    if segments.len() == 2 {
+        return true;
+    }
+    // Canonical subpages — matched by the third segment.
+    matches!(
+        segments[2],
+        "issues"
+            | "pulls"
+            | "pull"
+            | "wiki"
+            | "tree"
+            | "blob"
+            | "commit"
+            | "commits"
+            | "releases"
+            | "tags"
+            | "discussions"
+            | "actions"
+    )
+}
+
 /// Classify the page type from its title, URL, and element composition.
-fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
+///
+/// FR-4 (friction-log-2026-04-22): the `article/repo page` variant
+/// prevents content-heavy pages (GitHub repo roots, blog posts, docs)
+/// from being labelled `navigation/listing page` just because they
+/// happen to carry > 10 ambient links. Detection has two branches:
+/// - **Branch A (DOM)** — JS walker sets `article_signal=true` when
+///   the DOM has `<article>`, `<main role=main>`, a Schema.org
+///   `itemtype`, or an `og:type` meta. Wins over everything below
+///   `login`/`search`/`form` to keep authenticated-gate detection
+///   intact.
+/// - **Branch B (URL)** — for hosts in `REPO_URL_HOST_ALLOWLIST`, a
+///   `/owner/repo(/issues|pulls|...)?` pathname matches even when the
+///   DOM signal is missing (e.g. during the React mount race on
+///   GitHub).
+fn classify_page(
+    title: &str,
+    url: &str,
+    elements: &[Element],
+    article_signal: bool,
+) -> String {
     let lower_title = title.to_lowercase();
     let lower_url = url.to_lowercase();
 
@@ -744,6 +877,15 @@ fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
                 || e.label.to_lowercase().contains("log"))
     });
 
+    // FR-4 Branch B: URL-based repo classification. Parse once so we
+    // don't re-tokenize on every heuristic below.
+    let url_says_repo = match url::Url::parse(url) {
+        Ok(parsed) => parsed
+            .host_str()
+            .is_some_and(|host| url_matches_repo_pattern(host, parsed.path())),
+        Err(_) => false,
+    };
+
     if has_password
         || lower_title.contains("login")
         || lower_title.contains("sign in")
@@ -754,6 +896,12 @@ fn classify_page(title: &str, url: &str, elements: &[Element]) -> String {
         "search page".into()
     } else if has_inputs && has_submit {
         "form page".into()
+    } else if article_signal || url_says_repo {
+        // FR-4: Branch A (DOM signal) OR Branch B (URL pattern on
+        // allow-listed host) wins over the listing heuristic. DOM
+        // signal gets priority when both fire — that's already the
+        // case since we OR them.
+        "article/repo page".into()
     } else if elements
         .iter()
         .filter(|e| e.kind == ElementKind::Link)
@@ -1392,5 +1540,164 @@ mod tests {
         assert_eq!(extraction.forms.len(), 1);
         assert_eq!(extraction.forms[0].id, None);
         assert_eq!(extraction.forms[0].action, Some("/xuser".into()));
+    }
+
+    // ── FR-4: article/repo classifier ─────────────────────────
+
+    fn link(id: u32, label: &str, href: &str) -> Element {
+        Element {
+            id,
+            kind: ElementKind::Link,
+            label: label.into(),
+            name: None,
+            value: None,
+            placeholder: None,
+            href: Some(href.into()),
+            input_type: None,
+            disabled: false,
+            form_index: None,
+            context: None,
+            hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
+        }
+    }
+
+    fn many_links(n: usize) -> Vec<Element> {
+        (0..n)
+            .map(|i| link(i as u32, &format!("link {i}"), &format!("/p/{i}")))
+            .collect()
+    }
+
+    #[test]
+    fn classify_article_signal_wins_over_listing() {
+        // 40 ambient links would normally trigger navigation/listing, but
+        // DOM's `<article>` signal promotes the page to article/repo.
+        let elements = many_links(40);
+        let hint = classify_page("GitHub", "https://github.com/anthropics/claude-code", &elements, true);
+        assert_eq!(hint, "article/repo page");
+    }
+
+    #[test]
+    fn classify_url_pattern_repo_root_without_dom_signal() {
+        // No <article>, but URL is /owner/repo on a repo-host allowlist.
+        let elements = many_links(15);
+        let hint = classify_page(
+            "anthropics/claude-code · GitHub",
+            "https://github.com/anthropics/claude-code",
+            &elements,
+            false,
+        );
+        assert_eq!(hint, "article/repo page");
+    }
+
+    #[test]
+    fn classify_url_pattern_repo_issues() {
+        let hint = classify_page(
+            "Issue #42",
+            "https://github.com/anthropics/claude-code/issues/42",
+            &many_links(30),
+            false,
+        );
+        assert_eq!(hint, "article/repo page");
+    }
+
+    #[test]
+    fn classify_url_pattern_gitlab_blob() {
+        let hint = classify_page(
+            "file.rs",
+            "https://gitlab.com/owner/repo/blob/main/src/file.rs",
+            &many_links(12),
+            false,
+        );
+        assert_eq!(hint, "article/repo page");
+    }
+
+    #[test]
+    fn classify_hn_news_pagination_not_a_repo() {
+        // FR-4 protects against the false positive on `/owner/bar` shape
+        // outside the allowlist — HN paginator at news.ycombinator.com
+        // must stay a navigation/listing page.
+        let hint = classify_page(
+            "Hacker News",
+            "https://news.ycombinator.com/news/2",
+            &many_links(40),
+            false,
+        );
+        assert_eq!(hint, "navigation/listing page");
+    }
+
+    #[test]
+    fn classify_article_signal_wins_over_url_pattern() {
+        // DOM signal beats URL absence — blog post on a custom domain
+        // still classifies as article/repo when <article> is present.
+        let hint = classify_page(
+            "Post",
+            "https://blog.example.com/2026/post",
+            &many_links(25),
+            true,
+        );
+        assert_eq!(hint, "article/repo page");
+    }
+
+    #[test]
+    fn classify_listing_preserved_when_no_signal_and_not_repo_host() {
+        // Regression: plain listing pages without the article signal
+        // keep their existing classification.
+        let hint = classify_page("News", "https://example.com/news", &many_links(15), false);
+        assert_eq!(hint, "navigation/listing page");
+    }
+
+    #[test]
+    fn classify_login_wins_over_article_signal() {
+        // <article>-bearing login pages (rare but possible) still
+        // register as login so auth-gate detection does not regress.
+        let mut elements = many_links(5);
+        elements.push(Element {
+            id: 99,
+            kind: ElementKind::Input,
+            label: "password".into(),
+            name: Some("password".into()),
+            value: None,
+            placeholder: None,
+            href: None,
+            input_type: Some("password".into()),
+            disabled: false,
+            form_index: Some(0),
+            context: None,
+            hint: None,
+            checked: None,
+            options: None,
+            frame_index: None,
+            is_visible: None,
+        });
+        let hint = classify_page("Sign in", "https://example.com/login", &elements, true);
+        assert_eq!(hint, "login page");
+    }
+
+    #[test]
+    fn url_repo_pattern_allowlist_gates() {
+        // github.com: /owner/repo → match.
+        assert!(url_matches_repo_pattern("github.com", "/anthropics/claude-code"));
+        // gitlab.com: /owner/repo/pulls → match.
+        assert!(url_matches_repo_pattern("gitlab.com", "/owner/repo/pulls"));
+        // codeberg.org: commits subpage.
+        assert!(url_matches_repo_pattern("codeberg.org", "/owner/repo/commits/main"));
+        // Non-allowlisted host: same shape, should NOT match.
+        assert!(!url_matches_repo_pattern("news.ycombinator.com", "/user/pg"));
+        assert!(!url_matches_repo_pattern("news.ycombinator.com", "/news/2"));
+        // Allowlisted host but depth-1 path: not a repo.
+        assert!(!url_matches_repo_pattern("github.com", "/settings"));
+        // Allowlisted host, repo root with trailing slash.
+        assert!(url_matches_repo_pattern("github.com", "/owner/repo/"));
+        // Random subpage outside the canonical set on a repo host.
+        assert!(!url_matches_repo_pattern("github.com", "/owner/repo/something-random"));
+    }
+
+    #[test]
+    fn url_repo_pattern_case_insensitive_host() {
+        assert!(url_matches_repo_pattern("GitHub.com", "/owner/repo"));
     }
 }
