@@ -521,6 +521,29 @@ impl PageHandle for ChromiumPage {
         tracing::debug!("network tracking enabled");
         Ok(true)
     }
+
+    /// BUG-2: close the CDP target so ephemeral audit pages do not leak.
+    ///
+    /// We do NOT consume `chromiumoxide::Page` (its `close(self)` method
+    /// moves ownership, which conflicts with `&mut self` on the trait).
+    /// Instead, we drive the `Target.closeTarget` CDP command directly.
+    /// After it succeeds the target is gone on Chrome's side; subsequent
+    /// calls on this handle will error naturally.
+    async fn close(&mut self) -> Result<(), crate::Error> {
+        use chromiumoxide::cdp::browser_protocol::target::{CloseTargetParams, TargetId};
+
+        if !self.alive.load(Ordering::Relaxed) {
+            // Browser already dead — nothing to do, avoid spurious errors.
+            return Ok(());
+        }
+
+        let target_id = TargetId::new(self.page.target_id().as_ref());
+        self.page
+            .execute(CloseTargetParams::new(target_id))
+            .await
+            .map_err(cdp_err)?;
+        Ok(())
+    }
 }
 
 /// FIX-R3-10: Determine whether `--no-sandbox` should be passed to Chromium.

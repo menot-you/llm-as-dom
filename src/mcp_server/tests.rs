@@ -866,3 +866,26 @@ fn extract_params_format_json() {
     let p: ExtractParams = serde_json::from_str(json).unwrap();
     assert_eq!(p.format.as_deref(), Some("json"));
 }
+
+// ── BUG-2: AuditParams return_tab ────────────────────────────
+
+#[test]
+fn audit_params_default_return_tab_none() {
+    let json = r#"{"url":"https://example.com"}"#;
+    let p: AuditParams = serde_json::from_str(json).unwrap();
+    assert!(p.return_tab.is_none());
+}
+
+#[test]
+fn audit_params_return_tab_true() {
+    let json = r#"{"url":"https://example.com","return_tab":true}"#;
+    let p: AuditParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.return_tab, Some(true));
+}
+
+#[test]
+fn audit_params_return_tab_false_explicit() {
+    let json = r#"{"url":"https://example.com","return_tab":false}"#;
+    let p: AuditParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.return_tab, Some(false));
+}

@@ -147,6 +147,32 @@ pub trait PageHandle: Send + Sync {
     async fn stop_monitoring(&self) -> Result<(), crate::Error> {
         Ok(())
     }
+
+    /// Close the underlying page/target and release browser resources.
+    ///
+    /// **Default implementation is a noop** — used by engines whose page
+    /// lifetime matches the engine lifetime (e.g. WebKit single-page bridge:
+    /// no per-tab target exists; closing the engine releases everything).
+    ///
+    /// Chromium overrides this to issue `Target.closeTarget` via CDP. After
+    /// a successful close, further operations on this handle will fail
+    /// naturally (target gone on the Chrome side).
+    ///
+    /// **Asymmetry warning**: the default returns `Ok(())` without releasing
+    /// anything, while the Chromium override returns `Ok(())` only after the
+    /// target is freed. On WebKit, ephemeral pages spawned via `lad_audit`
+    /// with `return_tab=false` will NOT be released by `close()` — they
+    /// persist until the engine itself is shut down. Tracked as a follow-up:
+    /// WebKit needs a target-pool abstraction before it can honor the
+    /// release contract.
+    ///
+    /// Callers that produced an ephemeral page (e.g. `lad_audit` with
+    /// `return_tab=false`) MUST invoke this before dropping the handle so
+    /// that the Chrome target is released instead of leaking; do not rely on
+    /// it as a hard release signal when the engine could be WebKit.
+    async fn close(&mut self) -> Result<(), crate::Error> {
+        Ok(())
+    }
 }
 
 /// Convenience: evaluate JS and deserialize into `T`.
@@ -173,5 +199,57 @@ pub async fn eval_js_into<T: DeserializeOwned>(
                 )))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BUG-2: stub-based regression for the default `close()` impl.
+    /// Stands in for the WebKit-shaped contract — no per-page target to
+    /// release, just confirm the call returns `Ok(())` and never panics.
+    /// The Chromium override is exercised by the `#[ignore]` integration
+    /// test `test_chromium_page_close_releases_target`.
+    struct StubPage;
+
+    #[async_trait]
+    impl PageHandle for StubPage {
+        async fn eval_js(&self, _: &str) -> Result<serde_json::Value, crate::Error> {
+            Ok(serde_json::Value::Null)
+        }
+        async fn navigate(&self, _: &str) -> Result<(), crate::Error> {
+            Ok(())
+        }
+        async fn wait_for_navigation(&self) -> Result<(), crate::Error> {
+            Ok(())
+        }
+        async fn url(&self) -> Result<String, crate::Error> {
+            Ok(String::new())
+        }
+        async fn title(&self) -> Result<String, crate::Error> {
+            Ok(String::new())
+        }
+        async fn screenshot_png(&self) -> Result<Vec<u8>, crate::Error> {
+            Ok(Vec::new())
+        }
+        async fn cookies(&self) -> Result<Vec<crate::session::CookieEntry>, crate::Error> {
+            Ok(Vec::new())
+        }
+        async fn set_cookies(&self, _: &[crate::session::CookieEntry]) -> Result<(), crate::Error> {
+            Ok(())
+        }
+        // close, set_input_files, enable_network_monitoring, start_monitoring,
+        // stop_monitoring all use trait defaults — that's the point.
+    }
+
+    #[tokio::test]
+    async fn pagehandle_close_default_returns_ok() {
+        let mut p = StubPage;
+        let result = (&mut p as &mut dyn PageHandle).close().await;
+        assert!(
+            result.is_ok(),
+            "default PageHandle::close() must return Ok(()), got {result:?}"
+        );
     }
 }

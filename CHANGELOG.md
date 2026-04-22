@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Bug Fixes
+- *(audit)* Prevent ephemeral Chrome target leak and make active-tab lifecycle
+  explicit. `lad_audit` now always returns `audit_ephemeral: bool` and
+  `audit_tab: null | {tab_id, url}`. Default behavior (`return_tab=false`) closes
+  the audit page via a new `PageHandle::close()` trait method so the CDP target
+  is released; the previously active tab (e.g. a logged-in session) is
+  preserved. Passing `return_tab=true` promotes the audit page into the tab
+  pool and exposes its `tab_id` for follow-up tools (BUG-2 from
+  `docs/friction-log-2026-04-22.md`).
+
 ## [0.13.1](https://github.com/menot-you/llm-as-dom/compare/v0.13.0...v0.13.1) - 2026-04-17
 
 ### Bug Fixes
