@@ -184,7 +184,7 @@ pub struct RawAuditIssue {
 
 // ── JS check fragments ────────────────────────────────────────────
 
-/// Accessibility checks (5 rules).
+/// Accessibility checks (6 rules).
 const A11Y_CHECKS: &str = r#"
     // A11Y-1: Images without alt text
     document.querySelectorAll('img').forEach(el => {
@@ -252,9 +252,40 @@ const A11Y_CHECKS: &str = r#"
             suggestion: 'Add lang="en" (or appropriate language) to the <html> tag',
         });
     }
+
+    // A11Y-6 (FR-6): heading hierarchy skips. Either no <h1> at all, or
+    // a heading jumps a level (e.g. <h3> with no <h2> ancestor above it
+    // in document order). Screen readers rely on continuous h1→h2→h3
+    // nesting to expose the page outline.
+    (() => {
+        const h1Count = document.querySelectorAll('h1').length;
+        if (h1Count === 0) {
+            issues.push({
+                category: 'a11y', severity: 'warning',
+                element: 'html',
+                message: 'Page has no <h1> heading',
+                suggestion: 'Add exactly one <h1> describing the page purpose',
+            });
+        }
+        // Flag each heading that skips from <hN-1> — e.g. h3 with no prior h2.
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+        let lastLevel = 0;
+        for (const h of headings) {
+            const level = parseInt(h.tagName.substring(1), 10);
+            if (lastLevel > 0 && level > lastLevel + 1) {
+                issues.push({
+                    category: 'a11y', severity: 'warning',
+                    element: ident(h),
+                    message: 'Heading skips level (<h' + lastLevel + '> → <h' + level + '>)',
+                    suggestion: 'Promote the heading so levels increase by at most 1',
+                });
+            }
+            lastLevel = level;
+        }
+    })();
 "#;
 
-/// Form checks (4 rules).
+/// Form checks (6 rules).
 const FORMS_CHECKS: &str = r#"
     // FORMS-1: Inputs without autocomplete attribute
     document.querySelectorAll('input[type=text], input[type=email], input[type=tel], input[type=password]').forEach(el => {
@@ -303,9 +334,55 @@ const FORMS_CHECKS: &str = r#"
             });
         }
     });
+
+    // FORMS-5 (FR-6): secret-bearing forms without a visible anti-forgery
+    // marker. Severity `info` — SameSite=Strict cookies are a legitimate
+    // alternative, so flagged as hint, not error. Pattern list is broad
+    // enough to cover Rails, Django, Laravel, and generic frameworks.
+    document.querySelectorAll('form').forEach(f => {
+        const hasSecretInput = f.querySelector('input[type=password]');
+        if (!hasSecretInput) return;
+        const markerHints = ['csrf', 'authenticity', 'xsrf', 'nonce'];
+        let hasMarker = false;
+        for (const hint of markerHints) {
+            if (f.querySelector('input[type=hidden][name*="' + hint + '" i]')) {
+                hasMarker = true;
+                break;
+            }
+        }
+        if (!hasMarker) {
+            issues.push({
+                category: 'forms', severity: 'info',
+                element: ident(f),
+                message: 'Form has sensitive input but no visible anti-forgery marker',
+                suggestion: 'Add a hidden anti-forgery input, or confirm SameSite=Strict cookie protection',
+            });
+        }
+    });
+
+    // FORMS-6 (FR-6): sign-in/sign-up forms with missing autocomplete
+    // hints. Modern browsers rely on the autocomplete attribute to
+    // auto-fill sign-in data. Missing hints degrade UX for returning
+    // users.
+    document.querySelectorAll('form').forEach(f => {
+        const hasSecretInput = f.querySelector('input[type=password]');
+        if (!hasSecretInput) return;
+        const missing = [];
+        f.querySelectorAll('input[type=text], input[type=email], input[type=tel], input[type=password]').forEach(el => {
+            if (!el.hasAttribute('autocomplete')) missing.push(el);
+        });
+        if (missing.length > 0) {
+            issues.push({
+                category: 'forms', severity: 'warning',
+                element: ident(missing[0]),
+                message: 'Sign-in form has input without autocomplete hint',
+                suggestion: 'Set autocomplete="username" or the appropriate credential hint so browsers can autofill',
+            });
+        }
+    });
 "#;
 
-/// Link checks (3 rules).
+/// Link checks (4 rules).
 const LINKS_CHECKS: &str = r##"
     // LINKS-1: Links with href="javascript:void(0)" or href="#"
     document.querySelectorAll('a[href]').forEach(el => {
@@ -329,6 +406,23 @@ const LINKS_CHECKS: &str = r##"
                 element: ident(el),
                 message: 'Link with target="_blank" missing rel="noopener"',
                 suggestion: 'Add rel="noopener noreferrer" to prevent tab-nabbing',
+            });
+        }
+    });
+
+    // LINKS-4 (FR-6): links with target="_blank" that set noopener but
+    // NOT noreferrer. noopener alone blocks window.opener access, but
+    // noreferrer is the flag that suppresses the Referer header — some
+    // analytics pipelines treat the two as interchangeable and ship
+    // only noopener, leaving the referrer leak intact.
+    document.querySelectorAll('a[target=_blank]').forEach(el => {
+        const rel = (el.getAttribute('rel') || '').toLowerCase();
+        if (rel.includes('noopener') && !rel.includes('noreferrer')) {
+            issues.push({
+                category: 'links', severity: 'warning',
+                element: ident(el),
+                message: 'Link with rel="noopener" missing rel="noreferrer"',
+                suggestion: 'Append "noreferrer" so the Referer header is suppressed on the new tab',
             });
         }
     });
@@ -387,6 +481,74 @@ mod tests {
         );
         // Should still produce valid JS
         assert!(js.contains("return issues"), "should return issues array");
+    }
+
+    // ── FR-6: broader audit rules ──────────────────────────────
+
+    #[test]
+    fn build_js_a11y_has_heading_hierarchy_rule() {
+        let js = build_audit_js(&["a11y".into()]);
+        assert!(js.contains("A11Y-6"), "A11Y-6 heading hierarchy rule missing");
+        assert!(
+            js.contains("Page has no <h1> heading"),
+            "heading rule should flag missing h1"
+        );
+        assert!(
+            js.contains("Heading skips level"),
+            "heading rule should flag level skips"
+        );
+    }
+
+    #[test]
+    fn build_js_forms_has_anti_forgery_rule() {
+        let js = build_audit_js(&["forms".into()]);
+        assert!(js.contains("FORMS-5"), "FORMS-5 anti-forgery rule missing");
+        assert!(
+            js.contains("anti-forgery marker"),
+            "rule message should mention anti-forgery"
+        );
+        // Severity must be `info`, not `warning` — SameSite=Strict
+        // cookies are a legitimate alternative.
+        let idx_forms_5 = js.find("FORMS-5").expect("FORMS-5 marker present");
+        let context = &js[idx_forms_5..idx_forms_5 + 2000];
+        assert!(
+            context.contains("severity: 'info'"),
+            "FORMS-5 must be severity `info` (SameSite cookies are a legitimate alt)"
+        );
+    }
+
+    #[test]
+    fn build_js_forms_has_autocomplete_sign_in_rule() {
+        let js = build_audit_js(&["forms".into()]);
+        assert!(
+            js.contains("FORMS-6"),
+            "FORMS-6 sign-in autocomplete rule missing"
+        );
+        assert!(
+            js.contains("Sign-in form has input without autocomplete hint"),
+            "rule should flag sign-in forms missing autocomplete hints"
+        );
+    }
+
+    #[test]
+    fn build_js_links_has_noreferrer_rule() {
+        let js = build_audit_js(&["links".into()]);
+        assert!(js.contains("LINKS-4"), "LINKS-4 noreferrer rule missing");
+        assert!(
+            js.contains("noreferrer"),
+            "LINKS-4 should reference the rel=noreferrer token"
+        );
+    }
+
+    #[test]
+    fn build_js_all_new_rules_register_categories() {
+        let js = build_audit_js(&default_categories());
+        for marker in ["A11Y-6", "FORMS-5", "FORMS-6", "LINKS-4"] {
+            assert!(
+                js.contains(marker),
+                "all-categories build must include {marker}"
+            );
+        }
     }
 
     #[test]

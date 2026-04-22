@@ -62,6 +62,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit sentinel replaces silent empty strings on buttons and
   inputs so the agent can tell a genuinely unlabeled control from a
   parse failure (FR-5 from `docs/friction-log-2026-04-22.md`).
+- *(audit)* Broaden audit rule set. On real pages the old rules fired
+  only once or twice (HN login page surfaced only `A11Y-5 missing
+  lang`). Four new rules — one per category — pull in common
+  production misses:
+  - **A11Y-6** (warning) — missing `<h1>` OR heading hierarchy skip
+    (e.g. `<h3>` without a prior `<h2>`); screen-reader outline relies
+    on continuous levels.
+  - **FORMS-5** (info) — password-bearing `<form>` with no hidden
+    anti-forgery marker (`csrf`, `authenticity`, `xsrf`, `nonce`).
+    Severity `info` because SameSite=Strict cookies are a legitimate
+    alternative — we don't want the audit to scream at correct setups.
+  - **FORMS-6** (warning) — sign-in/sign-up form with inputs missing
+    the `autocomplete` attribute, which password managers need to
+    auto-fill credentials.
+  - **LINKS-4** (warning) — `target="_blank"` with `rel="noopener"`
+    but missing `rel="noreferrer"`. noopener blocks `window.opener`
+    but does NOT suppress the `Referer` header; shipping only one
+    leaves a referrer leak (FR-6 from
+    `docs/friction-log-2026-04-22.md`).
 
 ## [0.13.1](https://github.com/menot-you/llm-as-dom/compare/v0.13.0...v0.13.1) - 2026-04-17
 
