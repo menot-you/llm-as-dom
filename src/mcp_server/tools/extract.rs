@@ -7,15 +7,148 @@ use crate::LadServer;
 use crate::helpers::{mcp_err, to_pretty_json};
 use crate::params::{ExtractParams, JqParams, SnapshotParams};
 
+/// Issue #36 — apply `what` as a semantic filter to a `SemanticView`.
+///
+/// Pure function, no I/O — spliced out of `tool_lad_extract` so the
+/// scoring logic can be unit-tested without a browser or MCP server.
+///
+/// Behavior:
+/// 1. Tokenize `what` on whitespace, drop single-char noise.
+/// 2. Score each element by token-match over label/name/placeholder/href.
+/// 3. Stable-sort elements by score desc; return `relevant_count`
+///    (elements with score > 0).
+/// 4. If `strict` and the query is non-empty, drop score-zero elements.
+/// 5. If `text_blocks` is non-empty and the query is non-empty, replace
+///    `visible_text` with the top-K scoring blocks joined by " … ". K
+///    scales from `max_length` when provided, clamped to `[3, 20]`.
+/// 6. Zero-match pages leave `visible_text` untouched so the caller
+///    never loses page context to an overly strict filter.
+/// 7. `max_length` is applied LAST as a byte-budget safety cap with a
+///    UTF-8 char-boundary walk to avoid splitting multibyte codepoints.
+///
+/// Back-compat: empty `what` or empty `text_blocks` falls back to the
+/// pre-#36 behavior (sort-only, raw banner).
+pub(crate) fn apply_what_filter(
+    view: &mut llm_as_dom::semantic::SemanticView,
+    what: &str,
+    max_length: Option<usize>,
+    strict: bool,
+) -> usize {
+    let what_lower = what.to_lowercase();
+    let what_words: Vec<String> = what_lower
+        .split_whitespace()
+        .filter(|w| w.len() >= 2) // skip single-char noise (a, I, …)
+        .map(|w| w.to_string())
+        .collect();
+    let has_query = !what_words.is_empty();
+
+    let score_element = |el: &llm_as_dom::semantic::Element| -> u32 {
+        if !has_query {
+            return 0;
+        }
+        let fields = [
+            el.label.to_lowercase(),
+            el.name.as_deref().unwrap_or("").to_lowercase(),
+            el.placeholder.as_deref().unwrap_or("").to_lowercase(),
+            el.href.as_deref().unwrap_or("").to_lowercase(),
+        ];
+        let mut score = 0u32;
+        for word in &what_words {
+            for field in &fields {
+                if field.contains(word.as_str()) {
+                    score += 1;
+                }
+            }
+        }
+        score
+    };
+
+    // Sort relevant elements first (stable sort preserves DOM order within same score).
+    view.elements
+        .sort_by_key(|el| std::cmp::Reverse(score_element(el)));
+    let relevant_count = view
+        .elements
+        .iter()
+        .filter(|el| score_element(el) > 0)
+        .count();
+
+    // Strict mode drops zero-score elements entirely.
+    if strict && has_query {
+        view.elements.retain(|el| score_element(el) > 0);
+    }
+
+    // Replace `visible_text` with top-K scoring blocks when available.
+    if has_query && !view.text_blocks.is_empty() {
+        let score_block = |block: &str| -> u32 {
+            let lower = block.to_lowercase();
+            what_words
+                .iter()
+                .filter(|w| lower.contains(w.as_str()))
+                .count() as u32
+        };
+        let mut scored: Vec<(u32, &String)> = view
+            .text_blocks
+            .iter()
+            .map(|b| (score_block(b), b))
+            .filter(|(s, _)| *s > 0)
+            .collect();
+        // Sort by score desc, then by block length desc as a cheap
+        // "prefer substantial matches over one-word hits" tiebreak.
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.len().cmp(&a.1.len())));
+        // K scales with max_length when the caller set one; default to
+        // 8 otherwise. Clamped to [3, 20].
+        let top_k = max_length
+            .map(|m| (m / 240).max(3))
+            .unwrap_or(8)
+            .clamp(3, 20);
+        let joined = scored
+            .iter()
+            .take(top_k)
+            .map(|(_, b)| b.as_str())
+            .collect::<Vec<_>>()
+            .join(" … ");
+        if !joined.is_empty() {
+            view.visible_text = joined;
+        }
+        // If zero blocks matched, leave visible_text unchanged so the
+        // caller still sees page context — empty is worse than noise
+        // when the query genuinely doesn't match anything.
+    }
+
+    // Apply `max_length` AFTER scoring as a final safety cap. UTF-8 safe.
+    if let Some(max_len) = max_length
+        && view.visible_text.len() > max_len
+    {
+        let mut end = max_len;
+        while !view.visible_text.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        view.visible_text.truncate(end);
+    }
+
+    relevant_count
+}
+
 impl LadServer {
     /// Extract structured information from a web page.
     /// Returns interactive elements, visible text, page classification.
     /// Never returns raw HTML.
     ///
-    /// FIX-18: The `what` parameter now filters elements by relevance.
+    /// FIX-18: The `what` parameter scores elements by relevance.
     /// Elements whose label, name, placeholder, or href contain any word
-    /// from `what` are promoted to the front; all elements are still
-    /// returned but `relevant_count` tells the caller how many matched.
+    /// from `what` are promoted to the front; `relevant_count` tells the
+    /// caller how many matched.
+    ///
+    /// Issue #36: `what` is now also a semantic filter over `visible_text`.
+    /// The JS walker emits `text_blocks` (individual headings/paragraphs/
+    /// td/span/a/pre/code) which we score against `what` and concatenate
+    /// the top-K matches into `visible_text`, replacing the hard-capped
+    /// 500-char banner. Empty `what` or zero-match pages fall back to the
+    /// original banner so the caller never loses page context.
+    ///
+    /// When `strict=true` and `what` is non-empty, elements with score 0
+    /// are dropped instead of just re-ordered — useful on inventory-heavy
+    /// pages (GitHub, HN) where the full element list is noise.
     ///
     /// DX-W2-1: `url` is now optional. When omitted, extracts from the
     /// current active page without navigating — preserving session state.
@@ -25,6 +158,7 @@ impl LadServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
         let include_hidden = p.include_hidden.unwrap_or(false);
+        let strict = p.strict.unwrap_or(false);
         let mut view = if let Some(ref url) = p.url {
             let (_page, view) = self.navigate_and_extract(url).await?;
             view
@@ -60,49 +194,11 @@ impl LadServer {
             view.retain_visible_elements();
         }
 
-        if let Some(max_len) = p.max_length
-            && view.visible_text.len() > max_len
-        {
-            let mut end = max_len;
-            while !view.visible_text.is_char_boundary(end) && end > 0 {
-                end -= 1;
-            }
-            view.visible_text.truncate(end);
-        }
-
-        // FIX-18: Score elements by relevance to `what` and sort.
-        let what_lower = p.what.to_lowercase();
-        let what_words: Vec<&str> = what_lower.split_whitespace().collect();
-
-        let relevance_score = |el: &llm_as_dom::semantic::Element| -> u32 {
-            if what_words.is_empty() {
-                return 0;
-            }
-            let fields = [
-                el.label.to_lowercase(),
-                el.name.as_deref().unwrap_or("").to_lowercase(),
-                el.placeholder.as_deref().unwrap_or("").to_lowercase(),
-                el.href.as_deref().unwrap_or("").to_lowercase(),
-            ];
-            let mut score = 0u32;
-            for word in &what_words {
-                for field in &fields {
-                    if field.contains(word) {
-                        score += 1;
-                    }
-                }
-            }
-            score
-        };
-
-        // Sort relevant elements first (stable sort preserves DOM order within same score).
-        view.elements
-            .sort_by_key(|el| std::cmp::Reverse(relevance_score(el)));
-        let relevant_count = view
-            .elements
-            .iter()
-            .filter(|el| relevance_score(el) > 0)
-            .count();
+        // FIX-18 / Issue #36: apply `what` as a semantic filter — scores
+        // elements, rewrites visible_text from top-K matching blocks, and
+        // (when strict=true) drops zero-score elements. Returns the
+        // number of elements that matched for the JSON response.
+        let relevant_count = apply_what_filter(&mut view, &p.what, p.max_length, strict);
 
         // DX-W3-6: Support format="prompt" for compact text output.
         let use_prompt = p
@@ -426,6 +522,7 @@ mod tests {
                 name: None,
             }],
             visible_text: "Welcome back".to_string(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -460,5 +557,282 @@ mod tests {
     fn tool_lad_jq_parse_error_is_surfaced() {
         let result = run_jq(".elements |", input_value());
         assert!(result.is_err(), "syntax error should not silently succeed");
+    }
+
+    // ── Issue #36: apply_what_filter ──────────────────────────────────
+
+    use super::apply_what_filter;
+
+    /// Content-heavy fixture — mimics a GitHub-style page: a handful of
+    /// relevant elements buried in a pile of navigation noise, plus 30+
+    /// text_blocks where only a few match a focused `what` query.
+    fn content_heavy_fixture() -> SemanticView {
+        let mut elements = vec![
+            // Navigation noise (score 0 against "install star").
+            make_button(0, "Navigation Menu"),
+            make_button(1, "Saved searches"),
+            make_button(2, "Sign in"),
+            make_button(3, "Sign up"),
+            make_button(4, "Skip to content"),
+        ];
+        // Relevant elements (score > 0 for "install star").
+        let mut install = make_button(10, "Install");
+        install.href = Some("/browser-use#installation".into());
+        elements.push(install);
+        let mut stargazers = make_button(11, "Stargazers");
+        stargazers.href = Some("/browser-use/stargazers".into());
+        elements.push(stargazers);
+        // Padding noise to mimic GitHub's ~120-element inventory.
+        for i in 20..60 {
+            elements.push(make_button(i, &format!("Folder item {i}")));
+        }
+
+        SemanticView {
+            url: "https://github.com/browser-use/browser-use".to_string(),
+            title: "browser-use/browser-use".to_string(),
+            page_hint: "content page".to_string(),
+            elements,
+            forms: vec![],
+            visible_text: "Navigation Menu Saved searches browser-use/browser-use Folders and files Latest commit History Repository files navigation Want to skip the setup?".to_string(),
+            text_blocks: vec![
+                // Noise blocks.
+                "Navigation Menu".into(),
+                "Saved searches".into(),
+                "Folders and files".into(),
+                "Latest commit".into(),
+                "History".into(),
+                "Repository files navigation".into(),
+                // Relevant blocks.
+                "Make websites accessible for AI agents. Installation: pip install browser-use. Star count: 12k on GitHub.".into(),
+                "Quick start: pip install browser-use && browser-use --help".into(),
+                "Tagline: Open-source browser automation for LLM agents.".into(),
+                // More noise.
+                "Contributors".into(),
+                "Releases".into(),
+                "Packages".into(),
+                "Languages".into(),
+                "Want to skip the setup?".into(),
+            ],
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        }
+    }
+
+    #[test]
+    fn apply_what_filter_empty_query_is_noop() {
+        let mut view = content_heavy_fixture();
+        let banner_before = view.visible_text.clone();
+        let elements_before = view.elements.len();
+
+        let relevant = apply_what_filter(&mut view, "", None, false);
+
+        assert_eq!(relevant, 0, "empty query yields zero relevant count");
+        assert_eq!(view.visible_text, banner_before, "banner unchanged");
+        assert_eq!(
+            view.elements.len(),
+            elements_before,
+            "element count unchanged"
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_rewrites_visible_text_with_matching_blocks() {
+        let mut view = content_heavy_fixture();
+        let banner_before = view.visible_text.clone();
+
+        apply_what_filter(&mut view, "install star count", None, false);
+
+        // The matching blocks replace the banner. Noise like "Navigation
+        // Menu Saved searches" must NOT be the whole answer anymore.
+        assert_ne!(
+            view.visible_text, banner_before,
+            "visible_text should be rewritten when text_blocks match"
+        );
+        // Matches: "install", "star count", "pip install", "browser-use"...
+        let lower = view.visible_text.to_lowercase();
+        assert!(
+            lower.contains("install"),
+            "install should surface: got {:?}",
+            view.visible_text
+        );
+        assert!(
+            lower.contains("star count"),
+            "star count should surface: got {:?}",
+            view.visible_text
+        );
+        // Navigation noise should be absent — the scored blocks rejected it.
+        assert!(
+            !view.visible_text.contains("Navigation Menu Saved searches"),
+            "noise banner should not dominate the rewritten visible_text"
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_promotes_relevant_elements() {
+        let mut view = content_heavy_fixture();
+
+        apply_what_filter(&mut view, "install star", None, false);
+
+        // Elements with matches (Install, Stargazers) should be on top.
+        let top_labels: Vec<&str> = view
+            .elements
+            .iter()
+            .take(2)
+            .map(|e| e.label.as_str())
+            .collect();
+        assert!(
+            top_labels.contains(&"Install") || top_labels.contains(&"Stargazers"),
+            "relevant elements should sort to the top, got: {top_labels:?}"
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_strict_drops_zero_score_elements() {
+        let mut view = content_heavy_fixture();
+        let elements_before = view.elements.len();
+
+        let relevant = apply_what_filter(&mut view, "install star", None, true);
+
+        assert_eq!(
+            view.elements.len(),
+            relevant,
+            "strict mode keeps exactly the scored elements"
+        );
+        assert!(
+            view.elements.len() < elements_before,
+            "strict mode should shrink the inventory"
+        );
+        assert!(relevant > 0, "at least one element should match");
+    }
+
+    #[test]
+    fn apply_what_filter_no_match_preserves_banner() {
+        let mut view = content_heavy_fixture();
+        let banner_before = view.visible_text.clone();
+
+        // "zebra" matches nothing in the fixture.
+        apply_what_filter(&mut view, "zebra tapeworm kombucha", None, false);
+
+        assert_eq!(
+            view.visible_text, banner_before,
+            "zero-match query must not erase the banner — empty is worse \
+             than noise when the query genuinely doesn't match"
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_no_text_blocks_falls_back_to_banner() {
+        let mut view = content_heavy_fixture();
+        view.text_blocks.clear(); // legacy view simulation
+        let banner_before = view.visible_text.clone();
+
+        apply_what_filter(&mut view, "install star", None, false);
+
+        assert_eq!(
+            view.visible_text, banner_before,
+            "without text_blocks, scorer falls back to raw banner"
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_max_length_final_safety_cap() {
+        let mut view = content_heavy_fixture();
+
+        apply_what_filter(&mut view, "install star count", Some(50), false);
+
+        assert!(
+            view.visible_text.len() <= 50,
+            "max_length must be honored as final byte cap, got {} bytes",
+            view.visible_text.len()
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_ignores_single_char_tokens() {
+        let mut view = content_heavy_fixture();
+        let elements_before: Vec<u32> = view.elements.iter().map(|e| e.id).collect();
+
+        // "a I" would match nothing useful; scorer skips <2-char tokens.
+        apply_what_filter(&mut view, "a I", None, false);
+
+        let elements_after: Vec<u32> = view.elements.iter().map(|e| e.id).collect();
+        assert_eq!(
+            elements_before, elements_after,
+            "single-char tokens should not reorder elements"
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_case_insensitive() {
+        let mut view = content_heavy_fixture();
+
+        apply_what_filter(&mut view, "INSTALL STAR", None, false);
+
+        let lower = view.visible_text.to_lowercase();
+        assert!(
+            lower.contains("install"),
+            "case-insensitive match should surface install, got {:?}",
+            view.visible_text
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_handles_unicode_blocks_without_panic() {
+        let mut view = SemanticView {
+            url: "https://example.com".into(),
+            title: "Unicode".into(),
+            page_hint: "".into(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: String::new(),
+            text_blocks: vec![
+                "install \u{200B}token\u{200D}".into(),
+                "emoji 🚀 rocket install".into(),
+                "rtl \u{202E}reversed install".into(),
+                "installation guide here".into(),
+            ],
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        // Must not panic on zero-width, emoji, RTL markers.
+        apply_what_filter(&mut view, "install", Some(200), false);
+        // The substring "install" matches "installation" — matching block
+        // should be selected without boundary panics.
+        assert!(
+            view.visible_text.to_lowercase().contains("install"),
+            "expected install to surface: got {:?}",
+            view.visible_text
+        );
+    }
+
+    #[test]
+    fn apply_what_filter_prefers_longer_matching_block() {
+        let mut view = SemanticView {
+            url: "https://example.com".into(),
+            title: "T".into(),
+            page_hint: "".into(),
+            elements: vec![],
+            forms: vec![],
+            visible_text: "short".into(),
+            text_blocks: vec![
+                // Same score (1 hit on "foo"), different lengths — longer wins.
+                "foo".into(),
+                "detailed explanation of foo with all the context you need".into(),
+            ],
+            state: PageState::Ready,
+            element_cap: None,
+            blocked_reason: None,
+            session_context: None,
+        };
+        apply_what_filter(&mut view, "foo", None, false);
+        assert!(
+            view.visible_text.contains("detailed explanation"),
+            "tiebreak should prefer the longer block: got {:?}",
+            view.visible_text
+        );
     }
 }

@@ -71,6 +71,15 @@ pub(crate) struct ExtractParams {
     /// Only meaningful when `url` is `None` (reading an already-open tab).
     #[serde(default)]
     pub tab_id: Option<u32>,
+    /// Issue #36 — strict semantic filtering. When `true` AND `what` is
+    /// non-empty, drop elements whose relevance score is zero instead of
+    /// merely sorting them to the front. Defaults to `false` for
+    /// back-compat — existing callers keep getting the full inventory,
+    /// just re-ordered. Combines with `paginate_index` / `page_size`:
+    /// strict filter runs BEFORE pagination so page 0 is the K most
+    /// relevant hits, not the first 50 DOM elements.
+    #[serde(default)]
+    pub strict: Option<bool>,
 }
 
 /// Wave 1 — default page size for `lad_extract` / `lad_snapshot` pagination.

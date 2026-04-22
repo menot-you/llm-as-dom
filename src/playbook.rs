@@ -368,6 +368,7 @@ mod tests {
             ],
             forms: vec![],
             visible_text: "Sign in to GitHub".into(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,

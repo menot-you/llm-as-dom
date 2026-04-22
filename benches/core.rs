@@ -83,6 +83,7 @@ fn login_view() -> SemanticView {
         url: "https://news.ycombinator.com/login".into(),
         title: "Login".into(),
         page_hint: "login page".into(),
+        text_blocks: vec![],
         elements: vec![
             input_element(0, "Username", "text", Some("acct"), Some(0)),
             input_element(1, "Password", "password", Some("pw"), Some(0)),
@@ -129,6 +130,7 @@ fn large_view() -> SemanticView {
         elements,
         forms: vec![],
         visible_text: "This is a complex page with navigation, forms, and buttons. It represents a realistic extraction scenario.".into(),
+        text_blocks: vec![],
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
@@ -299,6 +301,7 @@ fn bench_sanitize_view_300el(c: &mut Criterion) {
         elements,
         forms: vec![],
         visible_text: "A large page with many interactive elements for stress testing.".into(),
+        text_blocks: vec![],
         state: PageState::Ready,
         element_cap: Some("300/500".into()),
         blocked_reason: None,

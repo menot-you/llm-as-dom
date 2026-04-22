@@ -63,6 +63,7 @@ mod tests {
             elements: vec![],
             forms: vec![],
             visible_text: text.into(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,

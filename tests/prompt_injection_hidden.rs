@@ -72,6 +72,7 @@ fn adversarial_view() -> SemanticView {
         url: "https://phishy.example/page".to_string(),
         title: "Login".to_string(),
         page_hint: "login page".to_string(),
+        text_blocks: vec![],
         elements: vec![
             hidden_el(1, "opacity:0", Some(false)),
             hidden_el(2, "display:none", Some(false)),

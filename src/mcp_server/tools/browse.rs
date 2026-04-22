@@ -154,6 +154,7 @@ impl LadServer {
                         elements: vec![],
                         forms: vec![],
                         visible_text: String::new(),
+                        text_blocks: vec![],
                         state: llm_as_dom::semantic::PageState::Ready,
                         element_cap: None,
                         blocked_reason: None,

@@ -149,6 +149,7 @@ mod tests {
             url: "https://example.com/login".into(),
             title: "Login".into(),
             page_hint: "login page".into(),
+            text_blocks: vec![],
             elements: vec![
                 Element {
                     id: 0,
