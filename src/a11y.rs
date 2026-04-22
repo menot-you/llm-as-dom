@@ -431,11 +431,26 @@ pub async fn extract_semantic_view_with_options(
 
             const textNodes = deepQueryAll(document, 'h1, h2, h3, h4, p, label, legend, [role="heading"]');
             let visibleText = '';
+            // Issue #36 — collect individual blocks for downstream scoring.
+            // Per-block capped at 240 chars, list capped at 200 entries.
+            // `visibleText` still emitted for back-compat (lad_snapshot,
+            // heuristics, wait). Scoring happens only in `tool_lad_extract`.
+            const textBlocks = [];
+            const BLOCK_CAP = 240;
+            const LIST_CAP = 200;
+            const pushBlock = (s) => {
+                if (textBlocks.length < LIST_CAP) {
+                    textBlocks.push(s.length > BLOCK_CAP ? s.substring(0, BLOCK_CAP) : s);
+                }
+            };
             for (const node of textNodes) {
                 const text = node.textContent?.trim();
-                if (text && visibleText.length < 500) {
-                    if (visibleText) visibleText += ' ';
-                    visibleText += text.substring(0, 100);
+                if (text) {
+                    pushBlock(text);
+                    if (visibleText.length < 500) {
+                        if (visibleText) visibleText += ' ';
+                        visibleText += text.substring(0, 100);
+                    }
                 }
             }
             // Fallback: collect substantial text from td, span, a, pre, code,
@@ -443,15 +458,20 @@ pub async fn extract_semantic_view_with_options(
             // Wave 5b (Pain #14): added pre/code/textarea so JSON response
             // pages rendered as <pre>{...}</pre> (e.g. httpbin.org/post)
             // don't emit empty visible_text.
-            if (visibleText.length < 100) {
-                const extraNodes = deepQueryAll(document, 'td, span, a, pre, code, textarea');
-                for (const node of extraNodes) {
-                    const text = node.textContent?.trim();
-                    if (text && text.length > 20 && visibleText.length < 500) {
+            // Issue #36 — always feed text_blocks from this pool too, so
+            // content-heavy pages (GitHub, HN) have scoring material even
+            // when headings alone already filled the 500-char visibleText.
+            const extraNodes = deepQueryAll(document, 'td, span, a, pre, code, textarea');
+            for (const node of extraNodes) {
+                const text = node.textContent?.trim();
+                if (text && text.length > 20) {
+                    pushBlock(text);
+                    if (visibleText.length < 100 && visibleText.length < 500) {
                         if (visibleText) visibleText += ' ';
                         visibleText += text.substring(0, 100);
                     }
                 }
+                if (textBlocks.length >= LIST_CAP) break;
             }
 
             // Last-resort fallback: if still near-empty, fall back to
@@ -464,6 +484,17 @@ pub async fn extract_semantic_view_with_options(
                     const bodyText = document.body?.innerText?.trim();
                     if (bodyText) {
                         visibleText = bodyText.substring(0, 500);
+                        // Issue #36 — when only innerText exists, split on
+                        // blank lines to seed text_blocks so the scorer has
+                        // something to work with on pathological SPAs.
+                        if (textBlocks.length === 0) {
+                            const parts = bodyText.split(/\n{2,}|\r\n{2,}/);
+                            for (const part of parts) {
+                                const t = part.trim();
+                                if (t.length > 20) pushBlock(t);
+                                if (textBlocks.length >= LIST_CAP) break;
+                            }
+                        }
                     }
                 } catch (_) {}
             }
@@ -477,7 +508,7 @@ pub async fn extract_semantic_view_with_options(
                 name: f.getAttribute('name') || null,
             }));
 
-            return { elements, visibleText, formCount: allForms.length, elementCap, forms };
+            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms };
         })()
     "#;
 
@@ -567,6 +598,7 @@ pub async fn extract_semantic_view_with_options(
         elements,
         forms,
         visible_text: extraction.visible_text,
+        text_blocks: extraction.text_blocks,
         state: PageState::Ready,
         element_cap: extraction.element_cap,
         blocked_reason: None,
@@ -594,6 +626,12 @@ struct JsExtraction {
     elements: Vec<JsElement>,
     #[serde(rename = "visibleText")]
     visible_text: String,
+    /// Issue #36 — individual text blocks (headings/paragraphs/td/span/a/
+    /// pre/code) pre-concatenation, per-block capped at 240 chars, list
+    /// capped at 200. Raw material for `tool_lad_extract`'s `what` scorer.
+    /// Defaults to empty for back-compat with any pinned legacy JS.
+    #[serde(rename = "textBlocks", default)]
+    text_blocks: Vec<String>,
     #[serde(rename = "formCount")]
     form_count: u32,
     /// `"50/316"` when elements were capped, `null` otherwise.
@@ -1070,6 +1108,7 @@ mod tests {
             }],
             forms: vec![],
             visible_text: String::new(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -1186,6 +1225,7 @@ mod tests {
             elements: vec![],
             forms: vec![],
             visible_text: long_text,
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -1206,6 +1246,7 @@ mod tests {
             elements: vec![],
             forms: vec![],
             visible_text: "Some visible content here".into(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -1227,6 +1268,7 @@ mod tests {
             elements: vec![],
             forms: vec![],
             visible_text: long_text,
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -1267,6 +1309,7 @@ mod tests {
             }],
             forms: vec![],
             visible_text: "Some text".into(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -1285,6 +1328,7 @@ mod tests {
             elements: vec![],
             forms: vec![],
             visible_text: String::new(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,

@@ -22,6 +22,16 @@ pub struct SemanticView {
     pub forms: Vec<FormMeta>,
     /// Concatenated visible headings/paragraphs (max ~500 chars).
     pub visible_text: String,
+    /// Issue #36 — Individual text blocks extracted from the DOM (headings,
+    /// paragraphs, td/span/a/pre/code) before concatenation. Used by
+    /// `tool_lad_extract` to score blocks against the `what` query and
+    /// return top-K matches instead of a pre-concatenated 500-char banner.
+    /// Each block is per-block length-capped in the JS walker; the list
+    /// itself is capped at 200 entries to bound payload size. Empty by
+    /// default (legacy callers, mock views) — scoring falls back to raw
+    /// `visible_text` when blocks are absent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub text_blocks: Vec<String>,
     /// Current page lifecycle state.
     pub state: PageState,
     /// Element cap indicator: `"50/316"` means 50 kept out of 316 total.
@@ -366,6 +376,7 @@ impl SemanticView {
             elements: slice.to_vec(),
             forms: self.forms.clone(),
             visible_text: self.visible_text.clone(),
+            text_blocks: self.text_blocks.clone(),
             state: self.state.clone(),
             element_cap: self.element_cap.clone(),
             blocked_reason: self.blocked_reason.clone(),
@@ -494,6 +505,7 @@ mod tests {
                 .collect(),
             forms: vec![],
             visible_text: "Hello".to_string(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,
@@ -578,6 +590,7 @@ mod tests {
             ],
             forms: vec![],
             visible_text: String::new(),
+            text_blocks: vec![],
             state: PageState::Ready,
             element_cap: None,
             blocked_reason: None,

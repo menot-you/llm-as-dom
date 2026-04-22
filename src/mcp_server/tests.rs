@@ -12,6 +12,7 @@ fn empty_view() -> semantic::SemanticView {
         elements: vec![],
         forms: vec![],
         visible_text: String::new(),
+        text_blocks: vec![],
         state: semantic::PageState::Ready,
         element_cap: None,
         blocked_reason: None,
