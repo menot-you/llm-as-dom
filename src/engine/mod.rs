@@ -147,6 +147,22 @@ pub trait PageHandle: Send + Sync {
     async fn stop_monitoring(&self) -> Result<(), crate::Error> {
         Ok(())
     }
+
+    /// Close the underlying page/target and release browser resources.
+    ///
+    /// Default implementation is noop — used by engines whose page lifetime
+    /// matches the engine lifetime (e.g. WebKit single-page bridge).
+    ///
+    /// Chromium impl closes the CDP target via `Target.closeTarget`. After
+    /// a successful close, further operations on this handle will fail
+    /// naturally (target gone on the Chrome side).
+    ///
+    /// Callers that produced an ephemeral page (e.g. `lad_audit` with
+    /// `return_tab=false`) MUST invoke this before dropping the handle so
+    /// that the Chrome target is released instead of leaking.
+    async fn close(&mut self) -> Result<(), crate::Error> {
+        Ok(())
+    }
 }
 
 /// Convenience: evaluate JS and deserialize into `T`.

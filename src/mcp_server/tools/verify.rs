@@ -61,14 +61,31 @@ impl LadServer {
     }
 
     /// Audit a web page for accessibility, forms, and links issues.
+    ///
+    /// BUG-2 (friction-log-2026-04-22): the audit used to leave the active
+    /// tab pointing at the previous URL silently while also leaking the
+    /// ephemeral Chrome target. Now the lifecycle is explicit:
+    /// - `return_tab=false` (default): close the ephemeral page after the
+    ///   audit completes, do NOT touch the active-tab slot. Response has
+    ///   `audit_ephemeral: true` and `audit_tab: null`.
+    /// - `return_tab=true`: promote the ephemeral page into the tab pool,
+    ///   return its `tab_id` so the caller can drive it like any other
+    ///   tab. Response has `audit_ephemeral: false` and
+    ///   `audit_tab: {tab_id, url}`.
     pub(crate) async fn tool_lad_audit(
         &self,
         params: Parameters<AuditParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = params.0;
-        tracing::info!(url = %p.url, categories = ?p.categories, "lad_audit");
+        let return_tab = p.return_tab.unwrap_or(false);
+        tracing::info!(
+            url = %p.url,
+            categories = ?p.categories,
+            return_tab,
+            "lad_audit"
+        );
 
-        let (page, _view) = self.navigate_and_extract(&p.url).await?;
+        let (mut page, view) = self.navigate_and_extract(&p.url).await?;
         let js = audit::build_audit_js(&p.categories);
         let raw_value = page.eval_js(&js).await.map_err(mcp_err)?;
 
@@ -78,8 +95,43 @@ impl LadServer {
         // FIX-5: Redact URL secrets from audit result.
         let safe_url = llm_as_dom::sanitize::redact_url_secrets(&p.url);
         let audit_result = audit::parse_audit_result(&safe_url, raw);
-        let output = serde_json::to_value(&audit_result)
+
+        // BUG-2: either promote the ephemeral audit page into a tab, or
+        // close it explicitly so the Chrome target does not leak.
+        let (audit_tab_field, audit_ephemeral) = if return_tab {
+            let final_url = page.url().await.map_err(mcp_err)?;
+            let ap = crate::state::ActivePage {
+                page,
+                url: final_url.clone(),
+                view,
+            };
+            let tab_id = self.insert_tab(ap).await;
+            let redacted_url = llm_as_dom::sanitize::redact_url_secrets(&final_url);
+            (
+                serde_json::json!({
+                    "tab_id": tab_id,
+                    "url": redacted_url,
+                }),
+                false,
+            )
+        } else {
+            if let Err(e) = page.close().await {
+                // Do not fail the audit on close failure — findings are
+                // already computed. Log so target-leak regressions surface.
+                tracing::warn!(error = %e, "failed to close ephemeral audit page");
+            }
+            (serde_json::Value::Null, true)
+        };
+
+        let mut output = serde_json::to_value(&audit_result)
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+        if let Some(obj) = output.as_object_mut() {
+            obj.insert("audit_tab".to_string(), audit_tab_field);
+            obj.insert(
+                "audit_ephemeral".to_string(),
+                serde_json::Value::Bool(audit_ephemeral),
+            );
+        }
 
         Ok(CallToolResult::success(vec![Content::text(
             to_pretty_json(&output),

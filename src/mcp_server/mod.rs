@@ -721,7 +721,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Audit a URL for quality issues: a11y (alt text, labels, lang), forms (autocomplete, minlength), links (void hrefs, noopener). Returns issues with severity and fix suggestions."
+        description = "Audit a URL for quality issues: a11y (alt text, labels, lang), forms (autocomplete, minlength), links (void hrefs, noopener). Returns issues with severity and fix suggestions. Response always includes `audit_ephemeral: bool` (true = audited page was ephemeral and is no longer accessible) and `audit_tab: null | {tab_id, url}` (non-null only when `return_tab=true`). Pass `return_tab=true` if you need follow-up interaction on the audited page."
     )]
     async fn lad_audit(
         &self,

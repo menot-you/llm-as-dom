@@ -120,6 +120,15 @@ pub(crate) struct AuditParams {
     /// Categories to check: "a11y", "forms", "links" (default: all).
     #[serde(default = "llm_as_dom::audit::default_categories")]
     pub categories: Vec<String>,
+    /// BUG-2: when `true`, the audited page is promoted into the tab pool
+    /// and its `tab_id` is returned in the response under `audit_tab`.
+    /// Follow-up tools (`lad_click`, `lad_scroll`, `lad_snapshot`) can
+    /// then target it without re-navigating. Default `false` runs the
+    /// audit in an ephemeral tab that is closed immediately after,
+    /// leaving the previously active tab (e.g. a logged-in session)
+    /// untouched.
+    #[serde(default)]
+    pub return_tab: Option<bool>,
 }
 
 /// Parameters for the `lad_session` tool.
