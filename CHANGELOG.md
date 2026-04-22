@@ -23,16 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a union over URL, `<title>`, visible body text, and rendered prompt
   (BUG-3 from `docs/friction-log-2026-04-22.md`).
 
+  **Behavior change**: `page contains X` (and `text contains X`) now also
+  match against the URL, where previously they could only match literal
+  prose containing the words "page"/"text" and "contains". Anyone who
+  relied on the old broken phrase as a never-matches sentinel will start
+  getting hits when `X` appears in the URL.
+
 ### Features
 - *(extract)* Add `limit: Option<u32>` to `lad_extract` with hard cap at 200.
   Applied AFTER strict filtering but BEFORE pagination so `top 5` is honored
   across pages. Response now includes `truncated: bool`, `limit_applied`, and
   `total_before_limit` so iterating callers can detect silent caps. When
-  `strict=true` and `limit` is omitted, a leading numeral in `what` (e.g.
-  "top 5 story titles", "primeiras 3 histórias", "best 10 matches") is parsed
-  as an implicit limit — `top|first|primeir[oa]s?|best|melhores` are
-  recognized. Non-matching phrasing returns the full filtered list; no silent
-  empty results (FR-2 from `docs/friction-log-2026-04-22.md`).
+  `strict=true` and `limit` is unset (`None` or `0`), a leading numeral in
+  `what` (e.g. "top 5 story titles", "primeiras 3 histórias", "best 10
+  matches") is parsed as an implicit limit — `top|first|primeir[oa]s?|best|
+  melhores` are recognized (en + pt-br only; es/fr extension is a deliberate
+  scope decision, not an oversight). `limit=0` is treated as "unset" rather
+  than "explicit empty" — falls through to the NL parse / no-limit branch
+  to avoid silent empty results. Non-matching phrasing returns the full
+  filtered list (FR-2 from `docs/friction-log-2026-04-22.md`).
 
 ## [0.13.1](https://github.com/menot-you/llm-as-dom/compare/v0.13.0...v0.13.1) - 2026-04-17
 

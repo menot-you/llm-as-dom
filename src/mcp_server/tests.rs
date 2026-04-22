@@ -912,11 +912,7 @@ fn check_assertion_text_contains_matches_url() {
 fn check_assertion_text_contains_matches_body() {
     let mut view = empty_view();
     view.visible_text = "Invalid password — please try again".into();
-    assert!(check_assertion(
-        "text contains invalid password",
-        &view,
-        ""
-    ));
+    assert!(check_assertion("text contains invalid password", &view, ""));
 }
 
 #[test]
@@ -979,6 +975,26 @@ fn resolve_limit_explicit_clamps_to_hard_cap() {
     let (limit, user_asked_more) = resolve_extract_limit(Some(9_999), false, "");
     assert_eq!(limit, Some(200));
     assert!(user_asked_more);
+}
+
+#[test]
+fn resolve_limit_explicit_zero_is_no_limit() {
+    use super::tools::extract::resolve_extract_limit;
+    // Explicit `limit=0` reads as "unset" (footgun avoidance), NOT
+    // "explicit empty". Falls through to no-limit. Without strict, no NL
+    // parse — full list.
+    let (limit, user_asked_more) = resolve_extract_limit(Some(0), false, "");
+    assert_eq!(limit, None);
+    assert!(!user_asked_more);
+}
+
+#[test]
+fn resolve_limit_explicit_zero_falls_through_to_nl_when_strict() {
+    use super::tools::extract::resolve_extract_limit;
+    // `limit=0` + strict + NL phrase: zero falls through, NL parse fires.
+    // Documents that `0` is interchangeable with `None` for downstream rules.
+    let (limit, _) = resolve_extract_limit(Some(0), true, "top 5 story titles");
+    assert_eq!(limit, Some(5));
 }
 
 #[test]

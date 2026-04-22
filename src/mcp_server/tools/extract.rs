@@ -135,19 +135,25 @@ const EXTRACT_LIMIT_HARD_CAP: u32 = 200;
 /// FR-2 (friction-log-2026-04-22) — resolve the effective element limit.
 ///
 /// Rules (documented in `ExtractParams::limit`):
-/// 1. Explicit `limit` always wins. Clamped to `[1, EXTRACT_LIMIT_HARD_CAP]`.
+/// 1. **Explicit `limit=0` is treated as "no limit"** — falls through to the
+///    NL-parse / default branch. Reads as "unset" rather than "explicit zero
+///    elements", which would be a footgun (silent empty result).
+/// 2. Otherwise explicit `limit` wins. Clamped to `[1, EXTRACT_LIMIT_HARD_CAP]`.
 ///    Returns `(clamped_limit, user_asked_more = explicit > clamped)`.
-/// 2. When `limit=None` AND `strict=true`, parse a leading numeral from
-///    `what` — matches `top N`, `first N`, pt-br `primeiras/primeiros N`,
-///    `best N`, `melhores N` (case-insensitive). Non-match is a non-error:
-///    we return `(None, false)` so the caller gets the full filtered list.
-/// 3. Otherwise return `(None, false)`.
+/// 3. When `limit` is unset (None or 0) AND `strict=true`, parse a leading
+///    numeral from `what` — see [`NUMERAL_RE`] for the recognized prefixes.
+///    Non-match is a non-error: we return `(None, false)` so the caller gets
+///    the full filtered list (no silent empty).
+/// 4. Otherwise return `(None, false)`.
 pub(crate) fn resolve_extract_limit(
     explicit: Option<u32>,
     strict: bool,
     what: &str,
 ) -> (Option<u32>, bool) {
-    if let Some(n) = explicit {
+    // Rule 1: limit=0 means "no limit" — fall through.
+    if let Some(n) = explicit
+        && n > 0
+    {
         let clamped = n.clamp(1, EXTRACT_LIMIT_HARD_CAP);
         let user_asked_more = n > clamped;
         return (Some(clamped), user_asked_more);
@@ -157,12 +163,17 @@ pub(crate) fn resolve_extract_limit(
     }
     // Regex is compiled once per call — extract.rs is cold path relative to
     // DOM walking, so this is not a hotspot.
+    //
+    // Recognized prefixes (intentionally pt-br + en only — extending to es/fr
+    // is a deliberate scope decision, not an oversight; add cases here and
+    // mirror in tests):
+    //   - en: `top`, `first`, `best`
+    //   - pt-br: `primeiro/a`, `primeiros/as` (covered by `primeir[oa]s?`),
+    //            `melhores`
     static NUMERAL_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = NUMERAL_RE.get_or_init(|| {
-        regex::Regex::new(
-            r"(?i)\b(?:top|first|primeir[oa]s?|primeiras|best|melhores)\s+(\d+)\b",
-        )
-        .expect("limit numeral regex is static and well-formed")
+        regex::Regex::new(r"(?i)\b(?:top|first|primeir[oa]s?|best|melhores)\s+(\d+)\b")
+            .expect("limit numeral regex is static and well-formed")
     });
     let Some(cap) = re.captures(what) else {
         return (None, false);
