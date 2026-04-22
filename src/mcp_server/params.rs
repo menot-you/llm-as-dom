@@ -80,6 +80,17 @@ pub(crate) struct ExtractParams {
     /// relevant hits, not the first 50 DOM elements.
     #[serde(default)]
     pub strict: Option<bool>,
+    /// FR-2 (friction-log-2026-04-22) — hard cap on returned elements.
+    /// Applied AFTER strict filtering but BEFORE pagination, so the
+    /// caller gets at most `limit` elements even across all pages.
+    /// Response includes `truncated: bool` signaling whether the cap
+    /// trimmed anything. When `strict=true` and `limit` is omitted, a
+    /// leading numeral in `what` (e.g. "top 5 story titles", "primeiras
+    /// 3 histórias") is parsed as an implicit limit. Hard cap is 200;
+    /// values above 200 are silently clamped and the response sets
+    /// `truncated=true` so the caller can request more explicitly.
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 /// Wave 1 — default page size for `lad_extract` / `lad_snapshot` pagination.

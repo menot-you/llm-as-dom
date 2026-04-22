@@ -889,3 +889,158 @@ fn audit_params_return_tab_false_explicit() {
     let p: AuditParams = serde_json::from_str(json).unwrap();
     assert_eq!(p.return_tab, Some(false));
 }
+
+// ── BUG-3: text contains / page contains predicates ──────────
+
+#[test]
+fn check_assertion_text_contains_matches_title() {
+    let mut view = empty_view();
+    view.title = "LLM-as-DOM at DuckDuckGo".into();
+    assert!(check_assertion("text contains llm", &view, ""));
+    assert!(check_assertion("text contains duckduckgo", &view, ""));
+}
+
+#[test]
+fn check_assertion_text_contains_matches_url() {
+    let mut view = empty_view();
+    view.url = "https://duckduckgo.com/?q=llm-as-dom".into();
+    assert!(check_assertion("text contains llm-as-dom", &view, ""));
+    assert!(check_assertion("text contains duckduckgo.com", &view, ""));
+}
+
+#[test]
+fn check_assertion_text_contains_matches_body() {
+    let mut view = empty_view();
+    view.visible_text = "Invalid password — please try again".into();
+    assert!(check_assertion(
+        "text contains invalid password",
+        &view,
+        ""
+    ));
+}
+
+#[test]
+fn check_assertion_page_contains_alias_equivalent() {
+    let mut view = empty_view();
+    view.title = "Dashboard".into();
+    // Both prefixes must resolve to the same union-text path.
+    assert_eq!(
+        check_assertion("text contains dashboard", &view, ""),
+        check_assertion("page contains dashboard", &view, ""),
+    );
+    assert!(check_assertion("page contains dashboard", &view, ""));
+}
+
+#[test]
+fn check_assertion_text_contains_miss_returns_false() {
+    let mut view = empty_view();
+    view.title = "Home".into();
+    view.url = "https://example.com".into();
+    view.visible_text = "Welcome".into();
+    assert!(!check_assertion("text contains nonexistent", &view, ""));
+}
+
+#[test]
+fn check_assertion_text_contains_empty_needle_false() {
+    let mut view = empty_view();
+    view.title = "anything".into();
+    // Empty needle should not trivially match — guards against
+    // `.contains("")` returning true for every string.
+    assert!(!check_assertion(r#"text contains """#, &view, ""));
+}
+
+// ── FR-2: extract limit resolution ──────────────────────────
+
+#[test]
+fn extract_params_default_limit_none() {
+    let json = r#"{"what":"links"}"#;
+    let p: ExtractParams = serde_json::from_str(json).unwrap();
+    assert!(p.limit.is_none());
+}
+
+#[test]
+fn extract_params_limit_parses() {
+    let json = r#"{"what":"links","limit":5}"#;
+    let p: ExtractParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.limit, Some(5));
+}
+
+#[test]
+fn resolve_limit_explicit_wins() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, user_asked_more) = resolve_extract_limit(Some(7), true, "top 3 items");
+    assert_eq!(limit, Some(7));
+    assert!(!user_asked_more);
+}
+
+#[test]
+fn resolve_limit_explicit_clamps_to_hard_cap() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, user_asked_more) = resolve_extract_limit(Some(9_999), false, "");
+    assert_eq!(limit, Some(200));
+    assert!(user_asked_more);
+}
+
+#[test]
+fn resolve_limit_nl_top_n_when_strict() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, _) = resolve_extract_limit(None, true, "top 5 story titles");
+    assert_eq!(limit, Some(5));
+}
+
+#[test]
+fn resolve_limit_nl_first_n_when_strict() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, _) = resolve_extract_limit(None, true, "first 3 comments");
+    assert_eq!(limit, Some(3));
+}
+
+#[test]
+fn resolve_limit_nl_ptbr_primeiras() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, _) = resolve_extract_limit(None, true, "primeiras 4 histórias");
+    assert_eq!(limit, Some(4));
+    let (limit, _) = resolve_extract_limit(None, true, "primeiros 2 itens");
+    assert_eq!(limit, Some(2));
+}
+
+#[test]
+fn resolve_limit_nl_best_n() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, _) = resolve_extract_limit(None, true, "best 10 matches");
+    assert_eq!(limit, Some(10));
+    let (limit, _) = resolve_extract_limit(None, true, "melhores 6 resultados");
+    assert_eq!(limit, Some(6));
+}
+
+#[test]
+fn resolve_limit_nl_ignored_when_not_strict() {
+    use super::tools::extract::resolve_extract_limit;
+    // Non-strict mode: NL parse does NOT fire. User gets full list.
+    let (limit, user_asked_more) = resolve_extract_limit(None, false, "top 5 story titles");
+    assert_eq!(limit, None);
+    assert!(!user_asked_more);
+}
+
+#[test]
+fn resolve_limit_nonnumeric_phrase_no_limit() {
+    use super::tools::extract::resolve_extract_limit;
+    // "top scoring" has no digit — fallback: no implicit limit.
+    let (limit, _) = resolve_extract_limit(None, true, "top scoring items");
+    assert_eq!(limit, None);
+}
+
+#[test]
+fn resolve_limit_zero_numeral_ignored() {
+    use super::tools::extract::resolve_extract_limit;
+    // `top 0 items` is nonsense — don't return Some(0).
+    let (limit, _) = resolve_extract_limit(None, true, "top 0 items");
+    assert_eq!(limit, None);
+}
+
+#[test]
+fn resolve_limit_empty_what_no_limit() {
+    use super::tools::extract::resolve_extract_limit;
+    let (limit, _) = resolve_extract_limit(None, true, "");
+    assert_eq!(limit, None);
+}

@@ -129,6 +129,57 @@ pub(crate) fn apply_what_filter(
     relevant_count
 }
 
+/// FR-2: hard cap for `lad_extract` element limits.
+const EXTRACT_LIMIT_HARD_CAP: u32 = 200;
+
+/// FR-2 (friction-log-2026-04-22) — resolve the effective element limit.
+///
+/// Rules (documented in `ExtractParams::limit`):
+/// 1. Explicit `limit` always wins. Clamped to `[1, EXTRACT_LIMIT_HARD_CAP]`.
+///    Returns `(clamped_limit, user_asked_more = explicit > clamped)`.
+/// 2. When `limit=None` AND `strict=true`, parse a leading numeral from
+///    `what` — matches `top N`, `first N`, pt-br `primeiras/primeiros N`,
+///    `best N`, `melhores N` (case-insensitive). Non-match is a non-error:
+///    we return `(None, false)` so the caller gets the full filtered list.
+/// 3. Otherwise return `(None, false)`.
+pub(crate) fn resolve_extract_limit(
+    explicit: Option<u32>,
+    strict: bool,
+    what: &str,
+) -> (Option<u32>, bool) {
+    if let Some(n) = explicit {
+        let clamped = n.clamp(1, EXTRACT_LIMIT_HARD_CAP);
+        let user_asked_more = n > clamped;
+        return (Some(clamped), user_asked_more);
+    }
+    if !strict || what.is_empty() {
+        return (None, false);
+    }
+    // Regex is compiled once per call — extract.rs is cold path relative to
+    // DOM walking, so this is not a hotspot.
+    static NUMERAL_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = NUMERAL_RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)\b(?:top|first|primeir[oa]s?|primeiras|best|melhores)\s+(\d+)\b",
+        )
+        .expect("limit numeral regex is static and well-formed")
+    });
+    let Some(cap) = re.captures(what) else {
+        return (None, false);
+    };
+    let Some(n_str) = cap.get(1) else {
+        return (None, false);
+    };
+    let Ok(n) = n_str.as_str().parse::<u32>() else {
+        return (None, false);
+    };
+    if n == 0 {
+        return (None, false);
+    }
+    let clamped = n.clamp(1, EXTRACT_LIMIT_HARD_CAP);
+    (Some(clamped), false)
+}
+
 impl LadServer {
     /// Extract structured information from a web page.
     /// Returns interactive elements, visible text, page classification.
@@ -200,6 +251,27 @@ impl LadServer {
         // number of elements that matched for the JSON response.
         let relevant_count = apply_what_filter(&mut view, &p.what, p.max_length, strict);
 
+        // FR-2 (friction-log-2026-04-22): apply hard cap BEFORE pagination
+        // so `top 5` is honored even when the caller also paginates.
+        let total_before_limit = view.elements.len();
+        let (effective_limit, user_asked_more_than_cap) =
+            resolve_extract_limit(p.limit, strict, &p.what);
+        let mut truncated = user_asked_more_than_cap;
+        if let Some(limit) = effective_limit
+            && (limit as usize) < view.elements.len()
+        {
+            view.elements.truncate(limit as usize);
+            truncated = true;
+        }
+        tracing::debug!(
+            user_limit = ?p.limit,
+            effective_limit = ?effective_limit,
+            total_before_limit,
+            total_after_limit = view.elements.len(),
+            truncated,
+            "lad_extract limit applied"
+        );
+
         // DX-W3-6: Support format="prompt" for compact text output.
         let use_prompt = p
             .format
@@ -256,6 +328,12 @@ impl LadServer {
                 "forms": view.forms,
                 "visible_text": view.visible_text,
                 "query": p.what,
+                // FR-2: signal truncation so iterating callers
+                // ("top 50 → top 100 → top 200") can tell whether the cap
+                // fired and stop asking for more silently.
+                "truncated": truncated,
+                "limit_applied": effective_limit,
+                "total_before_limit": total_before_limit,
             });
 
             Ok(CallToolResult::success(vec![Content::text(
