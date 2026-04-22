@@ -55,7 +55,8 @@ fn apply_what_filter(view: &mut SemanticView, what: &str, max_length: Option<usi
         s
     };
 
-    view.elements.sort_by_key(|el| std::cmp::Reverse(score_el(el)));
+    view.elements
+        .sort_by_key(|el| std::cmp::Reverse(score_el(el)));
     let relevant = view.elements.iter().filter(|el| score_el(el) > 0).count();
 
     if !view.text_blocks.is_empty() {
@@ -70,7 +71,10 @@ fn apply_what_filter(view: &mut SemanticView, what: &str, max_length: Option<usi
             .filter(|(s, _)| *s > 0)
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.len().cmp(&a.1.len())));
-        let top_k = max_length.map(|m| (m / 240).max(3)).unwrap_or(8).clamp(3, 20);
+        let top_k = max_length
+            .map(|m| (m / 240).max(3))
+            .unwrap_or(8)
+            .clamp(3, 20);
         let joined = scored
             .iter()
             .take(top_k)
