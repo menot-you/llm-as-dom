@@ -681,7 +681,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Extract structured info from a page: interactive elements, text, page type. Never returns raw HTML. URL is optional — omit to extract from current page without navigating (preserves session state). `what` is a semantic filter: visible_text is rewritten to the top-K paragraphs/headings matching your query (not a hard 500-char banner). Pass `strict=true` to additionally drop elements whose label/name/placeholder/href don't match `what` — useful on inventory-heavy pages (GitHub, HN). Pass paginate_index+page_size to slice elements; include_hidden=true to bypass the default hidden-element filter."
+        description = "Extract structured info from a page: interactive elements, text, page type. Never returns raw HTML. URL is optional — omit to extract from current page without navigating (preserves session state). `what` is a semantic filter: visible_text is rewritten to the top-K paragraphs/headings matching your query (not a hard 500-char banner). Pass `strict=true` to additionally drop elements whose label/name/placeholder/href don't match `what` — useful on inventory-heavy pages (GitHub, HN). Pass `limit=N` to cap returned elements (hard cap 200; applied BEFORE pagination); response includes `truncated: bool`, `limit_applied`, and `total_before_limit` so iterating callers can tell if the cap fired. When `strict=true` and `limit` is omitted, a leading numeral in `what` (e.g. \"top 5 story titles\", \"primeiras 3 histórias\") is parsed as an implicit limit. Pass paginate_index+page_size to slice elements; include_hidden=true to bypass the default hidden-element filter."
     )]
     async fn lad_extract(
         &self,
@@ -835,7 +835,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Wait for condition(s) to be true on the active page. Supports single `condition` or multiple `conditions` with mode='any' (first match wins) or mode='all' (default, all must pass). Example: conditions=['has button Dashboard', 'text contains Invalid password'], mode='any'. Default timeout: 10s, poll interval: 500ms."
+        description = "Wait for condition(s) to be true on the active page. Supports single `condition` or multiple `conditions` with mode='any' (first match wins) or mode='all' (default, all must pass). Example: conditions=['has button Dashboard', 'text contains Invalid password'], mode='any'. Supported predicates include `title contains X` (title only), `url contains X` (URL only), `text contains X` / `page contains X` (UNION match — true if X appears in URL, title, visible body text, or rendered prompt), `has button|link|input|form|image|password|login`. Default timeout: 10s, poll interval: 500ms."
     )]
     async fn lad_wait(
         &self,

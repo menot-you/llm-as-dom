@@ -7,8 +7,13 @@ use llm_as_dom::semantic;
 /// Supported patterns (after normalization):
 /// - `has login form` / `has login`
 /// - `has password`
-/// - `title contains <text>`
-/// - `url contains <text>`
+/// - `title contains <text>` — match against `<title>` only
+/// - `url contains <text>` — match against URL only
+/// - `text contains <text>` / `page contains <text>` — UNION match: true if
+///   the substring appears in URL, `<title>`, visible body text, OR the
+///   pre-rendered prompt text. Use this when you don't care where on the
+///   page the text shows up (BUG-3: this is what `lad_wait` documented as
+///   an example but did not actually implement until now).
 /// - `has button <label>` (also matches `has <label> button`)
 /// - `has link <label>` (also matches `has <label> link`)
 /// - `has input <name>` (also matches `has <name> input`, plus input_type)
@@ -51,6 +56,21 @@ pub(crate) fn check_assertion(
             .url
             .to_lowercase()
             .contains(rest.trim().trim_matches('"'));
+    }
+    // BUG-3 (friction-log-2026-04-22): `text contains X` and its alias
+    // `page contains X` were documented as `lad_wait` examples but fell
+    // through to the whole-phrase fallback, which required "text" and
+    // "contains" to be literal words on the page. Match against the
+    // full union text now so the documented behavior matches reality.
+    if let Some(rest) = assertion
+        .strip_prefix("text contains ")
+        .or_else(|| assertion.strip_prefix("page contains "))
+    {
+        let needle = rest.trim().trim_matches('"');
+        if needle.is_empty() {
+            return false;
+        }
+        return full_text.contains(needle);
     }
     if let Some(rest) = assertion.strip_prefix("has button ") {
         let label = rest.trim().trim_matches('"').to_lowercase();
