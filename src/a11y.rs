@@ -289,11 +289,15 @@ pub async fn extract_semantic_view_with_options(
                         label = 'text editor';
                     }
                     // FR-5: explicit marker for still-unlabeled interactive
-                    // elements so agents see `<unlabeled:button>` instead
+                    // elements so agents see `[unlabeled:button]` instead
                     // of a silent empty string. Skip links: link labels
                     // already fall back to the href tail above.
+                    //
+                    // Bracket form (`[unlabeled:...]`) chosen over chevron
+                    // (`<...>`) so downstream markdown renderers and HTML
+                    // sanitizers don't strip or escape the sentinel.
                     if (!label && (kind === 'button' || kind === 'input')) {
-                        label = `<unlabeled:${kind}>`;
+                        label = `[unlabeled:${kind}]`;
                     }
 
                     const closestForm = el.closest('form');
@@ -546,14 +550,34 @@ pub async fn extract_semantic_view_with_options(
 
             // ── FR-4: article/repo structural signal ────────────────────
             // True when the DOM advertises itself as an article or a
-            // code-hosting repository. Matches <article>, <main role=main>,
-            // Schema.org itemtype variants, and og:type meta values.
+            // code-hosting repository. Branches:
+            //   1. Top-level structural element (`body > article`,
+            //      `body > main[role=main]`) carrying substantial text.
+            //      Scoping to direct body children avoids false positives
+            //      on SPA dashboards that stamp `<article>` per card or
+            //      list row.
+            //   2. Schema.org `itemtype` anywhere in the document — these
+            //      tags are intentionally placed and rarely abused.
+            //   3. `og:type` meta in {article, repository, object, blog,
+            //      news}. Non-canonical values (`blog`, `news`,
+            //      `repository`, `object`) are accepted intentionally:
+            //      they appear in the wild on GitHub/blog platforms even
+            //      though strict OG spec only lists `article`.
             // Used by Rust-side classify_page() as Branch A, winning over
             // the "many links → listing" fallback for content-heavy pages
             // like GitHub repo roots that carry a README + 40+ nav links.
+            //
+            // The text-content gate (>= 200 chars) on top-level <article>
+            // and <main> filters out wrapper-only usage (e.g. an empty
+            // <main> wrapping a SPA route shell). 200 chars ≈ a short
+            // paragraph; cards/rows alone rarely cross that bar.
+            const ARTICLE_MIN_TEXT = 200;
             let articleSignal = false;
             try {
-                if (document.querySelector('article, main[role="main"], [itemtype*="SoftwareSourceCode"], [itemtype*="Article"], [itemtype*="BlogPosting"], [itemtype*="NewsArticle"]')) {
+                const topLevel = document.querySelector('body > article, body > main[role="main"]');
+                if (topLevel && (topLevel.textContent || '').trim().length >= ARTICLE_MIN_TEXT) {
+                    articleSignal = true;
+                } else if (document.querySelector('[itemtype*="SoftwareSourceCode"], [itemtype*="Article"], [itemtype*="BlogPosting"], [itemtype*="NewsArticle"]')) {
                     articleSignal = true;
                 } else {
                     const og = document.querySelector('meta[property="og:type"]')?.getAttribute('content');
@@ -857,12 +881,7 @@ fn url_matches_repo_pattern(host: &str, path: &str) -> bool {
 ///   `/owner/repo(/issues|pulls|...)?` pathname matches even when the
 ///   DOM signal is missing (e.g. during the React mount race on
 ///   GitHub).
-fn classify_page(
-    title: &str,
-    url: &str,
-    elements: &[Element],
-    article_signal: bool,
-) -> String {
+fn classify_page(title: &str, url: &str, elements: &[Element], article_signal: bool) -> String {
     let lower_title = title.to_lowercase();
     let lower_url = url.to_lowercase();
 
@@ -1576,7 +1595,12 @@ mod tests {
         // 40 ambient links would normally trigger navigation/listing, but
         // DOM's `<article>` signal promotes the page to article/repo.
         let elements = many_links(40);
-        let hint = classify_page("GitHub", "https://github.com/anthropics/claude-code", &elements, true);
+        let hint = classify_page(
+            "GitHub",
+            "https://github.com/anthropics/claude-code",
+            &elements,
+            true,
+        );
         assert_eq!(hint, "article/repo page");
     }
 
@@ -1680,20 +1704,32 @@ mod tests {
     #[test]
     fn url_repo_pattern_allowlist_gates() {
         // github.com: /owner/repo → match.
-        assert!(url_matches_repo_pattern("github.com", "/anthropics/claude-code"));
+        assert!(url_matches_repo_pattern(
+            "github.com",
+            "/anthropics/claude-code"
+        ));
         // gitlab.com: /owner/repo/pulls → match.
         assert!(url_matches_repo_pattern("gitlab.com", "/owner/repo/pulls"));
         // codeberg.org: commits subpage.
-        assert!(url_matches_repo_pattern("codeberg.org", "/owner/repo/commits/main"));
+        assert!(url_matches_repo_pattern(
+            "codeberg.org",
+            "/owner/repo/commits/main"
+        ));
         // Non-allowlisted host: same shape, should NOT match.
-        assert!(!url_matches_repo_pattern("news.ycombinator.com", "/user/pg"));
+        assert!(!url_matches_repo_pattern(
+            "news.ycombinator.com",
+            "/user/pg"
+        ));
         assert!(!url_matches_repo_pattern("news.ycombinator.com", "/news/2"));
         // Allowlisted host but depth-1 path: not a repo.
         assert!(!url_matches_repo_pattern("github.com", "/settings"));
         // Allowlisted host, repo root with trailing slash.
         assert!(url_matches_repo_pattern("github.com", "/owner/repo/"));
         // Random subpage outside the canonical set on a repo host.
-        assert!(!url_matches_repo_pattern("github.com", "/owner/repo/something-random"));
+        assert!(!url_matches_repo_pattern(
+            "github.com",
+            "/owner/repo/something-random"
+        ));
     }
 
     #[test]
