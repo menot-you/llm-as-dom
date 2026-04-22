@@ -142,17 +142,10 @@ async fn test_chromium_page_close_releases_target() {
     engine.close().await.unwrap();
 }
 
-/// BUG-2 regression: default-impl `PageHandle::close()` on non-Chromium
-/// engines is a noop (WebKit has no target pool — single-page bridge).
-/// We cover the noop path with a dyn-dispatch call so the trait contract
-/// is exercised even without a WebKit bridge available in CI.
-#[test]
-fn pagehandle_close_default_noop_compiles() {
-    // Compile-time assertion: trait object has `close` with default impl.
-    // Nothing to assert at runtime — the real coverage is the Chromium
-    // integration test above.
-    fn _takes_boxed(_p: &mut dyn llm_as_dom::engine::PageHandle) {}
-}
+// BUG-2: the default `close()` impl is exercised by a stub-based unit test
+// in `src/engine/mod.rs` (see `pagehandle_close_default_returns_ok`). The
+// real Chromium release path is covered by the `#[ignore]` integration test
+// `test_chromium_page_close_releases_target` above.
 
 /// Launches a real browser, extracts example.com, asserts elements > 0.
 #[ignore = "requires Chrome + network — run with `cargo test -- --ignored`"]
