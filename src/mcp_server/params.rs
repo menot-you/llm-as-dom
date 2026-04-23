@@ -91,6 +91,16 @@ pub(crate) struct ExtractParams {
     /// `truncated=true` so the caller can request more explicitly.
     #[serde(default)]
     pub limit: Option<u32>,
+    /// BUG-4 + FR-1 (friction-log-2026-04-22) — run the structural-card
+    /// detector and emit `view.cards` in the response. Default `false`
+    /// keeps response JSON byte-identical (cards field omitted via
+    /// `serde(skip_serializing_if = Option::is_none)`). On listing
+    /// pages (HN, Reddit, GitHub feeds) where 17 story rows currently
+    /// expand to 100+ elements, cards surface the structural grouping
+    /// plus per-row metadata (points, author, age) without touching
+    /// the underlying elements list.
+    #[serde(default)]
+    pub include_cards: Option<bool>,
 }
 
 /// Wave 1 — default page size for `lad_extract` / `lad_snapshot` pagination.
@@ -209,6 +219,11 @@ pub(crate) struct SnapshotParams {
     /// Only meaningful when `url` is `None` (re-reading an already-open tab).
     #[serde(default)]
     pub tab_id: Option<u32>,
+    /// BUG-4 + FR-1 (friction-log-2026-04-22) — opt in to the
+    /// structural-card detector. Same semantics as
+    /// `ExtractParams::include_cards`.
+    #[serde(default)]
+    pub include_cards: Option<bool>,
 }
 
 /// Default snapshot hard timeout: 20 seconds.

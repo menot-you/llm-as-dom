@@ -160,7 +160,7 @@ pub fn try_button_click(
 
         let label_lower = el.label.to_lowercase();
         let value_lower = el.value.as_deref().unwrap_or("").to_lowercase();
-        let combined = format!("{} {}", label_lower, value_lower);
+        let combined = format!("{label_lower} {value_lower}");
 
         let mut score: f32 = 0.0;
         for kw in &goal_keywords {
@@ -186,7 +186,7 @@ pub fn try_button_click(
     best_button.map(|(id, conf)| super::HeuristicResult {
         action: Some(Action::Click {
             element: id,
-            reasoning: format!("heuristic: click submit button [{}]", id),
+            reasoning: format!("heuristic: click submit button [{id}]"),
         }),
         confidence: conf,
         reason: "submit button matched".into(),
@@ -357,6 +357,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 

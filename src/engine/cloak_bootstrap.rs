@@ -202,8 +202,7 @@ fn cache_root() -> Result<PathBuf, Error> {
 /// per machine on first engine launch and shows progress in tracing.
 fn download_tarball(asset_name: &str, dest: &Path) -> Result<(), Error> {
     let url = format!(
-        "https://github.com/CloakHQ/CloakBrowser/releases/download/{}/{}",
-        DEFAULT_RELEASE_TAG, asset_name
+        "https://github.com/CloakHQ/CloakBrowser/releases/download/{DEFAULT_RELEASE_TAG}/{asset_name}"
     );
     tracing::info!(url = %url, dest = %dest.display(), "cloakbrowser: downloading");
 
@@ -225,8 +224,7 @@ fn download_tarball(asset_name: &str, dest: &Path) -> Result<(), Error> {
         .map_err(|e| Error::Browser(format!("cloakbrowser: curl failed to launch: {e}")))?;
     if !status.success() {
         return Err(Error::Browser(format!(
-            "cloakbrowser: curl exited with {} downloading {}",
-            status, url
+            "cloakbrowser: curl exited with {status} downloading {url}"
         )));
     }
     Ok(())
@@ -250,8 +248,7 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<(), Error> {
         // Remove the tainted file so next run can retry.
         let _ = std::fs::remove_file(path);
         return Err(Error::Browser(format!(
-            "cloakbrowser: sha256 mismatch — expected {}, got {}",
-            expected, actual
+            "cloakbrowser: sha256 mismatch — expected {expected}, got {actual}"
         )));
     }
     tracing::info!("cloakbrowser: sha256 verified");
@@ -271,8 +268,7 @@ fn extract_tarball(tarball: &Path, dest_dir: &Path) -> Result<(), Error> {
         .map_err(|e| Error::Browser(format!("cloakbrowser: tar failed to launch: {e}")))?;
     if !status.success() {
         return Err(Error::Browser(format!(
-            "cloakbrowser: tar exited with {}",
-            status
+            "cloakbrowser: tar exited with {status}"
         )));
     }
     tracing::debug!("cloakbrowser: extraction complete");

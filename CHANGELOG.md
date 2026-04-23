@@ -82,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/friction-log-2026-04-22.md`).
 
 ### Features
+- *(extract,snapshot)* New `include_cards: Option<bool>` param on
+  `lad_extract` and `lad_snapshot`. Default `false` keeps response JSON
+  byte-identical for every caller that does not opt in (new `cards`
+  field is omitted via `serde(skip_serializing_if = "Option::is_none")`).
+  Opt in to receive `view.cards: Vec<Card>` where each `Card` carries
+  `{ id: "cN", title, metadata: [(key,value)], child_element_ids: [u32] }`.
+  The JS walker detects structural cards generically — any container
+  with ≥ 3 repeated sibling children (same tagName for ≥ 80% of the
+  first 20 positions) qualifies, so HN rows, Reddit feeds, GitHub
+  repo lists, and generic `<ol>/<ul>` index pages all group without
+  any hostname baked into the walker. Per-sibling metadata regex
+  pulls points/comments/views/author/age. Card IDs are strings
+  (prefix `c`) to avoid collision with integer `Element::id`; click
+  interaction still routes through the existing
+  `lad_click(element=N)` path via each card's `child_element_ids`
+  (BUG-4 + FR-1 from `docs/friction-log-2026-04-22.md`).
 - *(extract)* Add `limit: Option<u32>` to `lad_extract` with hard cap at 200.
   Applied AFTER strict filtering but BEFORE pagination so `top 5` is honored
   across pages. Response now includes `truncated: bool`, `limit_applied`, and

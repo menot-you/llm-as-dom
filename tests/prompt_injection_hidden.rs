@@ -107,6 +107,7 @@ fn adversarial_view() -> SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 

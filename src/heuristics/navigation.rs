@@ -49,8 +49,7 @@ pub fn try_navigation(
         action: Some(Action::Click {
             element: id,
             reasoning: format!(
-                "heuristic: click element [{}] matching navigation target \"{target}\"",
-                id
+                "heuristic: click element [{id}] matching navigation target \"{target}\""
             ),
         }),
         confidence: conf,

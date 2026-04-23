@@ -265,8 +265,8 @@ pub fn build_target_js(spec: &TargetSpec, body: &str) -> String {
     let spec_js = spec.to_js_object();
     format!(
         r#"(() => {{
-            {matcher}
-            const spec = {spec};
+            {MATCHER_JS}
+            const spec = {spec_js};
             const el = __ladFindTarget(spec);
             if (!el) {{
                 // Collect near-misses: elements matching at least one constraint.
@@ -287,9 +287,6 @@ pub fn build_target_js(spec: &TargetSpec, body: &str) -> String {
             {body}
             return JSON.stringify({{ ok: true }});
         }})()"#,
-        matcher = MATCHER_JS,
-        spec = spec_js,
-        body = body,
     )
 }
 

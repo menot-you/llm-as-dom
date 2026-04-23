@@ -97,6 +97,7 @@ fn login_view() -> SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -135,6 +136,7 @@ fn large_view() -> SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -306,6 +308,7 @@ fn bench_sanitize_view_300el(c: &mut Criterion) {
         element_cap: Some("300/500".into()),
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     let raw = view.to_prompt();
