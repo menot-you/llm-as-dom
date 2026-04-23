@@ -306,34 +306,82 @@ impl LadServer {
         let js = build_element_js_or_target(p.element, p.target.as_ref(), &body)?;
 
         if p.press_enter {
-            // FIX-R6-05: Form submission via Enter may trigger navigation.
-            // Use wait_for_navigation with a timeout instead of a fixed sleep.
+            // FIX-R6-05 / BUG-1 (friction-log-2026-04-22): form submission
+            // via Enter may trigger navigation, which invalidates the CDP
+            // execution context mid-eval. In non-strict mode, we detect
+            // the race and tolerate the resulting
+            // `Cannot find context` / `Execution context was destroyed`
+            // errors when navigation is confirmed to have happened. Set
+            // env `LAD_PRESS_ENTER_STRICT=1` to revert to the raw-error
+            // behavior (rollback escape hatch).
+            let detailed = p.detailed.unwrap_or(false);
+            let strict = self.press_enter_strict;
+            let url_before;
+            let url_after;
             {
                 let mut guard = self.lock_active_page().await;
                 let ap = guard.resolve(p.tab_id)?;
-                check_js_result(&ap.page.eval_js(&js).await.map_err(mcp_err)?)?;
+                url_before = ap.page.url().await.unwrap_or_default();
 
-                // Wait up to 5s for potential navigation; timeout is fine (page didn't navigate).
+                let eval_res = ap.page.eval_js(&js).await;
+
+                // Wait up to 5s for potential navigation; timeout is fine
+                // (the page may not have navigated at all).
                 let _ = tokio::time::timeout(
                     std::time::Duration::from_secs(5),
                     ap.page.wait_for_navigation(),
                 )
                 .await;
 
+                url_after = ap.page.url().await.unwrap_or_default();
+                let nav_happened = !url_after.is_empty() && url_after != url_before;
+
+                // BUG-1: tolerate stale-context errors ONLY when navigation
+                // confirmed AND strict mode is off. Short-circuit here so
+                // other CDP errors (timeout, SSRF, real bugs) still bubble.
+                match eval_res {
+                    Ok(v) => {
+                        check_js_result(&v)?;
+                    }
+                    Err(e) => {
+                        let msg = format!("{e:?}");
+                        let is_stale_context = msg.contains("Cannot find context")
+                            || msg.contains("Execution context was destroyed")
+                            || msg.contains("context with specified id not found");
+                        if !is_stale_context || strict || !nav_happened {
+                            return Err(mcp_err(e));
+                        }
+                        tracing::info!(
+                            url_before = %url_before,
+                            url_after = %url_after,
+                            "BUG-1: tolerated stale context after confirmed navigation"
+                        );
+                    }
+                }
+
                 // FIX-R6-01: SSRF gate after potential navigation
                 // FIX-R8-01: Invalidate the tab on SSRF detection.
-                let current_url = ap.page.url().await.map_err(mcp_err)?;
-                if !llm_as_dom::sanitize::is_safe_url(&current_url) {
+                if !llm_as_dom::sanitize::is_safe_url(&url_after) {
                     Self::invalidate_tab_on_ssrf(&mut guard, p.tab_id);
                     return Err(mcp_err(format!(
-                        "blocked: form submission navigated to unsafe URL {current_url}"
+                        "blocked: form submission navigated to unsafe URL {url_after}"
                     )));
                 }
             }
             let view = self.refresh_view_for(p.tab_id).await?;
-            Ok(CallToolResult::success(vec![Content::text(
-                view.to_prompt(),
-            )]))
+            let nav_happened = !url_after.is_empty() && url_after != url_before;
+            let outcome = if nav_happened {
+                "navigated"
+            } else {
+                "no_navigation"
+            };
+            let prompt = view.to_prompt();
+            let body = if detailed {
+                format!("[outcome: {outcome}, from: {url_before}, to: {url_after}]\n{prompt}")
+            } else {
+                prompt
+            };
+            Ok(CallToolResult::success(vec![Content::text(body)]))
         } else {
             self.interact_and_refresh(&js, VALUE_SET_DELAY_MS, p.tab_id)
                 .await
