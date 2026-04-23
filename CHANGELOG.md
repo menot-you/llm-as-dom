@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prose containing the words "page"/"text" and "contains". Anyone who
   relied on the old broken phrase as a never-matches sentinel will start
   getting hits when `X` appears in the URL.
+- *(a11y)* Dedupe long repeated sentences in `visible_text`. The JS walker
+  previously re-emitted the same sticky `<header>` / `<footer>` / `<aside>` /
+  `<nav>` text via both the heading walk AND the span/td fallback, which
+  produced outputs like "Hacker Newsnew | past | comments | ask ... Hacker
+  Newsnew | past | comments | ask ...". Now long sentences (≥ 5 words)
+  inside chrome containers are emitted once per page. Short strings
+  ("Page 1 of 10") and content sections (`<main>`, `<article>`) pass
+  unchanged so feed entries (e.g. 5 GitHub repo rows all showing "No
+  description, website, or topics provided.") and legitimate pagination
+  duplicates stay visible to the agent (FR-3 from
+  `docs/friction-log-2026-04-22.md`).
 
 ### Features
 - *(extract)* Add `limit: Option<u32>` to `lad_extract` with hard cap at 200.

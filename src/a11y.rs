@@ -483,9 +483,50 @@ pub async fn extract_semantic_view_with_options(
                     textBlocks.push(s.length > BLOCK_CAP ? s.substring(0, BLOCK_CAP) : s);
                 }
             };
+
+            // ── FR-3 (friction-log-2026-04-22): visible_text dedup ─────
+            // The same long sentence was repeating 2-3× in `visibleText`
+            // whenever sticky `<header>` / `<footer>` / `<aside>` /
+            // `<nav>` text was reachable both via the heading/paragraph
+            // walk AND via the span/td fallback. Dedupe long sentences
+            // (≥ 5 words) that live inside these chrome containers only.
+            // Short strings ("Page 1 of 10") and content sections
+            // (`<main>`, `<article>`) pass unchanged so feed entries
+            // (e.g. 5 GitHub repo rows with "No description, website, or
+            // topics provided.") and legitimate pagination duplicates
+            // stay visible to the agent.
+            const CHROME_TAGS = new Set(['HEADER', 'FOOTER', 'ASIDE', 'NAV']);
+            const chromeSeen = new Set();
+            function inChromeSection(node) {
+                let cur = node;
+                while (cur && cur !== document.body && cur !== document.documentElement) {
+                    const tag = cur.tagName;
+                    if (CHROME_TAGS.has(tag)) return true;
+                    // <main>/<article> short-circuits — the node is
+                    // content, NOT chrome, so it must NOT be deduped.
+                    if (tag === 'MAIN' || tag === 'ARTICLE') return false;
+                    cur = cur.parentElement;
+                }
+                return false;
+            }
+            function normalizeForDedup(text) {
+                return text.replace(/\s+/g, ' ').trim();
+            }
+            function shouldEmitForDedup(node, text) {
+                const norm = normalizeForDedup(text);
+                if (!norm) return true;
+                // Short strings always pass — pagination labels, ship
+                // warnings, small captions legitimately repeat.
+                if (norm.split(' ').length < 5) return true;
+                if (!inChromeSection(node)) return true;
+                if (chromeSeen.has(norm)) return false;
+                chromeSeen.add(norm);
+                return true;
+            }
+
             for (const node of textNodes) {
                 const text = node.textContent?.trim();
-                if (text) {
+                if (text && shouldEmitForDedup(node, text)) {
                     pushBlock(text);
                     if (visibleText.length < 500) {
                         if (visibleText) visibleText += ' ';
@@ -504,7 +545,7 @@ pub async fn extract_semantic_view_with_options(
             const extraNodes = deepQueryAll(document, 'td, span, a, pre, code, textarea');
             for (const node of extraNodes) {
                 const text = node.textContent?.trim();
-                if (text && text.length > 20) {
+                if (text && text.length > 20 && shouldEmitForDedup(node, text)) {
                     pushBlock(text);
                     if (visibleText.length < 100 && visibleText.length < 500) {
                         if (visibleText) visibleText += ' ';

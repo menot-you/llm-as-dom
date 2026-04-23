@@ -147,6 +147,85 @@ async fn test_chromium_page_close_releases_target() {
 // real Chromium release path is covered by the `#[ignore]` integration test
 // `test_chromium_page_close_releases_target` above.
 
+/// FR-3 regression: long sentences in `<header>` / `<footer>` must be
+/// deduped in `visible_text`, while the same string inside `<main>`
+/// stays — we don't want to collapse legitimate feed content.
+#[ignore = "requires Chrome — run with `cargo test -- --ignored`"]
+#[tokio::test]
+async fn test_visible_text_dedupes_chrome_repeat() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let html = "<!doctype html><html lang=en><head><title>dedupe</title></head>\
+        <body>\
+        <header><p>Welcome to our wonderful long sentence banner.</p></header>\
+        <main><p>Welcome to our wonderful long sentence banner.</p></main>\
+        <footer><p>Welcome to our wonderful long sentence banner.</p></footer>\
+        </body></html>";
+    let url = format!("data:text/html;charset=utf-8,{html}");
+
+    let page = engine.new_page(&url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    let needle = "wonderful long sentence banner";
+    let occurrences = view.visible_text.matches(needle).count();
+    assert_eq!(
+        occurrences, 2,
+        "expected <main> + 1 chrome occurrence (header or footer, whichever arrived first), got {occurrences} for text: {}",
+        view.visible_text
+    );
+
+    engine.close().await.unwrap();
+}
+
+/// FR-3 regression: short repeated strings (< 5 words) must NOT be
+/// deduped, because pagination / labels / short captions legitimately
+/// repeat in chrome sections.
+#[ignore = "requires Chrome — run with `cargo test -- --ignored`"]
+#[tokio::test]
+async fn test_visible_text_preserves_short_chrome_repeat() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let html = "<!doctype html><html lang=en><head><title>paginator</title></head>\
+        <body>\
+        <header><p>Page 1 of 10</p></header>\
+        <main><h1>Content</h1></main>\
+        <footer><p>Page 1 of 10</p></footer>\
+        </body></html>";
+    let url = format!("data:text/html;charset=utf-8,{html}");
+
+    let page = engine.new_page(&url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view(page.as_ref())
+        .await
+        .unwrap();
+
+    let occurrences = view.visible_text.matches("Page 1 of 10").count();
+    assert_eq!(
+        occurrences, 2,
+        "short strings (< 5 words) must not be deduped: {}",
+        view.visible_text
+    );
+
+    engine.close().await.unwrap();
+}
+
 /// Launches a real browser, extracts example.com, asserts elements > 0.
 #[ignore = "requires Chrome + network — run with `cargo test -- --ignored`"]
 #[tokio::test]
