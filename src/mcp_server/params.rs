@@ -97,8 +97,8 @@ pub(crate) struct ExtractParams {
     /// `serde(skip_serializing_if = Option::is_none)`). On listing
     /// pages (HN, Reddit, GitHub feeds) where 17 story rows currently
     /// expand to 100+ elements, cards surface the structural grouping
-    /// + per-row metadata (points, author, age) without touching the
-    /// underlying elements list.
+    /// plus per-row metadata (points, author, age) without touching
+    /// the underlying elements list.
     #[serde(default)]
     pub include_cards: Option<bool>,
 }
