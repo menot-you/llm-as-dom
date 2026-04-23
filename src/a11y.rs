@@ -18,7 +18,7 @@ use crate::semantic::{Element, ElementHint, ElementKind, FormMeta, PageState, Se
 /// [`extract_semantic_view_with_options`] with `include_hidden=true` to bypass
 /// the gate (audit / debugging).
 pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView, crate::Error> {
-    extract_semantic_view_with_options(page, false).await
+    extract_semantic_view_with_options(page, false, false).await
 }
 
 /// Extract page structure with an explicit `include_hidden` flag.
@@ -33,6 +33,7 @@ pub async fn extract_semantic_view(page: &dyn PageHandle) -> Result<SemanticView
 pub async fn extract_semantic_view_with_options(
     page: &dyn PageHandle,
     include_hidden: bool,
+    include_cards: bool,
 ) -> Result<SemanticView, crate::Error> {
     let url = page.url().await.unwrap_or_else(|_| "unknown".into());
     let title = page.title().await.unwrap_or_else(|_| String::new());
@@ -42,6 +43,7 @@ pub async fn extract_semantic_view_with_options(
     // string below by replacing a sentinel token rather than going through
     // `format!` (that would force us to escape every `{`/`}` in the walker).
     let include_hidden_js = if include_hidden { "true" } else { "false" };
+    let include_cards_js = if include_cards { "true" } else { "false" };
     let js_template = r#"
         (() => {
             // CHAOS-C3: Override window.close() to prevent hostile pages from
@@ -53,6 +55,11 @@ pub async fn extract_semantic_view_with_options(
             // elements reach the Rust side (where is_visible=false flags
             // them for downstream filtering). Substituted at runtime.
             const includeHidden = __LAD_INCLUDE_HIDDEN__;
+            // BUG-4 + FR-1 follow-up: gate the structural cards walker so
+            // opt-out callers don't pay the DOM traversal + querySelectorAll
+            // cost. Default path (includeCards=false) skips the whole try
+            // block — zero walker work when the feature is off.
+            const includeCards = __LAD_INCLUDE_CARDS__;
 
             const MAX_ELEMENTS = 300;
             // DX-CE3 (bug 3): include contenteditable roots, [role="textbox"],
@@ -645,7 +652,7 @@ pub async fn extract_semantic_view_with_options(
             // Cards are informational grouping. Clicking still routes
             // through `elements` — no new tool surface.
             const cards = [];
-            try {
+            if (includeCards) try {
                 const CARD_LIST_MIN_CHILDREN = 3;
                 const CARD_SAMPLE_DEPTH = 20;
                 const CARD_LIST_CAP = 50;
@@ -707,10 +714,12 @@ pub async fn extract_semantic_view_with_options(
         })()
     "#;
 
-    // Splice the Rust-side `include_hidden` flag into the JS walker. Safe
-    // because `bool::to_string()` only yields "true"/"false" — no escaping
-    // required, no XSS surface (this runs inside our own controlled page).
-    let js = js_template.replace("__LAD_INCLUDE_HIDDEN__", include_hidden_js);
+    // Splice the Rust-side flags into the JS walker. Safe because
+    // `bool::to_string()` only yields "true"/"false" — no escaping required,
+    // no XSS surface (this runs inside our own controlled page).
+    let js = js_template
+        .replace("__LAD_INCLUDE_HIDDEN__", include_hidden_js)
+        .replace("__LAD_INCLUDE_CARDS__", include_cards_js);
 
     let mut extraction: JsExtraction = crate::engine::eval_js_into(page, &js).await?;
     let mut shell_markers = crate::cloaking::probe_shell_markers(page).await;
@@ -786,9 +795,11 @@ pub async fn extract_semantic_view_with_options(
         })
         .collect();
 
-    // BUG-4 + FR-1: the walker always extracts cards so the cost is
-    // paid once per extraction. Gating on `include_cards=true` happens
-    // at the tool layer (strips `view.cards = None` on opt-out).
+    // BUG-4 + FR-1: the JS walker only runs when `include_cards=true` was
+    // passed into this function (see `includeCards` gate in the JS
+    // template). On the default path the cards array is always empty and
+    // callers pay zero walker cost. Tool layer still strips
+    // `view.cards = None` belt-and-suspenders when the caller didn't opt in.
     let raw_cards: Vec<crate::semantic::Card> =
         extraction.cards.into_iter().map(Into::into).collect();
 

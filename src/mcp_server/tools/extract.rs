@@ -237,18 +237,22 @@ impl LadServer {
             })?
         };
 
-        // Wave 5 (Pain #10): when the caller asks for hidden elements, the
-        // default JS walker has already dropped them at Layer 1. Re-extract
-        // with the flag lifted so hidden nodes flow through. Only done when
-        // the flag is explicitly true to avoid an extra roundtrip on the
-        // default path and to keep the signature of
-        // `navigate_or_reuse`/`refresh_active_view` unchanged.
-        if include_hidden {
+        // Wave 5 (Pain #10) + BUG-4 follow-up: re-extract with the JS walker
+        // flags the caller asked for (include_hidden lifts Layer 1 gate;
+        // include_cards turns on the structural cards walker). Default path
+        // (both false) pays zero walker cost. Only fired when at least one
+        // is true to keep `navigate_or_reuse` / `refresh_active_view`
+        // signatures unchanged.
+        if include_hidden || include_cards {
             let guard = self.lock_active_page().await;
             let ap = guard.resolve(p.tab_id)?;
-            view = llm_as_dom::a11y::extract_semantic_view_with_options(ap.page.as_ref(), true)
-                .await
-                .map_err(mcp_err)?;
+            view = llm_as_dom::a11y::extract_semantic_view_with_options(
+                ap.page.as_ref(),
+                include_hidden,
+                include_cards,
+            )
+            .await
+            .map_err(mcp_err)?;
         }
 
         // Wave 1 — hidden-element gate. Runs BEFORE scoring/pagination so
@@ -397,16 +401,19 @@ impl LadServer {
                 self.refresh_view_for(p.tab_id).await?
             };
 
-            // Wave 5 (Pain #10): re-extract with include_hidden=true when
-            // the caller wants hidden nodes. See `tool_lad_extract` for
-            // rationale — avoids threading the flag through
-            // `navigate_or_reuse` / `refresh_active_view`.
-            if include_hidden {
+            // Wave 5 (Pain #10) + BUG-4 follow-up: re-extract with the JS
+            // walker flags the caller asked for. Default path pays zero
+            // walker cost; only re-extracts when at least one flag is true.
+            if include_hidden || include_cards {
                 let guard = self.lock_active_page().await;
                 let ap = guard.resolve(p.tab_id)?;
-                view = llm_as_dom::a11y::extract_semantic_view_with_options(ap.page.as_ref(), true)
-                    .await
-                    .map_err(mcp_err)?;
+                view = llm_as_dom::a11y::extract_semantic_view_with_options(
+                    ap.page.as_ref(),
+                    include_hidden,
+                    include_cards,
+                )
+                .await
+                .map_err(mcp_err)?;
             }
 
             // Wave 1 — hidden-element gate (default-on). See `retain_visible_elements`.
