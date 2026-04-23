@@ -104,8 +104,7 @@ pub async fn run_pilot(
             );
             let final_action = Action::Escalate {
                 reason: format!(
-                    "stale state: URL and element count unchanged for {} consecutive observations",
-                    stale_streak
+                    "stale state: URL and element count unchanged for {stale_streak} consecutive observations"
                 ),
             };
             let step = Step {

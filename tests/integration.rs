@@ -2554,7 +2554,7 @@ async fn test_type_into_contenteditable() {
     let text = "hello contenteditable world";
     let js = format!(
         r#"(() => {{
-            const el = document.querySelector('[data-lad-id="{id}"]');
+            const el = document.querySelector('[data-lad-id="{composer_id}"]');
             if (!el) return JSON.stringify({{ error: "not found" }});
             const isEditor = el.isContentEditable
                 || el.getAttribute('contenteditable') === 'true'
@@ -2582,8 +2582,6 @@ async fn test_type_into_contenteditable() {
             }}
             return JSON.stringify({{ ok: true }});
         }})()"#,
-        id = composer_id,
-        text = text,
     );
     page.eval_js(&js).await.unwrap();
 

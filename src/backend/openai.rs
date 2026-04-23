@@ -119,7 +119,7 @@ impl PilotBackend for OpenAiBackend {
 
         let mut request_builder = self
             .client
-            .post(format!("{}/chat/completions", base))
+            .post(format!("{base}/chat/completions"))
             .header("Content-Type", "application/json");
 
         if !self.api_key.is_empty() {

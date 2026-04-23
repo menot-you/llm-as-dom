@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("\n== STEP 1: resolve_cloak_binary ==");
     let path = resolve_cloak_binary()?;
-    eprintln!("-> path: {:?}", path);
+    eprintln!("-> path: {path:?}");
 
     eprintln!("\n== STEP 2: build BrowserConfig with LAD flags ==");
     // Use LAD's real persistent profile to reproduce the hang
@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("Library/Caches/lad/chrome-profile");
     std::fs::create_dir_all(&udd_path)?;
     let udd = udd_path.to_string_lossy().to_string();
-    eprintln!("-> udd: {}", udd);
+    eprintln!("-> udd: {udd}");
     let mut builder = chromiumoxide::BrowserConfig::builder()
         .user_data_dir(udd)
         .arg("--no-first-run")
@@ -71,13 +71,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("\n== STEP 8: get_title ==");
     let title = page.get_title().await?;
-    eprintln!("-> title: {:?}", title);
+    eprintln!("-> title: {title:?}");
 
     eprintln!("\n== STEP 9: evaluate navigator.webdriver ==");
     let js = "JSON.stringify({webdriver: navigator.webdriver, ua: navigator.userAgent.slice(0,60), plugins: navigator.plugins.length})";
     let eval_result = page.evaluate(js).await?;
     let v: serde_json::Value = eval_result.into_value()?;
-    eprintln!("-> {}", v);
+    eprintln!("-> {v}");
 
     drop(browser);
     handle.abort();

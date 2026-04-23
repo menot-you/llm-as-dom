@@ -477,7 +477,7 @@ pub fn format_session_context(session: &crate::session::SessionState) -> String 
             let safe_url = crate::sanitize::redact_url_secrets(&entry.url);
             let _ = writeln!(out, "  - visited: {} ({})", safe_url, entry.title);
             for action in &entry.actions_taken {
-                let _ = writeln!(out, "    action: {}", action);
+                let _ = writeln!(out, "    action: {action}");
             }
         }
     }
