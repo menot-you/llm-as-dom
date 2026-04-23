@@ -84,6 +84,7 @@ fn login_view() -> SemanticView {
         ],
         forms: vec![],
         visible_text: "Sign in".into(),
+        text_blocks: vec![],
         state: PageState::Ready,
         element_cap: None,
         blocked_reason: None,
