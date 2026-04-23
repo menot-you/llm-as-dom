@@ -796,16 +796,25 @@ fn element_selector_with_fallbacks(
 /// Internal variant of [`templatize`]. The caller uses the populated
 /// `substituted` set to detect secret-shaped params that never matched any
 /// captured step value.
+///
+/// Issue #55 — order determinism. `HashMap` iteration has no stable order,
+/// so when one param's value is a substring of another (e.g.
+/// `password=abc`, `confirm=abc123`) the output depended on which ran
+/// first. We now sort by value length descending before replacing, so the
+/// longest value always wins its substring match and the shorter value
+/// still gets replaced in any remaining instances. Output is deterministic
+/// regardless of insertion order.
 fn templatize_tracking(
     raw: &str,
     params: &std::collections::HashMap<String, String>,
     substituted: &mut std::collections::HashSet<String>,
 ) -> String {
     let mut out = raw.to_string();
-    for (key, value) in params {
-        if value.is_empty() {
-            continue;
-        }
+    // Sort by value length desc, tiebreak by key for full determinism.
+    let mut ordered: Vec<(&String, &String)> =
+        params.iter().filter(|(_, v)| !v.is_empty()).collect();
+    ordered.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
+    for (key, value) in ordered {
         let placeholder = format!("${{{key}}}");
         let replaced = out.replace(value, &placeholder);
         if replaced != out {
@@ -1637,6 +1646,39 @@ mod tests {
     }
 
     // ── Fix 2a/2b: templatize enforcement ─────────────────────────────
+
+    /// Issue #55 — when params overlap (one value is a substring of
+    /// another), output must be deterministic regardless of insertion
+    /// order. Before the fix, iterating `&HashMap` produced different
+    /// replacements per run. Sorting by value.len() desc fixes it — longest
+    /// match always wins.
+    #[test]
+    fn templatize_tracking_deterministic_on_substring_overlap() {
+        let raw = "user=alice pass=abc confirm=abc123";
+        let mut params = HashMap::new();
+        params.insert("password".into(), "abc".into());
+        params.insert("confirm".into(), "abc123".into());
+        params.insert("user".into(), "alice".into());
+
+        // Run 20 times — with the old buggy code, at least one would
+        // produce ${password}123 instead of ${confirm}. With the fix,
+        // all 20 must agree.
+        let mut outputs = std::collections::HashSet::new();
+        for _ in 0..20 {
+            let mut subbed = std::collections::HashSet::new();
+            outputs.insert(templatize_tracking(raw, &params, &mut subbed));
+        }
+        assert_eq!(
+            outputs.len(),
+            1,
+            "output must be deterministic across runs, got {:?}",
+            outputs
+        );
+        // Longest value wins its match: abc123 -> ${confirm}; the lone abc
+        // (in pass=abc) also gets its replacement to ${password}.
+        let got = outputs.into_iter().next().unwrap();
+        assert_eq!(got, "user=${user} pass=${password} confirm=${confirm}");
+    }
 
     #[test]
     fn templatize_errors_when_secret_not_substituted() {
