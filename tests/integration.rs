@@ -26,6 +26,7 @@ fn mock_view(elements: Vec<Element>, page_hint: &str) -> SemanticView {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     }
 }
 
@@ -661,6 +662,7 @@ fn test_detect_cloudflare_challenge() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Cloudflare challenge should be detected");
@@ -707,6 +709,7 @@ fn test_detect_captcha_in_text() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "CAPTCHA text should trigger detection");
@@ -730,6 +733,7 @@ fn test_detect_challenge_url_with_few_elements() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -760,6 +764,7 @@ fn test_detect_many_elements_not_blocked() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     assert!(
         detect_bot_challenge(&view).is_none(),
@@ -866,6 +871,7 @@ fn hinted_login_view() -> SemanticView {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     }
 }
 
@@ -1023,6 +1029,7 @@ fn test_detect_reddit_challenge_url() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1054,6 +1061,7 @@ fn test_detect_verify_url() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1080,6 +1088,7 @@ fn test_detect_security_check_url() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1110,6 +1119,7 @@ fn test_detect_github_404() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1141,6 +1151,7 @@ fn test_detect_generic_404_title() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Generic 404 title should be detected");
@@ -1164,6 +1175,7 @@ fn test_detect_access_denied_title() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Access Denied title should be detected");
@@ -1187,6 +1199,7 @@ fn test_detect_forbidden_title() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Forbidden title should be detected");
@@ -1214,6 +1227,7 @@ fn test_no_false_positive_not_in_title() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1346,6 +1360,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     let pb = find_playbook(&playbooks, &view.url).unwrap();
@@ -1412,6 +1427,7 @@ fn test_hints_active_when_heuristics_disabled() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     // Hints should resolve even though we conceptually disable heuristics.
@@ -1733,6 +1749,7 @@ fn mfa_page_escalates() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     // Use a generic goal so login/search/nav heuristics don't fire first
@@ -1764,6 +1781,7 @@ fn non_mfa_page_does_not_escalate() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     let r = heuristics::try_resolve(&view, "view dashboard", &[]);
@@ -1856,6 +1874,7 @@ fn validation_error_escalates() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
@@ -1881,6 +1900,7 @@ fn clean_form_no_validation_escalation() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
@@ -1959,6 +1979,7 @@ fn mfa_module_direct_detection() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     let result = mfa::try_detect_mfa(&view, "login", &[]);
@@ -1983,6 +2004,7 @@ fn validation_module_direct_check() {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     };
 
     assert!(validation::has_validation_errors(&view));
@@ -2735,6 +2757,134 @@ async fn test_spa_shell_not_classified_as_cloaking() {
         view.blocked_reason.is_none(),
         "no blocked_reason expected, got {:?}",
         view.blocked_reason
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+// ── Issue #56 (seed): cards walker fixture test ─────────────────────
+//
+// Bootstraps #56 ("zero fixture tests for JS walker") with ONE happy-path
+// fixture proving the walker finds a repeated-sibling HN-like feed and
+// the #57 fixes hold (tight author regex, synthetic title fallback).
+// Run locally with `cargo test -- --ignored test_extract_cards_hn_like`.
+//
+// Follow-up work tracked in issue #56 extends this to:
+// - 1000-card truncation boundary (cards_truncated=true)
+// - single-card container (below MIN_CHILDREN threshold → no cards)
+// - nested cards (card-in-card)
+// - 79%/81% dominant-tag boundary
+// - fail-closed catch path (throw inside walker → empty cards, no panic)
+
+/// Happy-path fixture: HN-like feed with 4 `<div class="item">` siblings
+/// + banner prose containing author-regex false-positives. Asserts:
+/// - walker found 4 cards in the main feed container
+/// - "written by hand" and "Published by Editorial" did NOT produce
+///   author metadata (tightened regex ignores generic "by X" in prose)
+/// - "647 points by kaibeezy" DID produce `author=kaibeezy` (HN prefix
+///   "points by" matches the tightened regex)
+/// - sidebar with untitled articles produces cards using the synthetic
+///   title fallback (first 80 chars of sibling text)
+/// - cards_truncated is None (under CARD_LIST_CAP of 50)
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_hn_like() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-hn-like.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // include_cards=true (include_hidden=false) — run the walker.
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    let cards = view
+        .cards
+        .as_ref()
+        .expect("walker should populate cards when include_cards=true");
+
+    // Four siblings in `<div class="feed-container">` → four cards.
+    let feed_cards: Vec<_> = cards
+        .iter()
+        .filter(|c| {
+            c.title.contains("Alberta")
+                || c.title.contains("Docker")
+                || c.title.contains("Rust")
+                || c.title.contains("Title-less")
+        })
+        .collect();
+    assert_eq!(
+        feed_cards.len(),
+        4,
+        "expected 4 feed cards, got {} (all titles: {:?})",
+        feed_cards.len(),
+        cards.iter().map(|c| &c.title).collect::<Vec<_>>()
+    );
+
+    // The tight author regex: "647 points by kaibeezy" must match but
+    // the banner "written by hand" / "Published by Editorial" must NOT.
+    let kaibeezy_card = cards
+        .iter()
+        .find(|c| c.title.contains("Alberta"))
+        .expect("first card present");
+    let author = kaibeezy_card
+        .metadata
+        .iter()
+        .find(|(k, _)| k == "author")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(
+        author,
+        Some("kaibeezy"),
+        "HN-prefix 'points by kaibeezy' must extract author"
+    );
+
+    // No card should have author=hand or author=Editorial — the prose
+    // banner sits outside any repeated-sibling container AND the regex
+    // no longer matches generic "by X" in free text.
+    for c in cards {
+        let author = c
+            .metadata
+            .iter()
+            .find(|(k, _)| k == "author")
+            .map(|(_, v)| v.as_str());
+        assert_ne!(
+            author,
+            Some("hand"),
+            "author regex must not match 'written by hand'"
+        );
+        assert_ne!(
+            author,
+            Some("Editorial"),
+            "author regex must not match 'Published by Editorial'"
+        );
+    }
+
+    // Sidebar articles have no heading and no absolute anchor — the
+    // synthetic title fallback should kick in (first 80 chars of
+    // sibling text). At least one card should carry a "Tip: press" title.
+    let tip_card = cards.iter().find(|c| c.title.starts_with("Tip: press"));
+    assert!(
+        tip_card.is_some(),
+        "synthetic title fallback should surface the 'Tip: press ...' article"
+    );
+
+    // Under the CARD_LIST_CAP (50) — truncation flag stays None.
+    assert_eq!(
+        view.cards_truncated, None,
+        "fixture has < 50 cards, truncation flag must be None"
     );
 
     drop(page);
