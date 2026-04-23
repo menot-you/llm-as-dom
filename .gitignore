@@ -21,3 +21,7 @@ website/dist/
 .idea/
 .nott/
 
+# Learned playbooks (opt-in via --learn) — may contain templatized
+# selectors captured from production flows. Never commit.
+.lad/
+

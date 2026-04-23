@@ -12,7 +12,7 @@ pub mod util;
 pub use action::{Action, execute_action, execute_action_with_retry};
 pub use captcha::wait_for_captcha_resolution;
 pub use decide::decide_with_retry;
-pub use runner::{run_pilot, take_screenshot};
+pub use runner::{redact_action_for_learn, run_pilot, take_screenshot};
 pub use util::js_escape;
 
 use async_trait::async_trait;
@@ -66,6 +66,37 @@ pub trait PilotBackend: Send + Sync {
     ) -> Result<Action, crate::Error>;
 }
 
+/// Opt-in playbook-learning configuration for a pilot run.
+///
+/// When present on [`PilotConfig`], a successful run (terminating with
+/// [`Action::Done`] and containing at least one non-Tier-0 step) is persisted
+/// as a playbook in `output_dir`, so the next invocation can replay it as
+/// Tier 0 at zero LLM cost. Absence preserves the default behaviour.
+#[derive(Debug, Clone)]
+pub struct LearnConfig {
+    /// Explicit playbook name. When `None`, the name is derived from the goal.
+    pub name: Option<String>,
+    /// Param key/value pairs used to templatize captured `Type` / `Select`
+    /// values, e.g. `{"email": "octocat", "password": "hunter2"}`.
+    pub explicit_params: std::collections::HashMap<String, String>,
+    /// Directory where the synthesized playbook JSON will be written.
+    pub output_dir: std::path::PathBuf,
+}
+
+impl LearnConfig {
+    /// Convenience constructor using the default `.lad/playbooks/` directory.
+    pub fn new(
+        name: Option<String>,
+        explicit_params: std::collections::HashMap<String, String>,
+    ) -> Self {
+        Self {
+            name,
+            explicit_params,
+            output_dir: std::path::PathBuf::from(".lad/playbooks"),
+        }
+    }
+}
+
 /// Configuration for a pilot run.
 pub struct PilotConfig {
     /// Natural-language goal to accomplish.
@@ -95,6 +126,18 @@ pub struct PilotConfig {
     /// the user to resolve it in the browser window instead of escalating
     /// immediately.
     pub interactive: bool,
+    /// Opt-in playbook learning. When `Some` and the run succeeds, the
+    /// trajectory is synthesized into a replayable playbook and saved to
+    /// `learn.output_dir`. Default: `None` (no learning).
+    pub learn: Option<LearnConfig>,
+    /// The URL the pilot was originally pointed at (the `--url` argument).
+    ///
+    /// Used by playbook learning to derive the `url_pattern` from the
+    /// *canonical* entry point, not from whatever the first observation
+    /// sees (an OAuth bounce to a third-party IdP would otherwise
+    /// replace the pattern and cause future replay to miss). `None` is
+    /// the legacy default — synthesis falls back to the first observed URL.
+    pub initial_url: Option<String>,
 }
 
 impl Default for PilotConfig {
@@ -108,6 +151,8 @@ impl Default for PilotConfig {
             max_retries_per_step: 2,
             session: None,
             interactive: false,
+            learn: None,
+            initial_url: None,
         }
     }
 }
@@ -141,11 +186,24 @@ pub struct PilotResult {
 
 #[cfg(test)]
 mod tests {
-    use super::PilotConfig;
+    use super::{LearnConfig, PilotConfig};
 
     #[test]
     fn pilot_config_interactive_default() {
         let config = PilotConfig::default();
         assert!(!config.interactive);
+    }
+
+    #[test]
+    fn pilot_config_learn_defaults_off() {
+        let config = PilotConfig::default();
+        assert!(config.learn.is_none());
+    }
+
+    #[test]
+    fn learn_config_new_sets_default_dir() {
+        let lc = LearnConfig::new(Some("pb".into()), Default::default());
+        assert_eq!(lc.output_dir, std::path::PathBuf::from(".lad/playbooks"));
+        assert_eq!(lc.name.as_deref(), Some("pb"));
     }
 }
