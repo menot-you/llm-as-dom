@@ -90,6 +90,7 @@ fn login_view() -> SemanticView {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     }
 }
 

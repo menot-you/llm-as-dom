@@ -652,21 +652,36 @@ pub async fn extract_semantic_view_with_options(
             // Cards are informational grouping. Clicking still routes
             // through `elements` — no new tool surface.
             const cards = [];
+            // Issue #57: emit when the CARD_LIST_CAP cut the list short so
+            // agents can distinguish a 50-card ceiling hit from a genuine
+            // 50-card feed. Mirrors the `elementCap` contract.
+            let cardsTruncated = false;
             if (includeCards) try {
                 const CARD_LIST_MIN_CHILDREN = 3;
                 const CARD_SAMPLE_DEPTH = 20;
                 const CARD_LIST_CAP = 50;
+                // Issue #57: tighter author regexes. Old `/\bby\s+([A-Za-z0-9_\-\.]{2,32})\b/`
+                // matched "written by hand", "by Editorial", etc. We now require a
+                // concrete prefix that listings actually use (HN points-by, Reddit
+                // submitted-by, Twitter @handle) — losing generic "by X" in prose is
+                // a feature, not a bug. Multiple patterns; first match wins via
+                // `metaSeen` dedupe.
                 const META_REGEXES = [
                     [/(\d+)\s+(point|points|vote|votes|upvote|upvotes)\b/i, 'points'],
                     [/(\d+)\s+(comment|comments|reply|replies|response|responses)\b/i, 'comments'],
                     [/(\d+)\s+(view|views|read|reads)\b/i, 'views'],
-                    [/\bby\s+([A-Za-z0-9_\-\.]{2,32})\b/, 'author'],
+                    // HN row format: "647 points by kaibeezy 3 hours ago"
+                    [/\d+\s+(?:points?|votes?|upvotes?)\s+by\s+([A-Za-z0-9_\-\.]{2,32})/i, 'author'],
+                    // Reddit / generic blog byline
+                    [/\b(?:submitted|posted|written|authored)\s+by\s+@?([A-Za-z0-9_\-\.]{2,32})/i, 'author'],
+                    // Twitter / Bluesky @handle
+                    [/\bby\s+@([A-Za-z0-9_\-\.]{2,32})/i, 'author'],
                     [/\b(\d+\s+(?:second|minute|hour|day|week|month|year)s?\s+ago)\b/i, 'age'],
                 ];
                 const candidates = deepQueryAll(document, 'ol, ul, tbody, section, main, article, div[class*="feed"], div[class*="list"]');
                 let cardId = 0;
                 outer: for (const container of candidates) {
-                    if (cards.length >= CARD_LIST_CAP) break;
+                    if (cards.length >= CARD_LIST_CAP) { cardsTruncated = true; break; }
                     const children = Array.from(container.children || []);
                     if (children.length < CARD_LIST_MIN_CHILDREN) continue;
                     const sample = children.slice(0, CARD_SAMPLE_DEPTH);
@@ -680,10 +695,16 @@ pub async fn extract_semantic_view_with_options(
                     if (domCount / sample.length < 0.8) continue;
                     for (const sib of children) {
                         if (sib.tagName !== domTag) continue;
-                        if (cards.length >= CARD_LIST_CAP) break outer;
+                        if (cards.length >= CARD_LIST_CAP) { cardsTruncated = true; break outer; }
                         const titleEl = sib.querySelector('h1, h2, h3, h4, h5, h6')
                             || sib.querySelector('a[href^="http"], a[href^="/"]');
-                        const title = (titleEl?.textContent?.trim()?.substring(0, 160)) || '';
+                        let title = (titleEl?.textContent?.trim()?.substring(0, 160)) || '';
+                        // Issue #57: synthetic title fallback — agents would rather
+                        // see a truncated sibling-text snippet than silently lose
+                        // the card. Only skip when the sibling is genuinely empty.
+                        if (!title) {
+                            title = (sib.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 80);
+                        }
                         if (!title) continue;
                         const sibText = (sib.textContent || '').replace(/\s+/g, ' ').trim();
                         const metadata = [];
@@ -710,7 +731,7 @@ pub async fn extract_semantic_view_with_options(
                 }
             } catch (_) { /* fail closed — no cards is fine */ }
 
-            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms, articleSignal, cards };
+            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms, articleSignal, cards, cardsTruncated };
         })()
     "#;
 
@@ -820,6 +841,14 @@ pub async fn extract_semantic_view_with_options(
         } else {
             Some(raw_cards)
         },
+        // Issue #57: surface truncation only when the walker ran AND hit
+        // the cap. `None` on the default path where cards weren't asked
+        // for; `Some(true)` when the cap cut the list short.
+        cards_truncated: if extraction.cards_truncated {
+            Some(true)
+        } else {
+            None
+        },
     };
 
     // ── Security: strip steganographic characters + mask passwords ──
@@ -869,6 +898,10 @@ struct JsExtraction {
     /// serialized to the caller.
     #[serde(default)]
     cards: Vec<JsCard>,
+    /// Issue #57: walker hit `CARD_LIST_CAP` so siblings were dropped.
+    /// Defaults to false for legacy JS compat.
+    #[serde(default, rename = "cardsTruncated")]
+    cards_truncated: bool,
 }
 
 /// Raw card payload from the JS walker. Mirrors `semantic::Card`.
@@ -1447,6 +1480,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         sanitize_view(&mut view);
         assert_eq!(view.elements[0].name.as_deref(), Some("myname"));
@@ -1565,6 +1599,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         let reason = detect_bot_challenge(&view);
         assert!(reason.is_some());
@@ -1587,6 +1622,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         assert!(detect_bot_challenge(&view).is_none());
     }
@@ -1610,6 +1646,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         let markers = crate::cloaking::ShellMarkers {
             ready_complete: true,
@@ -1652,6 +1689,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         // Has elements, so no cloaking detection
         assert!(detect_bot_challenge(&view).is_none());
@@ -1672,6 +1710,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         // No elements AND no text — not cloaking, just empty
         assert!(detect_bot_challenge(&view).is_none());

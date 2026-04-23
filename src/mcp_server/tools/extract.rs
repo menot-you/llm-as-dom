@@ -638,6 +638,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         }
     }
 
@@ -729,6 +730,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         }
     }
 
@@ -910,6 +912,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         // Must not panic on zero-width, emoji, RTL markers.
         apply_what_filter(&mut view, "install", Some(200), false);
@@ -941,6 +944,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         apply_what_filter(&mut view, "foo", None, false);
         assert!(

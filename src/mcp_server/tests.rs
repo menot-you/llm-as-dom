@@ -18,6 +18,7 @@ fn empty_view() -> semantic::SemanticView {
         blocked_reason: None,
         session_context: None,
         cards: None,
+        cards_truncated: None,
     }
 }
 
@@ -1184,4 +1185,42 @@ fn card_id_string_does_not_collide_with_element_id_int() {
     }]);
     let json = serde_json::to_string(&view).unwrap();
     assert!(json.contains("\"id\":\"c0\""));
+}
+
+// ── Issue #57: cards_truncated flag ─────────────────────────────────
+
+/// Default `None` must be skipped in serialization — legacy clients
+/// never see the field unless the walker actually hit the cap.
+#[test]
+fn cards_truncated_omitted_when_none() {
+    let view = empty_view();
+    assert!(view.cards_truncated.is_none());
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(
+        !json.contains("cards_truncated"),
+        "default-None cards_truncated must be skipped: {json}"
+    );
+}
+
+/// `Some(true)` flows through to the JSON output.
+#[test]
+fn cards_truncated_serialized_when_some() {
+    let mut view = empty_view();
+    view.cards_truncated = Some(true);
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(
+        json.contains("\"cards_truncated\":true"),
+        "truncation flag must serialize: {json}"
+    );
+}
+
+/// Round-trip: a walker that emits `cardsTruncated=true` (JS) must
+/// deserialize into `Some(true)` on the SemanticView view.
+#[test]
+fn cards_truncated_round_trip() {
+    let mut view = empty_view();
+    view.cards_truncated = Some(true);
+    let json = serde_json::to_string(&view).unwrap();
+    let back: semantic::SemanticView = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.cards_truncated, Some(true));
 }

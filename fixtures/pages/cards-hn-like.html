@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — HN-like feed</title>
+</head>
+<body>
+  <header>
+    <h1>Feed</h1>
+    <p>Banner prose with the phrase "written by hand" — the author regex
+      MUST NOT extract "hand" as an author (issue #57 false-positive guard).</p>
+    <p>Published by Editorial Staff. The author regex MUST NOT extract
+      "Editorial" either — generic "by X" prose is deliberately ignored.</p>
+  </header>
+
+  <!-- HN-style item list: repeated <div class="item"> siblings with
+       heading + points/comments + "by <user>" (preceded by "points by"
+       so the tightened author regex matches). -->
+  <main>
+    <div class="feed-container">
+      <div class="item">
+        <h3><a href="https://example.com/post/1">Alberta startup sells no-tech tractors</a></h3>
+        <div class="meta">647 points by kaibeezy 3 hours ago | 312 comments</div>
+      </div>
+      <div class="item">
+        <h3><a href="https://example.com/post/2">Docker vulnerability affects 40% of images</a></h3>
+        <div class="meta">421 points by devops_mike 5 hours ago | 189 comments</div>
+      </div>
+      <div class="item">
+        <h3><a href="https://example.com/post/3">Rust 1.94 release notes</a></h3>
+        <div class="meta">883 points by rustacean 1 hour ago | 456 comments</div>
+      </div>
+      <div class="item">
+        <h3><a href="https://example.com/post/4">Title-less card with relative fragment link</a></h3>
+        <div class="meta">12 points by someone 10 minutes ago</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Untitled sibling: has no heading AND no http/absolute anchor.
+       With the #57 synthetic-title fallback, this becomes a card with
+       title = first 80 chars of sibling text. -->
+  <section class="sidebar-container">
+    <article>
+      <p>Tip: press <kbd>g</kbd> to go to the top of the feed</p>
+      <a href="#tip-1">permalink</a>
+    </article>
+    <article>
+      <p>Tip: press <kbd>n</kbd> for the next unread item</p>
+      <a href="#tip-2">permalink</a>
+    </article>
+    <article>
+      <p>Tip: use the <code>j</code>/<code>k</code> keys to navigate</p>
+      <a href="#tip-3">permalink</a>
+    </article>
+  </section>
+</body>
+</html>

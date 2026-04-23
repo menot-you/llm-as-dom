@@ -50,6 +50,12 @@ pub struct SemanticView {
     /// Populated only when the tool call passes `include_cards=true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cards: Option<Vec<Card>>,
+    /// Issue #57: truncation flag for `cards`. `Some(true)` when the JS
+    /// walker hit `CARD_LIST_CAP` (50) and silently dropped additional
+    /// siblings — mirrors the `element_cap` contract used for `elements`.
+    /// `None` when `include_cards=false` OR the result fit under the cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cards_truncated: Option<bool>,
 }
 
 /// BUG-4 + FR-1: a structural card representing a repeated sibling in
@@ -409,6 +415,7 @@ impl SemanticView {
             blocked_reason: self.blocked_reason.clone(),
             session_context: self.session_context.clone(),
             cards: self.cards.clone(),
+            cards_truncated: self.cards_truncated,
         };
 
         let header = if slice.is_empty() {
@@ -539,6 +546,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         }
     }
 
@@ -625,6 +633,7 @@ mod tests {
             blocked_reason: None,
             session_context: None,
             cards: None,
+            cards_truncated: None,
         };
         view.retain_visible_elements();
         assert_eq!(view.elements.len(), 3, "only visible elements survive");
