@@ -221,6 +221,7 @@ impl LadServer {
         let p = params.0;
         let include_hidden = p.include_hidden.unwrap_or(false);
         let strict = p.strict.unwrap_or(false);
+        let include_cards = p.include_cards.unwrap_or(false);
         let mut view = if let Some(ref url) = p.url {
             let (_page, view) = self.navigate_and_extract(url).await?;
             view
@@ -236,24 +237,34 @@ impl LadServer {
             })?
         };
 
-        // Wave 5 (Pain #10): when the caller asks for hidden elements, the
-        // default JS walker has already dropped them at Layer 1. Re-extract
-        // with the flag lifted so hidden nodes flow through. Only done when
-        // the flag is explicitly true to avoid an extra roundtrip on the
-        // default path and to keep the signature of
-        // `navigate_or_reuse`/`refresh_active_view` unchanged.
-        if include_hidden {
+        // Wave 5 (Pain #10) + BUG-4 follow-up: re-extract with the JS walker
+        // flags the caller asked for (include_hidden lifts Layer 1 gate;
+        // include_cards turns on the structural cards walker). Default path
+        // (both false) pays zero walker cost. Only fired when at least one
+        // is true to keep `navigate_or_reuse` / `refresh_active_view`
+        // signatures unchanged.
+        if include_hidden || include_cards {
             let guard = self.lock_active_page().await;
             let ap = guard.resolve(p.tab_id)?;
-            view = llm_as_dom::a11y::extract_semantic_view_with_options(ap.page.as_ref(), true)
-                .await
-                .map_err(mcp_err)?;
+            view = llm_as_dom::a11y::extract_semantic_view_with_options(
+                ap.page.as_ref(),
+                include_hidden,
+                include_cards,
+            )
+            .await
+            .map_err(mcp_err)?;
         }
 
         // Wave 1 — hidden-element gate. Runs BEFORE scoring/pagination so
         // hidden nodes never contribute to the caller's element budget.
         if !include_hidden {
             view.retain_visible_elements();
+        }
+
+        // BUG-4 + FR-1: gate card emission so opt-out callers see the
+        // pre-fix response shape byte-for-byte.
+        if !include_cards {
+            view.cards = None;
         }
 
         // FIX-18 / Issue #36: apply `what` as a semantic filter — scores
@@ -366,6 +377,7 @@ impl LadServer {
         let p = params.0;
         let deadline = std::time::Duration::from_millis(p.timeout_ms);
         let include_hidden = p.include_hidden.unwrap_or(false);
+        let include_cards = p.include_cards.unwrap_or(false);
         let paginate = p.paginate_index;
         let page_size = p.page_size.max(1);
 
@@ -389,21 +401,30 @@ impl LadServer {
                 self.refresh_view_for(p.tab_id).await?
             };
 
-            // Wave 5 (Pain #10): re-extract with include_hidden=true when
-            // the caller wants hidden nodes. See `tool_lad_extract` for
-            // rationale — avoids threading the flag through
-            // `navigate_or_reuse` / `refresh_active_view`.
-            if include_hidden {
+            // Wave 5 (Pain #10) + BUG-4 follow-up: re-extract with the JS
+            // walker flags the caller asked for. Default path pays zero
+            // walker cost; only re-extracts when at least one flag is true.
+            if include_hidden || include_cards {
                 let guard = self.lock_active_page().await;
                 let ap = guard.resolve(p.tab_id)?;
-                view = llm_as_dom::a11y::extract_semantic_view_with_options(ap.page.as_ref(), true)
-                    .await
-                    .map_err(mcp_err)?;
+                view = llm_as_dom::a11y::extract_semantic_view_with_options(
+                    ap.page.as_ref(),
+                    include_hidden,
+                    include_cards,
+                )
+                .await
+                .map_err(mcp_err)?;
             }
 
             // Wave 1 — hidden-element gate (default-on). See `retain_visible_elements`.
             if !include_hidden {
                 view.retain_visible_elements();
+            }
+
+            // BUG-4 + FR-1: strip cards unless caller opted in so the
+            // response JSON remains byte-identical for pre-fix callers.
+            if !include_cards {
+                view.cards = None;
             }
 
             // Wave 1 — pagination render.
@@ -616,6 +637,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 
@@ -706,6 +728,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 
@@ -886,6 +909,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         // Must not panic on zero-width, emoji, RTL markers.
         apply_what_filter(&mut view, "install", Some(200), false);
@@ -916,6 +940,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         apply_what_filter(&mut view, "foo", None, false);
         assert!(

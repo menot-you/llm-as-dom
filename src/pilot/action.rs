@@ -85,12 +85,10 @@ pub async fn execute_action(
         Action::Click { element, .. } => {
             let js = format!(
                 r#"(() => {{
-                    {DEEP_QS}
-                    const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
+                    {DEEP_QUERY_SELECTOR_JS}
+                    const el = deepQuerySelector(document, '[data-lad-id="{element}"]');
                     if (el) el.click();
                 }})()"#,
-                DEEP_QS = DEEP_QUERY_SELECTOR_JS,
-                id = element,
             );
             let _ = page.eval_js(&js).await?;
         }
@@ -98,8 +96,8 @@ pub async fn execute_action(
             let escaped = js_escape(value);
             let js = format!(
                 r#"(() => {{
-                    {DEEP_QS}
-                    const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
+                    {DEEP_QUERY_SELECTOR_JS}
+                    const el = deepQuerySelector(document, '[data-lad-id="{element}"]');
                     if (el) {{
                         el.focus();
                         el.value = '{escaped}';
@@ -107,8 +105,6 @@ pub async fn execute_action(
                         el.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     }}
                 }})()"#,
-                DEEP_QS = DEEP_QUERY_SELECTOR_JS,
-                id = element,
             );
             let _ = page.eval_js(&js).await?;
         }
@@ -116,12 +112,10 @@ pub async fn execute_action(
             let escaped = js_escape(value);
             let js = format!(
                 r#"(() => {{
-                    {DEEP_QS}
-                    const el = deepQuerySelector(document, '[data-lad-id="{id}"]');
+                    {DEEP_QUERY_SELECTOR_JS}
+                    const el = deepQuerySelector(document, '[data-lad-id="{element}"]');
                     if (el) {{ el.value = '{escaped}'; el.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
                 }})()"#,
-                DEEP_QS = DEEP_QUERY_SELECTOR_JS,
-                id = element,
             );
             let _ = page.eval_js(&js).await?;
         }
@@ -190,8 +184,7 @@ pub async fn execute_action_with_retry(
             }
 
             Err(crate::Error::ActionFailed(format!(
-                "action failed after {} retries: {}",
-                max_retries, last_err
+                "action failed after {max_retries} retries: {last_err}"
             )))
         }
     }

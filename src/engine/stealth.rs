@@ -888,11 +888,6 @@ pub fn build_stealth_script(fp: &StealthFingerprint) -> String {
   }} catch (e) {{}}
 }})();
 "#,
-        hw = hw,
-        mem = mem,
-        tz = tz,
-        gpu_vendor = gpu_vendor,
-        gpu_renderer = gpu_renderer,
     )
 }
 

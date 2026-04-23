@@ -44,6 +44,33 @@ pub struct SemanticView {
     /// Session context for multi-page flows (set by pilot when session is active).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_context: Option<String>,
+    /// BUG-4 + FR-1 (friction-log-2026-04-22): structural card groups
+    /// detected in the DOM (HN story rows, Reddit feed tiles, GitHub
+    /// repo lists). `None` by default so legacy JSON is byte-identical.
+    /// Populated only when the tool call passes `include_cards=true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cards: Option<Vec<Card>>,
+}
+
+/// BUG-4 + FR-1: a structural card representing a repeated sibling in
+/// the DOM. Surfaces inline metadata ("647 points by Kaibeezy 3 hours
+/// ago") that otherwise lived only in free text while keeping
+/// interactive `elements` unchanged so existing click flows work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Card {
+    /// Stable string ID prefixed `c`, e.g. `c0`. String to avoid
+    /// collision with integer `Element::id`.
+    pub id: String,
+    /// First heading OR first external link text inside the container.
+    pub title: String,
+    /// Key-value metadata extracted via regex over the sibling's text
+    /// (points, comments, author, age). Keys lowercase.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metadata: Vec<(String, String)>,
+    /// IDs of interactive elements inside the card. Agents drive the
+    /// card via existing `lad_click(element=N)` — no new endpoint.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_element_ids: Vec<u32>,
 }
 
 /// A single interactive element extracted from the DOM.
@@ -381,6 +408,7 @@ impl SemanticView {
             element_cap: self.element_cap.clone(),
             blocked_reason: self.blocked_reason.clone(),
             session_context: self.session_context.clone(),
+            cards: self.cards.clone(),
         };
 
         let header = if slice.is_empty() {
@@ -449,7 +477,7 @@ pub fn format_session_context(session: &crate::session::SessionState) -> String 
             let safe_url = crate::sanitize::redact_url_secrets(&entry.url);
             let _ = writeln!(out, "  - visited: {} ({})", safe_url, entry.title);
             for action in &entry.actions_taken {
-                let _ = writeln!(out, "    action: {}", action);
+                let _ = writeln!(out, "    action: {action}");
             }
         }
     }
@@ -510,6 +538,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 
@@ -595,6 +624,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         view.retain_visible_elements();
         assert_eq!(view.elements.len(), 3, "only visible elements survive");

@@ -17,6 +17,7 @@ fn empty_view() -> semantic::SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -1114,4 +1115,73 @@ fn resolve_limit_empty_what_no_limit() {
     use super::tools::extract::resolve_extract_limit;
     let (limit, _) = resolve_extract_limit(None, true, "");
     assert_eq!(limit, None);
+}
+
+// ── BUG-4 + FR-1: include_cards param + Card shape ────────────
+
+#[test]
+fn extract_params_default_include_cards_none() {
+    let json = r#"{"what":"anything"}"#;
+    let p: ExtractParams = serde_json::from_str(json).unwrap();
+    assert!(p.include_cards.is_none());
+}
+
+#[test]
+fn extract_params_include_cards_true() {
+    let json = r#"{"what":"anything","include_cards":true}"#;
+    let p: ExtractParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.include_cards, Some(true));
+}
+
+#[test]
+fn snapshot_params_include_cards_true() {
+    let json = r#"{"include_cards":true}"#;
+    let p: SnapshotParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.include_cards, Some(true));
+}
+
+#[test]
+fn semantic_view_cards_omitted_when_none() {
+    let view = empty_view();
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(
+        !json.contains("\"cards\""),
+        "default-None cards must be skipped in serialization: {json}"
+    );
+}
+
+#[test]
+fn semantic_view_cards_serialized_when_some() {
+    let mut view = empty_view();
+    view.cards = Some(vec![semantic::Card {
+        id: "c0".into(),
+        title: "Alberta startup sells no-tech tractors".into(),
+        metadata: vec![
+            ("points".into(), "647".into()),
+            ("author".into(), "Kaibeezy".into()),
+        ],
+        child_element_ids: vec![11, 16],
+    }]);
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(json.contains("\"cards\""));
+    assert!(json.contains("\"c0\""));
+    assert!(json.contains("\"points\""));
+    assert!(json.contains("\"647\""));
+    assert!(json.contains("\"child_element_ids\""));
+}
+
+#[test]
+fn card_id_string_does_not_collide_with_element_id_int() {
+    // Regression gate: element IDs are u32, card IDs are `cN` strings —
+    // a caller cross-indexing the two should never see collision since
+    // string vs number are distinct JSON types.
+    let mut view = empty_view();
+    view.cards = Some(vec![semantic::Card {
+        id: "c0".into(),
+        title: "card zero".into(),
+        metadata: vec![],
+        child_element_ids: vec![0],
+    }]);
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(json.contains("\"id\":\"c0\""));
 }

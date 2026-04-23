@@ -181,7 +181,7 @@ fn match_id(el: &Element, id: u32) -> Option<SelectorMatch> {
     (el.id == id).then(|| SelectorMatch {
         element_id: el.id,
         confidence: 1.0,
-        reason: format!("exact ID match [{}]", id),
+        reason: format!("exact ID match [{id}]"),
     })
 }
 
@@ -201,7 +201,7 @@ fn match_attribute(el: &Element, attr: &str, value: &str) -> Option<SelectorMatc
     matched.then(|| SelectorMatch {
         element_id: el.id,
         confidence: 0.95,
-        reason: format!("[{}={}] matched", attr, value),
+        reason: format!("[{attr}={value}] matched"),
     })
 }
 
@@ -220,7 +220,7 @@ fn match_kind_and_label(
     let (score, reason) = if label_lower == target_lower {
         (0.95, format!("exact label match: \"{}\"", el.label))
     } else if label_lower.contains(&target_lower) {
-        (0.85, format!("label contains: \"{}\"", label_contains))
+        (0.85, format!("label contains: \"{label_contains}\""))
     } else {
         return None;
     };
@@ -249,7 +249,7 @@ fn match_role(el: &Element, role: &str, label_contains: Option<&str>) -> Option<
     Some(SelectorMatch {
         element_id: el.id,
         confidence: 0.90,
-        reason: format!("role={} matched", role),
+        reason: format!("role={role} matched"),
     })
 }
 
@@ -322,13 +322,13 @@ fn match_natural(el: &Element, description: &str) -> Option<SelectorMatch> {
     for kw in &content_keywords {
         if label_lower.contains(kw) {
             score += 0.3;
-            reasons.push(format!("label contains \"{}\"", kw));
+            reasons.push(format!("label contains \"{kw}\""));
         } else if name_lower.contains(kw) {
             score += 0.2;
-            reasons.push(format!("name contains \"{}\"", kw));
+            reasons.push(format!("name contains \"{kw}\""));
         } else if ph_lower.contains(kw) {
             score += 0.15;
-            reasons.push(format!("placeholder contains \"{}\"", kw));
+            reasons.push(format!("placeholder contains \"{kw}\""));
         }
     }
 
@@ -486,6 +486,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 
