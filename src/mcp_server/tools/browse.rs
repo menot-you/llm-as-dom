@@ -159,6 +159,7 @@ impl LadServer {
                         element_cap: None,
                         blocked_reason: None,
                         session_context: None,
+                        cards: None,
                     });
                 let id = self
                     .insert_tab(crate::state::ActivePage {

@@ -628,7 +628,82 @@ pub async fn extract_semantic_view_with_options(
                 }
             } catch (_) { articleSignal = false; }
 
-            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms, articleSignal };
+            // ── BUG-4 + FR-1 (friction-log-2026-04-22): cards detector ──
+            // Find containers with >= 3 repeated structural siblings
+            // (children sharing a dominant tagName for >= 80% of the
+            // first 20 positions). Matches HN's `<table class="itemlist">`
+            // with `<tr class="athing">` rows, Reddit post feeds, generic
+            // `<ol>/<ul>` listings — no hostname baked in.
+            //
+            // Per sibling we emit a Card with:
+            // - title: first heading OR first external/anchor link text.
+            // - metadata: regex matches over sibling text for points /
+            //   comments / author / age. Non-matching siblings still
+            //   become cards with empty metadata.
+            // - child_element_ids: descendants carrying `data-lad-id`.
+            //
+            // Cards are informational grouping. Clicking still routes
+            // through `elements` — no new tool surface.
+            const cards = [];
+            try {
+                const CARD_LIST_MIN_CHILDREN = 3;
+                const CARD_SAMPLE_DEPTH = 20;
+                const CARD_LIST_CAP = 50;
+                const META_REGEXES = [
+                    [/(\d+)\s+(point|points|vote|votes|upvote|upvotes)\b/i, 'points'],
+                    [/(\d+)\s+(comment|comments|reply|replies|response|responses)\b/i, 'comments'],
+                    [/(\d+)\s+(view|views|read|reads)\b/i, 'views'],
+                    [/\bby\s+([A-Za-z0-9_\-\.]{2,32})\b/, 'author'],
+                    [/\b(\d+\s+(?:second|minute|hour|day|week|month|year)s?\s+ago)\b/i, 'age'],
+                ];
+                const candidates = deepQueryAll(document, 'ol, ul, tbody, section, main, article, div[class*="feed"], div[class*="list"]');
+                let cardId = 0;
+                outer: for (const container of candidates) {
+                    if (cards.length >= CARD_LIST_CAP) break;
+                    const children = Array.from(container.children || []);
+                    if (children.length < CARD_LIST_MIN_CHILDREN) continue;
+                    const sample = children.slice(0, CARD_SAMPLE_DEPTH);
+                    const tagCounts = new Map();
+                    for (const c of sample) tagCounts.set(c.tagName, (tagCounts.get(c.tagName) || 0) + 1);
+                    let domTag = null; let domCount = 0;
+                    for (const [tag, count] of tagCounts.entries()) {
+                        if (count > domCount) { domTag = tag; domCount = count; }
+                    }
+                    if (!domTag) continue;
+                    if (domCount / sample.length < 0.8) continue;
+                    for (const sib of children) {
+                        if (sib.tagName !== domTag) continue;
+                        if (cards.length >= CARD_LIST_CAP) break outer;
+                        const titleEl = sib.querySelector('h1, h2, h3, h4, h5, h6')
+                            || sib.querySelector('a[href^="http"], a[href^="/"]');
+                        const title = (titleEl?.textContent?.trim()?.substring(0, 160)) || '';
+                        if (!title) continue;
+                        const sibText = (sib.textContent || '').replace(/\s+/g, ' ').trim();
+                        const metadata = [];
+                        const metaSeen = new Set();
+                        for (const [re, key] of META_REGEXES) {
+                            const m = sibText.match(re);
+                            if (m && !metaSeen.has(key)) {
+                                metaSeen.add(key);
+                                metadata.push([key, m[1]]);
+                            }
+                        }
+                        const childIds = [];
+                        sib.querySelectorAll('[data-lad-id]').forEach(el => {
+                            const id = parseInt(el.getAttribute('data-lad-id'), 10);
+                            if (!Number.isNaN(id)) childIds.push(id);
+                        });
+                        cards.push({
+                            id: 'c' + cardId++,
+                            title,
+                            metadata,
+                            child_element_ids: childIds,
+                        });
+                    }
+                }
+            } catch (_) { /* fail closed — no cards is fine */ }
+
+            return { elements, visibleText, textBlocks, formCount: allForms.length, elementCap, forms, articleSignal, cards };
         })()
     "#;
 
@@ -711,6 +786,12 @@ pub async fn extract_semantic_view_with_options(
         })
         .collect();
 
+    // BUG-4 + FR-1: the walker always extracts cards so the cost is
+    // paid once per extraction. Gating on `include_cards=true` happens
+    // at the tool layer (strips `view.cards = None` on opt-out).
+    let raw_cards: Vec<crate::semantic::Card> =
+        extraction.cards.into_iter().map(Into::into).collect();
+
     let mut view = SemanticView {
         url,
         title,
@@ -723,6 +804,11 @@ pub async fn extract_semantic_view_with_options(
         element_cap: extraction.element_cap,
         blocked_reason: None,
         session_context: None,
+        cards: if raw_cards.is_empty() {
+            None
+        } else {
+            Some(raw_cards)
+        },
     };
 
     // ── Security: strip steganographic characters + mask passwords ──
@@ -766,6 +852,34 @@ struct JsExtraction {
     /// `article/repo page` classification in [`classify_page`].
     #[serde(default, rename = "articleSignal")]
     article_signal: bool,
+    /// BUG-4 + FR-1: structural cards detected by the walker. Always
+    /// populated by the JS walker; Rust-side gating on `include_cards`
+    /// happens at the tool layer before the `SemanticView` is
+    /// serialized to the caller.
+    #[serde(default)]
+    cards: Vec<JsCard>,
+}
+
+/// Raw card payload from the JS walker. Mirrors `semantic::Card`.
+#[derive(Deserialize, Clone)]
+struct JsCard {
+    id: String,
+    title: String,
+    #[serde(default)]
+    metadata: Vec<(String, String)>,
+    #[serde(rename = "child_element_ids", default)]
+    child_element_ids: Vec<u32>,
+}
+
+impl From<JsCard> for crate::semantic::Card {
+    fn from(c: JsCard) -> Self {
+        crate::semantic::Card {
+            id: c.id,
+            title: c.title,
+            metadata: c.metadata,
+            child_element_ids: c.child_element_ids,
+        }
+    }
 }
 
 /// Form metadata as returned by the JS extractor.
@@ -1321,6 +1435,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         sanitize_view(&mut view);
         assert_eq!(view.elements[0].name.as_deref(), Some("myname"));
@@ -1438,6 +1553,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         let reason = detect_bot_challenge(&view);
         assert!(reason.is_some());
@@ -1459,6 +1575,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         assert!(detect_bot_challenge(&view).is_none());
     }
@@ -1481,6 +1598,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         let markers = crate::cloaking::ShellMarkers {
             ready_complete: true,
@@ -1522,6 +1640,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         // Has elements, so no cloaking detection
         assert!(detect_bot_challenge(&view).is_none());
@@ -1541,6 +1660,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         // No elements AND no text — not cloaking, just empty
         assert!(detect_bot_challenge(&view).is_none());

@@ -25,6 +25,7 @@ fn mock_view(elements: Vec<Element>, page_hint: &str) -> SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -659,6 +660,7 @@ fn test_detect_cloudflare_challenge() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Cloudflare challenge should be detected");
@@ -704,6 +706,7 @@ fn test_detect_captcha_in_text() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "CAPTCHA text should trigger detection");
@@ -726,6 +729,7 @@ fn test_detect_challenge_url_with_few_elements() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -755,6 +759,7 @@ fn test_detect_many_elements_not_blocked() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     assert!(
         detect_bot_challenge(&view).is_none(),
@@ -860,6 +865,7 @@ fn hinted_login_view() -> SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -1016,6 +1022,7 @@ fn test_detect_reddit_challenge_url() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1046,6 +1053,7 @@ fn test_detect_verify_url() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1071,6 +1079,7 @@ fn test_detect_security_check_url() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1100,6 +1109,7 @@ fn test_detect_github_404() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1130,6 +1140,7 @@ fn test_detect_generic_404_title() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Generic 404 title should be detected");
@@ -1152,6 +1163,7 @@ fn test_detect_access_denied_title() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Access Denied title should be detected");
@@ -1174,6 +1186,7 @@ fn test_detect_forbidden_title() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(result.is_some(), "Forbidden title should be detected");
@@ -1200,6 +1213,7 @@ fn test_no_false_positive_not_in_title() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let result = detect_bot_challenge(&view);
     assert!(
@@ -1331,6 +1345,7 @@ fn test_playbook_step_produces_action_for_matching_view() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     let pb = find_playbook(&playbooks, &view.url).unwrap();
@@ -1396,6 +1411,7 @@ fn test_hints_active_when_heuristics_disabled() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     // Hints should resolve even though we conceptually disable heuristics.
@@ -1716,6 +1732,7 @@ fn mfa_page_escalates() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     // Use a generic goal so login/search/nav heuristics don't fire first
@@ -1746,6 +1763,7 @@ fn non_mfa_page_does_not_escalate() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     let r = heuristics::try_resolve(&view, "view dashboard", &[]);
@@ -1837,6 +1855,7 @@ fn validation_error_escalates() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
@@ -1861,6 +1880,7 @@ fn clean_form_no_validation_escalation() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     let r = heuristics::try_resolve(&view, "register account", &[0, 1]);
@@ -1938,6 +1958,7 @@ fn mfa_module_direct_detection() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     let result = mfa::try_detect_mfa(&view, "login", &[]);
@@ -1961,6 +1982,7 @@ fn validation_module_direct_check() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
 
     assert!(validation::has_validation_errors(&view));

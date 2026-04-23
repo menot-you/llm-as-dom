@@ -23,6 +23,7 @@ fn view(elements: Vec<Element>, hint: &str) -> SemanticView {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -39,6 +40,7 @@ fn view_with_text(elements: Vec<Element>, hint: &str, text: &str) -> SemanticVie
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -55,6 +57,7 @@ fn view_with_url(elements: Vec<Element>, hint: &str, url: &str, title: &str) -> 
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     }
 }
 
@@ -1171,6 +1174,7 @@ fn done_detection_url_changed() {
         element_cap: None,
         blocked_reason: None,
         session_context: None,
+        cards: None,
     };
     let r = heuristics::try_resolve(&v, "login as admin password secret", &[]);
     // URL no longer contains "login" and page_hint != "login page" -> Done.

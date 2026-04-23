@@ -221,6 +221,7 @@ impl LadServer {
         let p = params.0;
         let include_hidden = p.include_hidden.unwrap_or(false);
         let strict = p.strict.unwrap_or(false);
+        let include_cards = p.include_cards.unwrap_or(false);
         let mut view = if let Some(ref url) = p.url {
             let (_page, view) = self.navigate_and_extract(url).await?;
             view
@@ -254,6 +255,12 @@ impl LadServer {
         // hidden nodes never contribute to the caller's element budget.
         if !include_hidden {
             view.retain_visible_elements();
+        }
+
+        // BUG-4 + FR-1: gate card emission so opt-out callers see the
+        // pre-fix response shape byte-for-byte.
+        if !include_cards {
+            view.cards = None;
         }
 
         // FIX-18 / Issue #36: apply `what` as a semantic filter — scores
@@ -366,6 +373,7 @@ impl LadServer {
         let p = params.0;
         let deadline = std::time::Duration::from_millis(p.timeout_ms);
         let include_hidden = p.include_hidden.unwrap_or(false);
+        let include_cards = p.include_cards.unwrap_or(false);
         let paginate = p.paginate_index;
         let page_size = p.page_size.max(1);
 
@@ -404,6 +412,12 @@ impl LadServer {
             // Wave 1 — hidden-element gate (default-on). See `retain_visible_elements`.
             if !include_hidden {
                 view.retain_visible_elements();
+            }
+
+            // BUG-4 + FR-1: strip cards unless caller opted in so the
+            // response JSON remains byte-identical for pre-fix callers.
+            if !include_cards {
+                view.cards = None;
             }
 
             // Wave 1 — pagination render.
@@ -616,6 +630,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 
@@ -706,6 +721,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         }
     }
 
@@ -886,6 +902,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         // Must not panic on zero-width, emoji, RTL markers.
         apply_what_filter(&mut view, "install", Some(200), false);
@@ -916,6 +933,7 @@ mod tests {
             element_cap: None,
             blocked_reason: None,
             session_context: None,
+            cards: None,
         };
         apply_what_filter(&mut view, "foo", None, false);
         assert!(
