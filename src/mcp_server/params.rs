@@ -259,6 +259,14 @@ pub(crate) struct TypeParams {
     /// Wave 2 — target tab ID. Defaults to the active tab when omitted.
     #[serde(default)]
     pub tab_id: Option<u32>,
+    /// BUG-1 (friction-log-2026-04-22): when `press_enter=true` AND this
+    /// flag is `true`, prepend a single `[outcome: ..., from: ..., to: ...]`
+    /// line to the output describing whether navigation happened. Default
+    /// `false` leaves the output byte-identical to the pre-fix behavior
+    /// so existing callers that string-parse the prompt are unaffected.
+    /// Ignored when `press_enter=false`.
+    #[serde(default)]
+    pub detailed: Option<bool>,
 }
 
 /// Parameters for the `lad_select` tool.

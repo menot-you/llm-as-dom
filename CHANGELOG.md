@@ -39,6 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   description, website, or topics provided.") and legitimate pagination
   duplicates stay visible to the agent (FR-3 from
   `docs/friction-log-2026-04-22.md`).
+- *(type)* Tolerate stale CDP context after `press_enter=true`-triggered
+  navigation. `lad_type` with `press_enter=true` used to return a
+  `"Cannot find context with specified id"` / `"Execution context was
+  destroyed"` error while the navigation it just kicked off actually
+  completed successfully — agents saw an error but the page had moved.
+  The tool now confirms navigation via URL diff + `wait_for_navigation`
+  and silently swallows the stale-context error in that case, returning
+  the post-nav view as expected. Set env `LAD_PRESS_ENTER_STRICT=1` at
+  process startup for the pre-fix raw-error behavior (rollback escape
+  hatch). Non-nav CDP errors (timeout, protocol error) still bubble
+  unchanged. New optional `detailed: bool` param prepends a single
+  `[outcome: navigated|no_navigation, from: ..., to: ...]` line to the
+  output when `press_enter=true` — default-off so existing string
+  parsers see byte-identical responses (BUG-1 from
+  `docs/friction-log-2026-04-22.md`).
 
 ### Features
 - *(extract)* Add `limit: Option<u32>` to `lad_extract` with hard cap at 200.
