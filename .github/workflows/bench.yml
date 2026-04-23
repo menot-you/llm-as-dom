@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         if: steps.preflight.outputs.skip != 'true'
 
-      - uses: bencherdev/bencher@f639b1b6030ebd80690d396b2b003c4f8a183563 # main
+      - uses: bencherdev/bencher@3b2ef77af255eebb31e12616b8213ad80eccdb62 # main
         if: steps.preflight.outputs.skip != 'true'
 
       - name: Run benchmarks with bencher

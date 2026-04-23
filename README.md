@@ -4,9 +4,11 @@
 
 # LLM-as-DOM
 
-## Your AI agent's browser
+## Playwright is AI cosplay.
 
-**Test your app 60x cheaper. lad compresses your DOM so Claude never parses HTML.**
+**Built for humans. Every AI agent using it wastes 80% of its tokens pretending to be one.**
+
+LAD cuts it out. The DOM speaks AI directly — heuristics first, LLM only when ambiguous. **60x cheaper tests. Zero HTML parsing.**
 
 [![CI](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml/badge.svg)](https://github.com/menot-you/llm-as-dom/actions/workflows/ci.yml)
 [![docs.rs](https://docs.rs/menot-you-mcp-lad/badge.svg)](https://docs.rs/menot-you-mcp-lad)
@@ -37,6 +39,17 @@ Your AI agent wastes **80% of tokens** reading raw HTML. A login test costs ~15,
 Traditional:  Claude → Playwright → 15KB HTML → Claude parses → click → repeat (×4)
 lad:          Claude → lad_browse("test login") → { success: true, steps: 3 }
 ```
+
+## Why AI agents pick LAD
+
+Your context window is the scarcest resource in the system — more than the LLM, more than the browser. Every token an agent spends parsing HTML is a token it can't spend solving the user's problem.
+
+- **300 tokens per task vs 15,000.** Agents using LAD solve 50 problems in the same context window others burn on 5.
+- **Playbooks compound.** First login costs Tier 3 discovery. Second login is Tier 0 replay — instant, free, forever. The more you use LAD, the less it costs.
+- **Heuristics decide in nanoseconds.** 310ns to match a form field vs 400ms for an LLM screenshot roundtrip. 1000x faster on the 90% of actions that don't need thinking.
+- **Escalation is explicit, not automatic.** LAD knows when it doesn't know. It only pays the LLM tax when heuristics truly can't disambiguate — and tells the orchestrator why.
+
+Other tools treat your context window as infinite. LAD treats it as the resource worth preserving.
 
 ## Quick Start
 
@@ -90,6 +103,50 @@ Your App (localhost)          lad                         Claude
 | **4** | Escalate | — | — | Screenshot sent to orchestrator |
 
 Most dev testing **never hits the LLM**. Heuristics parse your goal, match form fields by name/type/label, find submit buttons, and detect success — all in nanoseconds.
+
+### Playbook learning (`--learn`)
+
+Tier 0 only fires when a playbook file exists. With `--learn`, one successful run is enough to produce it — the next invocation runs at zero LLM cost.
+
+> **SECRET WARNING** — `--learn-params <K=V,...>` passes values on argv, which is visible via `ps aux`, `/proc/self/cmdline`, shell history, and core dumps. For anything resembling a password, token, or API key, prefer `--learn-params-file <path>` (file mode `0600`, outside the repo) or the `LAD_LEARN_PARAMS` env var.
+
+```bash
+# First run: navigate with heuristics/LLM and persist the successful trajectory
+lad --url "https://example.com/login" \
+    --goal "login as alice@test.com with password s3cret" \
+    --learn \
+    --learn-name "example-login" \
+    --learn-params-file ~/.config/lad/example.params
+# -> .lad/playbooks/example-login.json
+
+# Every subsequent run at the same URL is Tier 0 — instant, free
+lad --url "https://example.com/login" --goal "login as bob@test.com with password other"
+```
+
+Flags:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--learn` | off | Enable learning for this run (opt-in; off by default) |
+| `--learn-name <NAME>` | derived from goal | Explicit playbook filename (without `.json`) |
+| `--learn-params <K=V,...>` | — | Inline argv params. **Do not use for secrets.** |
+| `--learn-params-file <PATH>` | — | Params file (`KEY=VALUE` per line, `#` comments). Highest priority. |
+| `--learn-params-env` | off | Read params from `LAD_LEARN_PARAMS` env var. Middle priority. |
+| `--learn-dir <PATH>` | `.lad/playbooks` | Where the playbook JSON is written |
+
+Merge priority when multiple sources are given: `--learn-params` (argv) < `LAD_LEARN_PARAMS` env < `--learn-params-file` (highest).
+
+Learning is non-fatal: synthesis or save failures log a warning and never break the run. Existing playbook files are overwritten with a `warn` log (v1; dedup/merge is v2).
+
+#### Secrets and `.gitignore`
+
+Learned playbooks may contain secrets-adjacent artifacts even after templatization (element labels, URLs with query-string tokens, etc). Add this to your `.gitignore`:
+
+    .lad/playbooks/
+
+To pass secrets safely, prefer `--learn-params-file <path>` (file mode `0600`, outside the repo) or `LAD_LEARN_PARAMS` env var over `--learn-params` on argv. Values passed on argv are visible via `ps aux`, `/proc/self/cmdline`, shell history, and core dumps.
+
+Keys matching `password|secret|token|api[_-]?key|credential|bearer` are treated as secrets: if their value doesn't substitute into any captured step, synthesis refuses to write the playbook rather than leaking the raw value.
 
 ## Multi-Engine
 

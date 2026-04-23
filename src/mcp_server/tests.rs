@@ -868,6 +868,61 @@ fn extract_params_format_json() {
     assert_eq!(p.format.as_deref(), Some("json"));
 }
 
+// ── BUG-1: TypeParams detailed + press_enter_strict env ─────
+
+#[test]
+fn type_params_default_detailed_none() {
+    let json = r#"{"text":"hi"}"#;
+    let p: TypeParams = serde_json::from_str(json).unwrap();
+    assert!(p.detailed.is_none());
+    assert!(!p.press_enter);
+}
+
+#[test]
+fn type_params_detailed_true() {
+    let json = r#"{"text":"hi","press_enter":true,"detailed":true}"#;
+    let p: TypeParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.detailed, Some(true));
+    assert!(p.press_enter);
+}
+
+#[test]
+fn type_params_detailed_false_explicit() {
+    let json = r#"{"text":"hi","detailed":false}"#;
+    let p: TypeParams = serde_json::from_str(json).unwrap();
+    assert_eq!(p.detailed, Some(false));
+}
+
+#[test]
+fn press_enter_strict_detects_stale_context_messages() {
+    // Pure logic regression: the substrings the press_enter branch
+    // gates on must match what chromiumoxide actually emits. Keep this
+    // mirrored with `src/mcp_server/tools/interact.rs::tool_lad_type`.
+    let samples = [
+        "Cannot find context with specified id",
+        "Error { kind: ..., message: \"Execution context was destroyed\" }",
+        "cdp error: context with specified id not found",
+    ];
+    for s in samples {
+        let is_stale = s.contains("Cannot find context")
+            || s.contains("Execution context was destroyed")
+            || s.contains("context with specified id not found");
+        assert!(is_stale, "stale-context substring gate missed: {s}");
+    }
+    // And NON-stale errors must NOT match (guarding against over-swallow).
+    let non_stale = [
+        "Timeout after 30s",
+        "Connection refused",
+        "Protocol error: invalid JSON",
+    ];
+    for s in non_stale {
+        let is_stale = s.contains("Cannot find context")
+            || s.contains("Execution context was destroyed")
+            || s.contains("context with specified id not found");
+        assert!(!is_stale, "stale-context substring gate over-matched: {s}");
+    }
+}
+
 // ── BUG-2: AuditParams return_tab ────────────────────────────
 
 #[test]

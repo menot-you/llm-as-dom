@@ -70,7 +70,123 @@ struct Cli {
     /// Browser engine: "chromium" (default) or "webkit".
     #[arg(long, default_value = "chromium")]
     engine: String,
+
+    /// Enable playbook learning. When set, a successful run is synthesized
+    /// into a reusable playbook and written to `--learn-dir`.
+    #[arg(long, default_value_t = false)]
+    learn: bool,
+
+    /// Optional explicit playbook name. Defaults to a name derived from the goal.
+    #[arg(long)]
+    learn_name: Option<String>,
+
+    /// Comma-separated list of params to templatize in `Type` / `Select` values,
+    /// e.g. `--learn-params "email=octocat,password=hunter2"`.
+    ///
+    /// WARNING: argv is visible via `ps aux`, `/proc/self/cmdline`, shell
+    /// history, and core dumps. Prefer `--learn-params-file` or the
+    /// `LAD_LEARN_PARAMS` env var for secret values.
+    #[arg(long)]
+    learn_params: Option<String>,
+
+    /// Read learn-params from a file (`KEY=VALUE` per line; `#` starts
+    /// a comment; blank lines ignored). Highest priority source — overrides
+    /// both `--learn-params` and `LAD_LEARN_PARAMS`.
+    #[arg(long)]
+    learn_params_file: Option<String>,
+
+    /// Read learn-params from the `LAD_LEARN_PARAMS` env var (same format
+    /// as `--learn-params`). Middle priority — overrides `--learn-params`
+    /// but is overridden by `--learn-params-file`.
+    #[arg(long, default_value_t = false)]
+    learn_params_env: bool,
+
+    /// Directory to write the learned playbook to. Defaults to `.lad/playbooks`.
+    #[arg(long, default_value = ".lad/playbooks")]
+    learn_dir: String,
 }
+
+/// Parse a `KEY=VALUE,KEY=VALUE` string into a map. Entries without `=` or
+/// with an empty key are skipped.
+fn parse_learn_params(raw: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for pair in raw.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let Some((k, v)) = pair.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        out.insert(key.to_string(), v.trim().to_string());
+    }
+    out
+}
+
+/// Parse a `KEY=VALUE` file (one pair per line). Supports `#` line comments
+/// and blank lines. Returns a map even if some lines are malformed.
+fn parse_learn_params_file(contents: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        out.insert(key.to_string(), v.trim().to_string());
+    }
+    out
+}
+
+/// Merge learn-params from all three sources in priority order:
+/// argv (lowest) < env < file (highest).
+///
+/// Emits a single `tracing::warn!` when any source carried a key matching the
+/// secret-name regex — so operators see "do NOT commit .lad/playbooks/ unless
+/// .gitignore'd" at least once.
+fn merge_learn_params(
+    argv: Option<&str>,
+    env_enabled: bool,
+    file_path: Option<&str>,
+) -> std::io::Result<std::collections::HashMap<String, String>> {
+    let mut out = std::collections::HashMap::new();
+    if let Some(s) = argv {
+        for (k, v) in parse_learn_params(s) {
+            out.insert(k, v);
+        }
+    }
+    if env_enabled && let Ok(env_val) = std::env::var("LAD_LEARN_PARAMS") {
+        for (k, v) in parse_learn_params(&env_val) {
+            out.insert(k, v);
+        }
+    }
+    if let Some(path) = file_path {
+        let contents = std::fs::read_to_string(path)?;
+        for (k, v) in parse_learn_params_file(&contents) {
+            out.insert(k, v);
+        }
+    }
+    if out.keys().any(|k| llm_as_dom::playbook::is_secret_key(k)) {
+        tracing::warn!(
+            "learned playbook contains secrets; do NOT commit .lad/playbooks/ unless .gitignore'd"
+        );
+    }
+    Ok(out)
+}
+
+// Note: the `redact_action_for_learn` helper lives in `pilot::runner`
+// (exported from the library) so the runner's per-step log and this
+// binary's summary print go through identical redaction logic.
 
 // Sentry MUST be initialised before ANY other setup so that panics raised
 // during runtime bootstrap (tokio, tracing subscriber, CLI parsing) are
@@ -182,6 +298,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let playbook_path = std::path::PathBuf::from(&cli.playbook_dir);
+        let learn_config = if cli.learn {
+            let params = merge_learn_params(
+                cli.learn_params.as_deref(),
+                cli.learn_params_env,
+                cli.learn_params_file.as_deref(),
+            )?;
+            Some(pilot::LearnConfig {
+                name: cli.learn_name.clone(),
+                explicit_params: params,
+                output_dir: std::path::PathBuf::from(&cli.learn_dir),
+            })
+        } else {
+            None
+        };
         let config = pilot::PilotConfig {
             goal: goal.clone(),
             max_steps: cli.max_steps,
@@ -195,8 +325,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_retries_per_step: 2,
             session: None,
             interactive: cli.interactive,
+            learn: learn_config,
+            // FIX-4c: pass the canonical `--url` input so playbook learning
+            // derives the pattern from the entry point, not from post-OAuth
+            // view.url.
+            initial_url: Some(cli.url.clone()),
         };
 
+        let learn_on = config.learn.is_some();
         let result = pilot::run_pilot(page.as_ref(), backend_impl.as_ref(), &config).await?;
 
         println!("\n=== Pilot Result ===");
@@ -208,16 +344,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             result.llm_hits
         );
         println!("Duration: {:.1}s", result.total_duration.as_secs_f64());
-        println!("\nFinal: {:?}", result.final_action);
+        // Final action: redact Type values in learn mode so the CLI summary
+        // doesn't echo raw credentials to stdout.
+        if learn_on {
+            println!(
+                "\nFinal: {}",
+                pilot::redact_action_for_learn(&result.final_action)
+            );
+        } else {
+            println!("\nFinal: {:?}", result.final_action);
+        }
 
         for step in &result.steps {
-            println!(
-                "  [{}] {:?} {:?} ({:.1}s)",
-                step.index,
-                step.source,
-                step.action,
-                step.duration.as_secs_f64()
-            );
+            if learn_on {
+                println!(
+                    "  [{}] {:?} {} ({:.1}s)",
+                    step.index,
+                    step.source,
+                    pilot::redact_action_for_learn(&step.action),
+                    step.duration.as_secs_f64()
+                );
+            } else {
+                println!(
+                    "  [{}] {:?} {:?} ({:.1}s)",
+                    step.index,
+                    step.source,
+                    step.action,
+                    step.duration.as_secs_f64()
+                );
+            }
         }
     }
 
@@ -345,5 +500,122 @@ mod tests {
     fn cli_backend_defaults_to_auto() {
         let cli = Cli::try_parse_from(["lad", "--url", "https://x.com"]).unwrap();
         assert_eq!(cli.backend, "auto");
+    }
+
+    #[test]
+    fn cli_learn_defaults_off() {
+        let cli = Cli::try_parse_from(["lad", "--url", "https://x.com"]).unwrap();
+        assert!(!cli.learn);
+        assert!(cli.learn_name.is_none());
+        assert!(cli.learn_params.is_none());
+        assert_eq!(cli.learn_dir, ".lad/playbooks");
+    }
+
+    #[test]
+    fn cli_learn_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "lad",
+            "--url",
+            "https://x.com",
+            "--learn",
+            "--learn-name",
+            "gh-login",
+            "--learn-params",
+            "email=octocat,password=hunter2",
+            "--learn-dir",
+            "/tmp/pb",
+        ])
+        .unwrap();
+        assert!(cli.learn);
+        assert_eq!(cli.learn_name.as_deref(), Some("gh-login"));
+        assert_eq!(
+            cli.learn_params.as_deref(),
+            Some("email=octocat,password=hunter2")
+        );
+        assert_eq!(cli.learn_dir, "/tmp/pb");
+    }
+
+    #[test]
+    fn parse_learn_params_basic() {
+        let map = parse_learn_params("email=alice,password=secret");
+        assert_eq!(map.get("email").map(String::as_str), Some("alice"));
+        assert_eq!(map.get("password").map(String::as_str), Some("secret"));
+    }
+
+    #[test]
+    fn parse_learn_params_trims_whitespace() {
+        let map = parse_learn_params(" email = alice , password = secret ");
+        assert_eq!(map.get("email").map(String::as_str), Some("alice"));
+        assert_eq!(map.get("password").map(String::as_str), Some("secret"));
+    }
+
+    #[test]
+    fn parse_learn_params_skips_invalid_entries() {
+        let map = parse_learn_params("=orphan,,key_only,good=yes");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("good").map(String::as_str), Some("yes"));
+    }
+
+    // ── Fix 2c: CLI params-file + env ────────────────────────────────
+
+    #[test]
+    fn parse_learn_params_file_tmpdir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("params");
+        std::fs::write(&path, "password=hunter2\n#comment line\n\nemail=a@b.c\n").unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let map = parse_learn_params_file(&contents);
+        assert_eq!(map.get("password").map(String::as_str), Some("hunter2"));
+        assert_eq!(map.get("email").map(String::as_str), Some("a@b.c"));
+        assert_eq!(map.len(), 2, "comment + blank lines must be skipped");
+    }
+
+    #[test]
+    fn env_overrides_argv_file_overrides_env() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("params");
+        std::fs::write(&path, "key=from_file\n").unwrap();
+
+        // SAFETY: single-threaded test, env mutation is scoped to this test.
+        unsafe {
+            std::env::set_var("LAD_LEARN_PARAMS", "key=from_env");
+        }
+
+        // argv only.
+        let argv_only = merge_learn_params(Some("key=from_argv"), false, None).unwrap();
+        assert_eq!(argv_only.get("key").map(String::as_str), Some("from_argv"));
+
+        // argv + env → env wins.
+        let argv_env = merge_learn_params(Some("key=from_argv"), true, None).unwrap();
+        assert_eq!(argv_env.get("key").map(String::as_str), Some("from_env"));
+
+        // argv + env + file → file wins.
+        let all =
+            merge_learn_params(Some("key=from_argv"), true, Some(path.to_str().unwrap())).unwrap();
+        assert_eq!(all.get("key").map(String::as_str), Some("from_file"));
+
+        unsafe {
+            std::env::remove_var("LAD_LEARN_PARAMS");
+        }
+    }
+
+    // ── Fix 2d: redact_action_for_learn ──────────────────────────────
+
+    #[test]
+    fn redact_action_for_learn_hides_type_value() {
+        let action = llm_as_dom::pilot::Action::Type {
+            element: 1,
+            value: "s3cret".into(),
+            reasoning: "test".into(),
+        };
+        let rendered = llm_as_dom::pilot::redact_action_for_learn(&action);
+        assert!(
+            rendered.contains("len=6"),
+            "rendered output should show length marker, got {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("s3cret"),
+            "raw value must not appear, got {rendered:?}"
+        );
     }
 }

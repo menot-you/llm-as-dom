@@ -101,6 +101,16 @@ struct LadServer {
     pub(crate) watch_state: Arc<Mutex<Option<watch::WatchState>>>,
     /// MCP peer for server-initiated push notifications.
     pub(crate) peer: Arc<Mutex<Option<rmcp::Peer<rmcp::service::RoleServer>>>>,
+    /// BUG-1 (friction-log-2026-04-22): when `true`, revert `lad_type`
+    /// with `press_enter=true` to the pre-fix behavior — i.e.
+    /// propagate any `"Cannot find context"` / `"Execution context was
+    /// destroyed"` CDP error raw to the caller. Default `false` tolerates
+    /// those errors after a confirmed navigation and returns the
+    /// post-nav view instead. Toggled via env var
+    /// `LAD_PRESS_ENTER_STRICT=1` at startup — changes require a process
+    /// restart. Kept as an escape hatch for production rollback without
+    /// redeploying the binary.
+    pub(crate) press_enter_strict: bool,
 }
 
 impl Clone for LadServer {
@@ -119,6 +129,7 @@ impl Clone for LadServer {
             next_tab_id: Arc::clone(&self.next_tab_id),
             watch_state: Arc::clone(&self.watch_state),
             peer: Arc::clone(&self.peer),
+            press_enter_strict: self.press_enter_strict,
         }
     }
 }
@@ -243,6 +254,9 @@ impl LadServer {
             next_tab_id: Arc::new(AtomicU32::new(1)),
             watch_state: Arc::new(Mutex::new(None)),
             peer: Arc::new(Mutex::new(None)),
+            press_enter_strict: std::env::var("LAD_PRESS_ENTER_STRICT")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
         }
     }
 
@@ -771,7 +785,7 @@ impl LadServer {
     }
 
     #[tool(
-        description = "Type text into an element by its ID from lad_snapshot. Set press_enter=true to submit after typing (saves a lad_press_key call). Requires a prior lad_snapshot or lad_browse call."
+        description = "Type text into an element by its ID from lad_snapshot. Set press_enter=true to submit after typing (saves a lad_press_key call). When press_enter=true triggers navigation, the resulting stale-context CDP error is silently tolerated (default); set env LAD_PRESS_ENTER_STRICT=1 at process start for raw-error rollback. Pass detailed=true with press_enter=true to prepend `[outcome: navigated|no_navigation, from: ..., to: ...]` describing the result. Requires a prior lad_snapshot or lad_browse call."
     )]
     async fn lad_type(
         &self,

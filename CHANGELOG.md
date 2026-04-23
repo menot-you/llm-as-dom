@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/menot-you/llm-as-dom/compare/v0.13.1...v0.14.0) - 2026-04-23
+
+### Bug Fixes
+- *(type)* Tolerate stale CDP context after press_enter nav (BUG-1) ([#47](https://github.com/menot-you/llm-as-dom/pull/47))
+- *(a11y)* Dedupe long visible_text in chrome sections (FR-3) ([#46](https://github.com/menot-you/llm-as-dom/pull/46))
+- *(a11y)* Article/repo HINT + extended label fallback (FR-4, FR-5) ([#44](https://github.com/menot-you/llm-as-dom/pull/44))
+- *(wait,extract)* Text contains + limit/truncated (BUG-3, FR-2) ([#43](https://github.com/menot-you/llm-as-dom/pull/43))
+- *(audit)* Opt-in tab promotion + close ephemeral target (BUG-2) ([#42](https://github.com/menot-you/llm-as-dom/pull/42))
+- *(extract)* Honor `what` as semantic filter on content-heavy pages ([#36](https://github.com/menot-you/llm-as-dom/pull/36)) ([#41](https://github.com/menot-you/llm-as-dom/pull/41))
+
+
+### Features
+- *(audit)* Broaden a11y + forms + links rule set (FR-6) ([#45](https://github.com/menot-you/llm-as-dom/pull/45))
+
+
 ### Bug Fixes
 - *(audit)* Prevent ephemeral Chrome target leak and make active-tab lifecycle
   explicit. `lad_audit` now always returns `audit_ephemeral: bool` and
@@ -38,6 +53,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged so feed entries (e.g. 5 GitHub repo rows all showing "No
   description, website, or topics provided.") and legitimate pagination
   duplicates stay visible to the agent (FR-3 from
+  `docs/friction-log-2026-04-22.md`).
+- *(type)* Tolerate stale CDP context after `press_enter=true`-triggered
+  navigation. `lad_type` with `press_enter=true` used to return a
+  `"Cannot find context with specified id"` / `"Execution context was
+  destroyed"` error while the navigation it just kicked off actually
+  completed successfully — agents saw an error but the page had moved.
+  The tool now confirms navigation via URL diff + `wait_for_navigation`
+  and silently swallows the stale-context error in that case, returning
+  the post-nav view as expected. Set env `LAD_PRESS_ENTER_STRICT=1` at
+  process startup for the pre-fix raw-error behavior (rollback escape
+  hatch). Non-nav CDP errors (timeout, protocol error) still bubble
+  unchanged. New optional `detailed: bool` param prepends a single
+  `[outcome: navigated|no_navigation, from: ..., to: ...]` line to the
+  output when `press_enter=true` — default-off so existing string
+  parsers see byte-identical responses (BUG-1 from
   `docs/friction-log-2026-04-22.md`).
 
 ### Features
