@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/menot-you/llm-as-dom/compare/v0.14.0...v0.15.0) - 2026-04-23
+
+### Documentation
+- *(readme)* Add "Why AI agents pick LAD" section ([#33](https://github.com/menot-you/llm-as-dom/pull/33))
+- *(readme)* Visceral narrative rewrite — "AI cosplay" hook ([#32](https://github.com/menot-you/llm-as-dom/pull/32))
+
+
+### Features
+- *(extract,snapshot)* Opt-in structural cards detector (BUG-4, FR-1) ([#48](https://github.com/menot-you/llm-as-dom/pull/48))
+- *(playbook)* Opt-in playbook learning from successful runs ([#35](https://github.com/menot-you/llm-as-dom/pull/35))
+
+
 ## [0.14.0](https://github.com/menot-you/llm-as-dom/compare/v0.13.1...v0.14.0) - 2026-04-23
 
 ### Bug Fixes
