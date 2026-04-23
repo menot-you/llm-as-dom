@@ -151,14 +151,21 @@ fn parse_learn_params_file(contents: &str) -> std::collections::HashMap<String, 
 /// Merge learn-params from all three sources in priority order:
 /// argv (lowest) < env < file (highest).
 ///
-/// Emits a single `tracing::warn!` when any source carried a key matching the
-/// secret-name regex — so operators see "do NOT commit .lad/playbooks/ unless
-/// .gitignore'd" at least once.
+/// Non-fatal contract (issue #54): a missing or unreadable
+/// `--learn-params-file` must NOT abort the run. This function warns and
+/// continues with whatever argv/env provided, matching the PR #35 body
+/// promise "learning is non-fatal: synthesis or save failures log a
+/// warning and never break the run". The file is the only IO source;
+/// argv/env parsing are infallible string ops.
+///
+/// Emits a single `tracing::warn!` when any source carried a key matching
+/// the secret-name regex — so operators see "do NOT commit .lad/playbooks/
+/// unless .gitignore'd" at least once.
 fn merge_learn_params(
     argv: Option<&str>,
     env_enabled: bool,
     file_path: Option<&str>,
-) -> std::io::Result<std::collections::HashMap<String, String>> {
+) -> std::collections::HashMap<String, String> {
     let mut out = std::collections::HashMap::new();
     if let Some(s) = argv {
         for (k, v) in parse_learn_params(s) {
@@ -171,9 +178,20 @@ fn merge_learn_params(
         }
     }
     if let Some(path) = file_path {
-        let contents = std::fs::read_to_string(path)?;
-        for (k, v) in parse_learn_params_file(&contents) {
-            out.insert(k, v);
+        match std::fs::read_to_string(path) {
+            Ok(contents) => {
+                for (k, v) in parse_learn_params_file(&contents) {
+                    out.insert(k, v);
+                }
+            }
+            Err(e) => {
+                // Non-fatal: log and continue with argv/env only.
+                tracing::warn!(
+                    learn_params_file = %path,
+                    error = %e,
+                    "learn-params-file unreadable — continuing without it"
+                );
+            }
         }
     }
     if out.keys().any(|k| llm_as_dom::playbook::is_secret_key(k)) {
@@ -181,7 +199,7 @@ fn merge_learn_params(
             "learned playbook contains secrets; do NOT commit .lad/playbooks/ unless .gitignore'd"
         );
     }
-    Ok(out)
+    out
 }
 
 // Note: the `redact_action_for_learn` helper lives in `pilot::runner`
@@ -303,7 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cli.learn_params.as_deref(),
                 cli.learn_params_env,
                 cli.learn_params_file.as_deref(),
-            )?;
+            );
             Some(pilot::LearnConfig {
                 name: cli.learn_name.clone(),
                 explicit_params: params,
@@ -582,21 +600,45 @@ mod tests {
         }
 
         // argv only.
-        let argv_only = merge_learn_params(Some("key=from_argv"), false, None).unwrap();
+        let argv_only = merge_learn_params(Some("key=from_argv"), false, None);
         assert_eq!(argv_only.get("key").map(String::as_str), Some("from_argv"));
 
         // argv + env → env wins.
-        let argv_env = merge_learn_params(Some("key=from_argv"), true, None).unwrap();
+        let argv_env = merge_learn_params(Some("key=from_argv"), true, None);
         assert_eq!(argv_env.get("key").map(String::as_str), Some("from_env"));
 
         // argv + env + file → file wins.
-        let all =
-            merge_learn_params(Some("key=from_argv"), true, Some(path.to_str().unwrap())).unwrap();
+        let all = merge_learn_params(Some("key=from_argv"), true, Some(path.to_str().unwrap()));
         assert_eq!(all.get("key").map(String::as_str), Some("from_file"));
 
         unsafe {
             std::env::remove_var("LAD_LEARN_PARAMS");
         }
+    }
+
+    /// Issue #54 — missing/unreadable `--learn-params-file` must NOT abort
+    /// the run. The function warns and returns whatever argv/env provided.
+    #[test]
+    fn merge_learn_params_non_fatal_missing_file() {
+        let got = merge_learn_params(
+            Some("key=from_argv"),
+            false,
+            Some("/does/not/exist/learn-params.json"),
+        );
+        // File missing → we keep argv.
+        assert_eq!(got.get("key").map(String::as_str), Some("from_argv"));
+        assert_eq!(got.len(), 1, "only argv should have survived");
+    }
+
+    /// Issue #54 — an unreadable file (e.g. permission denied) must also
+    /// fall through without aborting. We simulate via a directory path
+    /// (read_to_string errors on dirs).
+    #[test]
+    fn merge_learn_params_non_fatal_unreadable_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Pointing at the directory itself — read_to_string returns IsADirectory.
+        let got = merge_learn_params(Some("k=v"), false, Some(tmp.path().to_str().unwrap()));
+        assert_eq!(got.get("k").map(String::as_str), Some("v"));
     }
 
     // ── Fix 2d: redact_action_for_learn ──────────────────────────────
