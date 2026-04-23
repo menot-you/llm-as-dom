@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/menot-you/llm-as-dom/compare/v0.15.0...v0.16.0) - 2026-04-23
+
+### Bug Fixes
+- *(cards)* Truncation flag, synthetic title, tighter author regex ([#60](https://github.com/menot-you/llm-as-dom/pull/60))
+- *(learn)* Non-fatal params file + deterministic templatize ([#59](https://github.com/menot-you/llm-as-dom/pull/59))
+
+
 ## [0.15.0](https://github.com/menot-you/llm-as-dom/compare/v0.14.0...v0.15.0) - 2026-04-23
 
 ### Documentation
