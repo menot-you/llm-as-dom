@@ -1671,8 +1671,7 @@ mod tests {
         assert_eq!(
             outputs.len(),
             1,
-            "output must be deterministic across runs, got {:?}",
-            outputs
+            "output must be deterministic across runs, got {outputs:?}"
         );
         // Longest value wins its match: abc123 -> ${confirm}; the lone abc
         // (in pass=abc) also gets its replacement to ${password}.
