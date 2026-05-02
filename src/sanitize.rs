@@ -569,7 +569,7 @@ pub fn redact_credentials_from_goal(goal: &str) -> String {
 /// which was not cryptographically secure and could be predicted.
 pub fn random_boundary() -> String {
     let mut buf = [0u8; 16];
-    getrandom::getrandom(&mut buf).expect("failed to get random bytes from OS CSPRNG");
+    getrandom::fill(&mut buf).expect("failed to get random bytes from OS CSPRNG");
     buf.iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
