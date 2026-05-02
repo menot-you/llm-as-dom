@@ -13,8 +13,15 @@ use llm_as_dom::{locate, network};
 /// Logs a hash instead of the content to prevent secrets from appearing in logs.
 fn sha256_prefix(data: &str) -> String {
     use sha2::{Digest, Sha256};
+    // sha2 0.11 — `Output` (hybrid_array::Array) no longer implements `LowerHex`.
+    // Hex-encode by hand to keep behaviour identical.
     let hash = Sha256::digest(data.as_bytes());
-    format!("{:x}", hash)[..16].to_string()
+    let mut out = String::with_capacity(16);
+    for b in hash.iter().take(8) {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 impl LadServer {

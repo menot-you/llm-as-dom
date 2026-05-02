@@ -5,7 +5,7 @@
 pub fn generate() -> String {
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut buf = [0u8; 12];
-    getrandom::getrandom(&mut buf).expect("getrandom failed");
+    getrandom::fill(&mut buf).expect("getrandom failed");
     buf.iter()
         .map(|b| CHARSET[(*b as usize) % CHARSET.len()] as char)
         .collect()
