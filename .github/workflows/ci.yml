@@ -164,10 +164,18 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: binaries-linux-x86_64
-          path: target/release
+      # NB: actions/download-artifact@v7+ Node action hangs 10min in kata-qemu
+      # (Node ABI / syscall incompat). Probe 2026-05-02 confirmed `gh run
+      # download` works in 24s for the same artifact in the same kata pod.
+      - name: Download binaries (gh CLI — kata-safe)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p target/release
+          gh run download "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name binaries-linux-x86_64 \
+            --dir target/release
 
       - name: Restore executable bit
         run: chmod +x target/release/lad
@@ -185,10 +193,16 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: binaries-linux-x86_64
-          path: target/release
+      # See fixture-tests step above re: kata-qemu + actions/download-artifact hang.
+      - name: Download binaries (gh CLI — kata-safe)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p target/release
+          gh run download "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name binaries-linux-x86_64 \
+            --dir target/release
 
       - name: Restore executable bit
         run: chmod +x target/release/lad
