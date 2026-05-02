@@ -1,6 +1,7 @@
 //! Criterion benchmarks for pure-Rust hot paths (no browser needed).
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 
 use llm_as_dom::heuristics;
 use llm_as_dom::pilot::Action;
