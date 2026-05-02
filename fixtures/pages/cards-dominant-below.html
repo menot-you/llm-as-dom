@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — dominant tag BELOW 80%</title>
+</head>
+<body>
+  <header><h1>Dominant-tag boundary (below)</h1></header>
+
+  <!-- 14 <li> + 6 <div> in the first 20 positions = 14/20 = 70% < 80%,
+       so the dominant-tag check fails and detection is skipped. The
+       walker `continue`s to the next candidate. No other container on
+       this page meets the threshold, so cards = None. -->
+  <main>
+    <ul class="feed-list">
+      <li><h3><a href="https://example.com/m1">Mixed item 01</a></h3></li>
+      <li><h3><a href="https://example.com/m2">Mixed item 02</a></h3></li>
+      <li><h3><a href="https://example.com/m3">Mixed item 03</a></h3></li>
+      <li><h3><a href="https://example.com/m4">Mixed item 04</a></h3></li>
+      <li><h3><a href="https://example.com/m5">Mixed item 05</a></h3></li>
+      <li><h3><a href="https://example.com/m6">Mixed item 06</a></h3></li>
+      <li><h3><a href="https://example.com/m7">Mixed item 07</a></h3></li>
+      <li><h3><a href="https://example.com/m8">Mixed item 08</a></h3></li>
+      <li><h3><a href="https://example.com/m9">Mixed item 09</a></h3></li>
+      <li><h3><a href="https://example.com/m10">Mixed item 10</a></h3></li>
+      <li><h3><a href="https://example.com/m11">Mixed item 11</a></h3></li>
+      <li><h3><a href="https://example.com/m12">Mixed item 12</a></h3></li>
+      <li><h3><a href="https://example.com/m13">Mixed item 13</a></h3></li>
+      <li><h3><a href="https://example.com/m14">Mixed item 14</a></h3></li>
+      <div><h3><a href="https://example.com/mx1">Outlier div 1</a></h3></div>
+      <div><h3><a href="https://example.com/mx2">Outlier div 2</a></h3></div>
+      <div><h3><a href="https://example.com/mx3">Outlier div 3</a></h3></div>
+      <div><h3><a href="https://example.com/mx4">Outlier div 4</a></h3></div>
+      <div><h3><a href="https://example.com/mx5">Outlier div 5</a></h3></div>
+      <div><h3><a href="https://example.com/mx6">Outlier div 6</a></h3></div>
+    </ul>
+  </main>
+</body>
+</html>

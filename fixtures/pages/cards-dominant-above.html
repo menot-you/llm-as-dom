@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — dominant tag ABOVE 80%</title>
+</head>
+<body>
+  <header><h1>Dominant-tag boundary (above)</h1></header>
+
+  <!-- Walker rule: of the first CARD_SAMPLE_DEPTH=20 children, the
+       dominant tagName must be >= 80%. We give 17 <li> + 3 <div> in
+       the first 20 positions = 17/20 = 85% > 80%, so detection fires.
+       The walker then iterates ALL children of the dominant tag, so
+       cards count == count of <li> (here: 17). -->
+  <main>
+    <ul class="feed-list">
+      <li><h3><a href="https://example.com/d1">Dominant item 01</a></h3></li>
+      <li><h3><a href="https://example.com/d2">Dominant item 02</a></h3></li>
+      <li><h3><a href="https://example.com/d3">Dominant item 03</a></h3></li>
+      <li><h3><a href="https://example.com/d4">Dominant item 04</a></h3></li>
+      <li><h3><a href="https://example.com/d5">Dominant item 05</a></h3></li>
+      <li><h3><a href="https://example.com/d6">Dominant item 06</a></h3></li>
+      <li><h3><a href="https://example.com/d7">Dominant item 07</a></h3></li>
+      <li><h3><a href="https://example.com/d8">Dominant item 08</a></h3></li>
+      <li><h3><a href="https://example.com/d9">Dominant item 09</a></h3></li>
+      <li><h3><a href="https://example.com/d10">Dominant item 10</a></h3></li>
+      <li><h3><a href="https://example.com/d11">Dominant item 11</a></h3></li>
+      <li><h3><a href="https://example.com/d12">Dominant item 12</a></h3></li>
+      <li><h3><a href="https://example.com/d13">Dominant item 13</a></h3></li>
+      <li><h3><a href="https://example.com/d14">Dominant item 14</a></h3></li>
+      <li><h3><a href="https://example.com/d15">Dominant item 15</a></h3></li>
+      <li><h3><a href="https://example.com/d16">Dominant item 16</a></h3></li>
+      <li><h3><a href="https://example.com/d17">Dominant item 17</a></h3></li>
+      <div><h3><a href="https://example.com/dx1">Outlier div 1</a></h3></div>
+      <div><h3><a href="https://example.com/dx2">Outlier div 2</a></h3></div>
+      <div><h3><a href="https://example.com/dx3">Outlier div 3</a></h3></div>
+    </ul>
+  </main>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — HN tbody rows</title>
+</head>
+<body>
+  <header><h1>HN-style tbody fixture</h1></header>
+
+  <!-- Real Hacker News uses <tr class="athing"> inside <tbody>.
+       The walker candidate selector includes 'tbody', so this should
+       trigger detection. We have 4 rows of dominant tag <tr> at 100%. -->
+  <table>
+    <tbody>
+      <tr class="athing" id="r1">
+        <td><h3><a href="https://example.com/a">Alpha story headline goes here</a></h3></td>
+        <td><div class="meta">512 points by alice 1 hour ago | 88 comments</div></td>
+      </tr>
+      <tr class="athing" id="r2">
+        <td><h3><a href="https://example.com/b">Beta launch breaks the lockfile</a></h3></td>
+        <td><div class="meta">204 points by bob 2 hours ago | 33 comments</div></td>
+      </tr>
+      <tr class="athing" id="r3">
+        <td><h3><a href="https://example.com/c">Gamma proposal lands in the RFC repo</a></h3></td>
+        <td><div class="meta">87 points by carol 30 minutes ago | 12 comments</div></td>
+      </tr>
+      <tr class="athing" id="r4">
+        <td><h3><a href="https://example.com/d">Delta release hits stable channel</a></h3></td>
+        <td><div class="meta">1532 points by dave 4 hours ago | 290 comments</div></td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>
