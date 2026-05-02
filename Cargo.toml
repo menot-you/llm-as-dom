@@ -90,7 +90,11 @@ qrcode = "0.14"
 
 # Bonjour/mDNS discovery (relay)
 mdns-sd = "0.19"
-flume = "0.12"
+# NOTE: we used to depend directly on `flume = "0.12"` for `RecvTimeoutError`,
+# but mdns-sd 0.19 still pulls in `flume 0.11` transitively. Two flume major
+# versions in the dep graph caused a type mismatch where our match arm compiled
+# against 0.12 while the Receiver yielded 0.11 errors. Discrimination is now
+# Debug-string-based in `relay::discovery`, so we don't need the direct dep.
 hostname = "0.4"
 http = "1"
 

@@ -124,12 +124,15 @@ fn find_blocking(timeout: Duration) -> Result<String, Box<dyn std::error::Error 
                 info!("mDNS search started");
             }
             Ok(_) => {}
-            Err(flume::RecvTimeoutError::Timeout) => {
-                mdns.shutdown().ok();
-                return Err(format!("no _lad._tcp service found within {timeout:?}").into());
-            }
             Err(e) => {
+                // mdns-sd re-exports `flume::Receiver` (currently flume 0.11). We avoid
+                // pulling `flume` into our direct deps just to name `RecvTimeoutError`,
+                // so we discriminate timeout vs disconnect by the Debug repr instead.
                 mdns.shutdown().ok();
+                let dbg = format!("{e:?}");
+                if dbg.contains("Timeout") {
+                    return Err(format!("no _lad._tcp service found within {timeout:?}").into());
+                }
                 return Err(format!("mDNS recv error: {e}").into());
             }
         }
