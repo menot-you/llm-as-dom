@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1](https://github.com/menot-you/llm-as-dom/compare/v0.16.0...v0.16.1) - 2026-05-02
+
+### Bug Fixes
+- *(deps)* Migrate rust-deps group bump (closes #64) ([#66](https://github.com/menot-you/llm-as-dom/pull/66))
+
+
 ## [0.16.0](https://github.com/menot-you/llm-as-dom/compare/v0.15.0...v0.16.0) - 2026-04-23
 
 ### Bug Fixes
