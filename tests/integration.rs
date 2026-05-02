@@ -2890,3 +2890,452 @@ async fn test_extract_cards_hn_like() {
     drop(page);
     engine.close().await.unwrap();
 }
+
+// ── Cards walker boundary fixtures (Issue #56) ───────────────────────
+//
+// Each test below pins ONE branch of the JS walker heuristic
+// (`src/a11y.rs` line ~659-732). The constants exercised:
+//   CARD_LIST_MIN_CHILDREN = 3   → at-min and below-min boundary
+//   CARD_SAMPLE_DEPTH      = 20  → dominant-tag boundary uses this slice
+//   CARD_LIST_CAP          = 50  → 1000-child fixture proves truncation
+//   dominant-tag threshold ≥ 80% → above + below fixtures pin both sides
+//   `catch (_)` fail-closed path → sabotage fixture forces an exception
+// All tests are `#[ignore]` because they require a real Chrome runtime.
+
+/// Real-HN row shape: `<tbody>` of `<tr class=athing>`. The walker
+/// candidate selector includes `tbody`, the dominant tag is `<tr>`
+/// at 100%, and we stamp 4 rows so MIN_CHILDREN passes. Asserts the
+/// walker reaches into table-row markup, not just `<div>`/`<li>` lists.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_hn_tr_rows() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-hn-tr-rows.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    let cards = view
+        .cards
+        .as_ref()
+        .expect("walker must populate cards for tbody / <tr class=athing> rows");
+
+    let row_titles: Vec<&str> = ["Alpha", "Beta", "Gamma", "Delta"].into();
+    let detected = cards
+        .iter()
+        .filter(|c| row_titles.iter().any(|prefix| c.title.starts_with(prefix)))
+        .count();
+    assert_eq!(
+        detected,
+        4,
+        "all 4 <tr class=athing> rows must become cards (got titles: {:?})",
+        cards.iter().map(|c| &c.title).collect::<Vec<_>>()
+    );
+
+    // Card IDs are walker-assigned `cN` strings — assert the prefix
+    // contract so a future refactor that switched to numeric IDs would
+    // surface here.
+    for c in cards {
+        assert!(
+            c.id.starts_with('c'),
+            "card id must be 'c<N>' string, got {:?}",
+            c.id
+        );
+    }
+
+    // Author regex tightening (#57): "points by alice" must match.
+    let alpha = cards
+        .iter()
+        .find(|c| c.title.starts_with("Alpha"))
+        .expect("Alpha row card present");
+    let author = alpha
+        .metadata
+        .iter()
+        .find(|(k, _)| k == "author")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(
+        author,
+        Some("alice"),
+        "tightened author regex must extract 'alice' from 'points by alice'"
+    );
+
+    assert_eq!(
+        view.cards_truncated, None,
+        "4 cards is well under CARD_LIST_CAP=50 — truncated must be None"
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// CARD_LIST_MIN_CHILDREN guard, below side: container has only 2
+/// children, walker rejects it, no other container on the page
+/// qualifies → `view.cards = None`.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_below_min_children() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-below-min.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    assert!(
+        view.cards.is_none(),
+        "container with 2 < MIN_CHILDREN children must NOT trigger detection (got {:?})",
+        view.cards
+    );
+    assert_eq!(view.cards_truncated, None, "no cards → no truncation flag");
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// CARD_LIST_MIN_CHILDREN guard, on-boundary: exactly 3 children. The
+/// JS check is strict less-than (`children.length < MIN`), so 3
+/// triggers detection.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_at_min_boundary() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-at-min-boundary.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    let cards = view.cards.as_ref().expect(
+        "exactly 3 children is on the boundary and MUST detect (children < MIN check is strict)",
+    );
+
+    let boundary_cards: Vec<_> = cards
+        .iter()
+        .filter(|c| c.title.starts_with("Boundary"))
+        .collect();
+    assert_eq!(
+        boundary_cards.len(),
+        3,
+        "all 3 boundary items must produce cards (got titles: {:?})",
+        cards.iter().map(|c| &c.title).collect::<Vec<_>>()
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// CARD_LIST_CAP truncation: 1000 sibling children → walker breaks
+/// out of the inner loop at 50 cards and sets `cardsTruncated = true`.
+/// Rust maps that to `cards_truncated = Some(true)`.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_cap_truncation() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-cap-truncation.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    // Generous settle: 1000 DOM nodes get stamped via inline script,
+    // and the inner walker loop iterates through all of them.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    let cards = view
+        .cards
+        .as_ref()
+        .expect("walker must emit cards before hitting the cap");
+
+    // Walker counts ALL siblings (including the cap-test ones). A
+    // future regression that under-emitted at the cap would fail this.
+    let cap_cards: Vec<_> = cards
+        .iter()
+        .filter(|c| c.title.starts_with("Cap-test item"))
+        .collect();
+    assert_eq!(
+        cap_cards.len(),
+        50,
+        "CARD_LIST_CAP must truncate at exactly 50 cap-test cards, got {}",
+        cap_cards.len()
+    );
+
+    // Total cards must not exceed the cap either — defends against a
+    // future change that lifted the per-container cap but kept the
+    // outer break.
+    assert!(
+        cards.len() <= 50,
+        "no run of cards may exceed CARD_LIST_CAP=50, got {}",
+        cards.len()
+    );
+
+    assert_eq!(
+        view.cards_truncated,
+        Some(true),
+        "hitting the cap MUST surface cards_truncated = Some(true) (Issue #57 contract)"
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Nested card-in-card: the walker iterates every container returned
+/// by `deepQueryAll`. Both outer `<ul>` (3 items) and inner `<ol>`
+/// (3 items) qualify, so cards from BOTH levels surface. A future
+/// regression that suppressed the inner pass (e.g., "only top-level
+/// containers") would fail here.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_nested() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-nested.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    let cards = view
+        .cards
+        .as_ref()
+        .expect("nested fixture must produce cards");
+
+    let outer_count = cards
+        .iter()
+        .filter(|c| c.title.starts_with("Outer item"))
+        .count();
+    let inner_count = cards
+        .iter()
+        .filter(|c| c.title.starts_with("Inner item"))
+        .count();
+
+    assert_eq!(
+        outer_count,
+        3,
+        "outer <ul> with 3 <li> siblings must yield 3 outer cards (titles: {:?})",
+        cards.iter().map(|c| &c.title).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        inner_count,
+        3,
+        "inner <ol> with 3 <li> siblings must yield 3 inner cards too (titles: {:?})",
+        cards.iter().map(|c| &c.title).collect::<Vec<_>>()
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Dominant-tag boundary, ABOVE the 80% threshold: 17 `<li>` + 3
+/// `<div>` in the first CARD_SAMPLE_DEPTH=20 children = 85% > 80%.
+/// Walker accepts the container and emits one card per `<li>`.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_dominant_tag_above_threshold() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-dominant-above.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    let cards = view
+        .cards
+        .as_ref()
+        .expect("17/20 = 85% dominant-tag share must trigger detection");
+
+    let dom_cards: Vec<_> = cards
+        .iter()
+        .filter(|c| c.title.starts_with("Dominant item"))
+        .collect();
+    assert_eq!(
+        dom_cards.len(),
+        17,
+        "walker iterates ALL children of the dominant tag → 17 <li> cards (got titles: {:?})",
+        cards.iter().map(|c| &c.title).collect::<Vec<_>>()
+    );
+
+    // Outlier <div> siblings share the parent but are skipped by the
+    // `if (sib.tagName !== domTag) continue` guard.
+    let outliers: Vec<_> = cards
+        .iter()
+        .filter(|c| c.title.starts_with("Outlier div"))
+        .collect();
+    assert!(
+        outliers.is_empty(),
+        "non-dominant-tag siblings must be skipped (got {} outliers)",
+        outliers.len()
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Dominant-tag boundary, BELOW the 80% threshold: 14 `<li>` + 6
+/// `<div>` in the first 20 children = 70% < 80%. Walker rejects the
+/// container; no other container on the page qualifies → cards None.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_dominant_tag_below_threshold() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-dominant-below.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .unwrap();
+
+    assert!(
+        view.cards.is_none(),
+        "70% dominant-tag share must REJECT the container (got cards: {:?})",
+        view.cards
+    );
+    assert_eq!(
+        view.cards_truncated, None,
+        "rejected container → no truncation flag"
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}
+
+/// Fail-closed `catch (_)` path: page sabotages
+/// `Element.prototype.querySelectorAll` so the very first
+/// `deepQueryAll` call inside the `if (includeCards) try { ... }`
+/// block throws. Walker must swallow it: cards None on the Rust side,
+/// no panic, the rest of extraction (elements + visible_text) still
+/// works because the element walker uses a different selector list
+/// that's not poisoned.
+#[ignore = "requires Chrome + local HTML fixture"]
+#[tokio::test]
+async fn test_extract_cards_fail_closed_on_walker_throw() {
+    use llm_as_dom::engine::chromium::ChromiumEngine;
+    use llm_as_dom::engine::{BrowserEngine, EngineConfig};
+    use std::path::Path;
+    use std::time::Duration;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pages/cards-fail-closed.html");
+    let file_url = format!("file://{}", fixture.display());
+
+    let engine = ChromiumEngine::launch(EngineConfig::default())
+        .await
+        .expect("browser launch");
+
+    let page = engine.new_page(&file_url).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = llm_as_dom::a11y::extract_semantic_view_with_options(page.as_ref(), false, true)
+        .await
+        .expect("extraction itself must NOT fail when the cards walker throws");
+
+    // Cards walker hit the `catch (_)` → cards stay empty → Rust
+    // wraps that as None.
+    assert!(
+        view.cards.is_none(),
+        "fail-closed contract: thrown exception in cards walker → cards None (got {:?})",
+        view.cards
+    );
+    assert_eq!(view.cards_truncated, None, "no cards → no truncation flag");
+    assert_eq!(
+        view.state,
+        PageState::Ready,
+        "rest of the page extraction must still report Ready"
+    );
+
+    drop(page);
+    engine.close().await.unwrap();
+}

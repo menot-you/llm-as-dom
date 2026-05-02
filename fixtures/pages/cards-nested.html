@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — nested card-in-card</title>
+</head>
+<body>
+  <header><h1>Nested card-list inside a card-list</h1></header>
+
+  <!-- Two qualifying containers nested:
+         OUTER  <ul class="outer-list">  with 3 <li> siblings (dominant <li>)
+         INNER  <ol class="inner-list">  inside the FIRST <li>, with 3 <li>
+       siblings of its own.
+       The walker's candidate selector matches both <ul> and <ol>, and
+       deepQueryAll iterates depth-first so BOTH containers get visited.
+       Expected: cards from both lists are present (at minimum 3 outer
+       + 3 inner == 6 cards). The test asserts both layers fired so a
+       future regression that "only kept the outer" would fail. -->
+  <main>
+    <ul class="outer-list">
+      <li>
+        <h3><a href="https://example.com/outer-1">Outer item ONE has a nested list</a></h3>
+        <ol class="inner-list">
+          <li><h4><a href="https://example.com/inner-1a">Inner item A under outer 1</a></h4></li>
+          <li><h4><a href="https://example.com/inner-1b">Inner item B under outer 1</a></h4></li>
+          <li><h4><a href="https://example.com/inner-1c">Inner item C under outer 1</a></h4></li>
+        </ol>
+      </li>
+      <li>
+        <h3><a href="https://example.com/outer-2">Outer item TWO has just a heading</a></h3>
+      </li>
+      <li>
+        <h3><a href="https://example.com/outer-3">Outer item THREE has just a heading</a></h3>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>

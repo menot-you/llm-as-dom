@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — below MIN_CHILDREN</title>
+</head>
+<body>
+  <header><h1>Two-item container</h1></header>
+
+  <!-- The walker requires at least CARD_LIST_MIN_CHILDREN = 3
+       siblings before it considers a container. With exactly 2 items
+       the candidate is rejected and no cards are emitted.
+
+       To prove only the SHORT container is rejected (not "no cards
+       anywhere"), we use a real container selector and ensure no other
+       container on the page meets the threshold. The header / body
+       have no card-shaped repetition. -->
+  <main>
+    <div class="feed-container">
+      <div class="item">
+        <h3><a href="https://example.com/only-1">Solo item one</a></h3>
+        <div class="meta">10 points by user1</div>
+      </div>
+      <div class="item">
+        <h3><a href="https://example.com/only-2">Solo item two</a></h3>
+        <div class="meta">20 points by user2</div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

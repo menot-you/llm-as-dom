@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — CARD_LIST_CAP truncation</title>
+</head>
+<body>
+  <header><h1>Large feed (1000 siblings → 50-card cap)</h1></header>
+
+  <!-- The walker caps `cards.length` at CARD_LIST_CAP = 50 inside the
+       inner sibling loop and sets `cardsTruncated = true`. The Rust
+       side maps that to `view.cards_truncated = Some(true)`.
+       1000 children > 50 cap. We stamp the children via a synchronous
+       inline script so the DOM is fully built before the walker runs.
+       (The walker is invoked from extract_semantic_view_with_options
+       AFTER navigation completes + the test's 1s settle sleep.) -->
+  <main>
+    <div class="feed-container" id="big-feed"></div>
+  </main>
+  <script>
+    (function () {
+      var feed = document.getElementById('big-feed');
+      for (var i = 0; i < 1000; i++) {
+        var div = document.createElement('div');
+        div.className = 'item';
+        var h3 = document.createElement('h3');
+        var a = document.createElement('a');
+        a.href = 'https://example.com/cap-' + i;
+        a.textContent = 'Cap-test item #' + i;
+        h3.appendChild(a);
+        div.appendChild(h3);
+        feed.appendChild(div);
+      }
+    })();
+  </script>
+</body>
+</html>

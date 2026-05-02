@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — fail-closed catch path</title>
+</head>
+<body>
+  <header><h1>Walker JS throws → cards None, no panic</h1></header>
+
+  <!-- This page would otherwise emit cards (4 dominant <li>), but a
+       sabotage script overrides Element.prototype.querySelectorAll to
+       throw whenever it is called with the EXACT card-walker selector
+       string. That hits the `try { ... } catch (_)` block inside the
+       cards walker (line ~659-732 of src/a11y.rs) on the
+       `deepQueryAll(document, 'ol, ul, tbody, ...')` call.
+
+       The walker must fail-closed: cards = None on the Rust side,
+       and the rest of the extraction (elements, visible_text) must
+       still succeed normally. -->
+  <main>
+    <ul class="feed-list">
+      <li><h3><a href="https://example.com/fc-1">Fail-closed item 1</a></h3></li>
+      <li><h3><a href="https://example.com/fc-2">Fail-closed item 2</a></h3></li>
+      <li><h3><a href="https://example.com/fc-3">Fail-closed item 3</a></h3></li>
+      <li><h3><a href="https://example.com/fc-4">Fail-closed item 4</a></h3></li>
+    </ul>
+  </main>
+  <script>
+    (function () {
+      // The exact selector string used by the cards walker (see a11y.rs
+      // line ~681). Match it verbatim and throw — anything else passes
+      // through to the original implementation so the Element walker
+      // (which uses a totally different selector list) keeps working.
+      var CARD_SELECTOR = 'ol, ul, tbody, section, main, article, div[class*="feed"], div[class*="list"]';
+      var origQSA = Element.prototype.querySelectorAll;
+      var origDocQSA = Document.prototype.querySelectorAll;
+      Element.prototype.querySelectorAll = function (sel) {
+        if (sel === CARD_SELECTOR) {
+          throw new Error('SABOTAGE: card walker selector poisoned');
+        }
+        return origQSA.call(this, sel);
+      };
+      Document.prototype.querySelectorAll = function (sel) {
+        if (sel === CARD_SELECTOR) {
+          throw new Error('SABOTAGE: card walker selector poisoned');
+        }
+        return origDocQSA.call(this, sel);
+      };
+    })();
+  </script>
+</body>
+</html>

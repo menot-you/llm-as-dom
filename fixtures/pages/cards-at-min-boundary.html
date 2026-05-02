@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cards walker fixture — exactly MIN_CHILDREN</title>
+</head>
+<body>
+  <header><h1>Three-item container (MIN_CHILDREN boundary)</h1></header>
+
+  <!-- Boundary case: exactly CARD_LIST_MIN_CHILDREN = 3 children.
+       The check is `children.length < MIN`, so 3 is detected. -->
+  <main>
+    <ul class="feed-list">
+      <li><h3><a href="https://example.com/min-1">Boundary item one</a></h3></li>
+      <li><h3><a href="https://example.com/min-2">Boundary item two</a></h3></li>
+      <li><h3><a href="https://example.com/min-3">Boundary item three</a></h3></li>
+    </ul>
+  </main>
+</body>
+</html>
