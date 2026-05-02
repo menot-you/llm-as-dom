@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn extract_decrypts_encrypted_cookies() {
         use aes::Aes128;
-        use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+        use cbc::cipher::{BlockModeEncrypt, KeyIvInit};
 
         let dir = std::env::temp_dir().join("lad-profile-decrypt-test");
         let _ = std::fs::create_dir_all(&dir);
@@ -355,8 +355,8 @@ mod tests {
 
         type Aes128CbcEnc = cbc::Encryptor<Aes128>;
         let encryptor = Aes128CbcEnc::new(&key.into(), &iv.into());
-        let ciphertext = encryptor
-            .encrypt_padded_vec_mut::<cbc::cipher::block_padding::Pkcs7>(b"decrypted_value");
+        let ciphertext =
+            encryptor.encrypt_padded_vec::<cbc::cipher::block_padding::Pkcs7>(b"decrypted_value");
 
         let mut encrypted_blob = b"v10".to_vec();
         encrypted_blob.extend_from_slice(&ciphertext);

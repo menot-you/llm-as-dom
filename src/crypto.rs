@@ -79,7 +79,7 @@ pub fn decrypt_cookie_value(encrypted: &[u8], key: &[u8; 16]) -> Result<String, 
     let iv: [u8; 16] = [0x20; 16];
 
     use aes::Aes128;
-    use cbc::cipher::{BlockDecryptMut, KeyIvInit};
+    use cbc::cipher::{BlockModeDecrypt, KeyIvInit};
 
     type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
@@ -87,7 +87,7 @@ pub fn decrypt_cookie_value(encrypted: &[u8], key: &[u8; 16]) -> Result<String, 
 
     let mut buf = ciphertext.to_vec();
     let plaintext = decryptor
-        .decrypt_padded_mut::<cbc::cipher::block_padding::Pkcs7>(&mut buf)
+        .decrypt_padded::<cbc::cipher::block_padding::Pkcs7>(&mut buf)
         .map_err(|e| crate::Error::ActionFailed(format!("AES decryption failed: {e}")))?;
 
     String::from_utf8(plaintext.to_vec())
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn encrypt_decrypt_roundtrip() {
         use aes::Aes128;
-        use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+        use cbc::cipher::{BlockModeEncrypt, KeyIvInit};
 
         let password = "test_password";
         let key = derive_key(password);
@@ -146,7 +146,7 @@ mod tests {
         let encryptor = Aes128CbcEnc::new(&key.into(), &iv.into());
 
         let ciphertext =
-            encryptor.encrypt_padded_vec_mut::<cbc::cipher::block_padding::Pkcs7>(plaintext);
+            encryptor.encrypt_padded_vec::<cbc::cipher::block_padding::Pkcs7>(plaintext);
 
         let mut encrypted = b"v10".to_vec();
         encrypted.extend_from_slice(&ciphertext);
