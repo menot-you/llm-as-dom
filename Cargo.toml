@@ -53,7 +53,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # MCP (Model Context Protocol)
-rmcp = { version = "1.5", features = ["server", "transport-io"] }
+rmcp = { version = "1.6", features = ["server", "transport-io"] }
 
 # Base64 encoding (screenshots)
 base64 = "0.22"
@@ -109,7 +109,7 @@ thiserror = "2"
 jaq-core = "3.0"
 jaq-std = "3.0"
 jaq-json = { version = "2.0", features = ["serde"] }
-sentry = { version = "0.48.0", default-features = false, features = ["panic", "tracing", "reqwest", "rustls", "anyhow", "backtrace", "contexts"] }
+sentry = { version = "0.48.1", default-features = false, features = ["panic", "tracing", "reqwest", "rustls", "anyhow", "backtrace", "contexts"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
